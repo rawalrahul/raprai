@@ -38,8 +38,12 @@ echo Setup complete!
 echo.
 echo Next steps:
 echo   1. Open .env and set TELEGRAM_BOT_TOKEN and ALLOWED_USER_IDS
-echo   2. (Optional) Set SESSION_CWD in .env to your preferred working directory
-echo   3. Run:  python web_app.py
+echo   2. (Optional) Set SESSION_CWD in .env to your default working directory
+echo   3. Launch the app:
+echo.
+echo        launch.bat                        — start with default directory
+echo        launch.bat C:\projects\myapp      — start in a specific folder
+echo        launch.bat "C:\My Projects\app"   — use quotes for paths with spaces
 echo.
 echo This opens a web chat UI at http://localhost:8000
 echo and runs the Telegram bot simultaneously in the same process.

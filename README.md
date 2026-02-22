@@ -99,18 +99,33 @@ All available settings:
 
 ## Step 5 — Run
 
+Double-click **`launch.bat`**, or run it from the command line:
+
 ```bat
-python web_app.py
+:: Start with the default working directory (from .env or the script folder)
+launch.bat
+
+:: Start in a specific project folder — no need to change .env
+launch.bat C:\projects\myapp
+launch.bat "C:\My Projects\website"
 ```
 
 You should see:
 ```
-INFO:     Started server process
-INFO:     Uvicorn running on http://127.0.0.1:8000
-INFO - Bot started. Polling for updates...
+Starting Claude Remote
+Working directory: C:\projects\myapp
+
+Web UI : http://localhost:8000
+Press Ctrl+C here to stop.
 ```
 
 Your browser will open automatically at **http://localhost:8000**. The Telegram bot is also active at the same time.
+
+> **Tip — per-project shortcuts:** Right-click `launch.bat` → *Create shortcut*, then open the shortcut properties and append your project path to the **Target** field:
+> ```
+> C:\...\claude-remote\launch.bat  C:\projects\website
+> ```
+> Give each shortcut a different name (e.g. *Claude Remote — Website*) and pin them to your taskbar or Start menu.
 
 ---
 
@@ -316,7 +331,8 @@ claude-remote/
 ├── requirements.txt      # Python dependencies
 ├── .env                  # Your config (never share this)
 ├── .env.example          # Config template
-├── setup.bat             # One-time setup script
+├── setup.bat             # One-time setup (install deps, create .env)
+├── launch.bat            # Daily launcher — accepts optional path argument
 ├── README.md             # This file
 └── chat_logs/            # Auto-created; stores chat history
     ├── 2026-02-23.jsonl  # One file per day
