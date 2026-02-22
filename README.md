@@ -1,4 +1,4 @@
-# Claude Remote — Web UI + Telegram Bot for Remote AI Control
+# My Personal Assistant — Web UI + Telegram Bot for Remote AI Control
 
 Control Claude Code, Gemini, Codex, and your shell from **anywhere** — through a local web chat UI in your browser and/or Telegram on your phone. Both channels are always in sync.
 
@@ -36,7 +36,7 @@ Telegram App (your phone)        ←── Bot API  ────┘
 
 1. Open Telegram and search for **@BotFather**
 2. Send `/newbot`
-3. Choose a name (e.g. `My Claude Remote`)
+3. Choose a name (e.g. `My My Personal Assistant`)
 4. Choose a username ending in `bot` (e.g. `my_claude_remote_bot`)
 5. BotFather replies with a **token** that looks like:
    ```
@@ -116,7 +116,7 @@ Your browser will open automatically at **http://localhost:8000**. The Telegram 
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  ◈ Claude Remote                    ● Claude Code   │  ← header with active AI badge
+│  ◈ My Personal Assistant                    ● Claude Code   │  ← header with active AI badge
 │─────────────────────────────────────────────────────│
 │  📁 C:\Users\me\projects\myapp          [✎ edit]   │  ← working directory bar
 │─────────────────────────────────────────────────────│
@@ -179,7 +179,7 @@ Click the **✎ edit** pencil next to the directory path, type a new path, and p
 
 ## File Auto-Send
 
-When an AI creates a file in the working directory, Claude Remote automatically detects it and sends it to Telegram:
+When an AI creates a file in the working directory, My Personal Assistant automatically detects it and sends it to Telegram:
 
 | File type | Extensions | Telegram action |
 |-----------|-----------|----------------|

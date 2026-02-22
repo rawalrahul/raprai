@@ -1,5 +1,5 @@
 """
-web_app.py — Claude Remote: Web UI + Telegram Bot in one process.
+web_app.py — My Personal Assistant: Web UI + Telegram Bot in one process.
 
 Replaces the bare command-prompt window with a local chat UI at http://localhost:8000.
 The Telegram bot continues to work in parallel; both channels share the same state.
@@ -466,7 +466,7 @@ async def _handle_new_files(before: set[str], after: set[str], source: str):
 # FastAPI app + WebSocket
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="Claude Remote")
+app = FastAPI(title="My Personal Assistant")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -618,7 +618,7 @@ async def _tg_send_chunks(update: Update, text: str, max_len: int = 3800):
 @authorized_only
 async def tg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
-        "Claude Remote — Web + Telegram\n\n"
+        "My Personal Assistant — Web + Telegram\n\n"
         "Open http://localhost:{port} for the web UI.\n\n"
         "AI modes:\n"
         "  /claude   — Activate Claude Code\n"
@@ -778,7 +778,7 @@ _HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Claude Remote</title>
+<title>My Personal Assistant</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -918,7 +918,7 @@ header{
 <div id="app">
 
 <header>
-  <div class="logo">◈ Claude <em>Remote</em></div>
+  <div class="logo">◈ My Personal <em>Assistant</em></div>
   <div class="ai-badge">
     <div class="dot" id="dot"></div>
     <span id="ai-label">Shell</span>
