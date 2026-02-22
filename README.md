@@ -1,4 +1,4 @@
-# My Personal Assistant — Web UI + Telegram Bot for Remote AI Control
+# Claude Remote — Web UI + Telegram Bot for Remote AI Control
 
 Control Claude Code, Gemini, Codex, and your shell from **anywhere** — through a local web chat UI in your browser and/or Telegram on your phone. Both channels are always in sync.
 
@@ -36,7 +36,7 @@ Telegram App (your phone)        ←── Bot API  ────┘
 
 1. Open Telegram and search for **@BotFather**
 2. Send `/newbot`
-3. Choose a name (e.g. `My My Personal Assistant`)
+3. Choose a name (e.g. `My Claude Remote`)
 4. Choose a username ending in `bot` (e.g. `my_claude_remote_bot`)
 5. BotFather replies with a **token** that looks like:
    ```
@@ -92,6 +92,7 @@ All available settings:
 | `OUTPUT_NO_RESPONSE` | — | Seconds to wait if no output arrives at all (default: `5`) |
 | `WEB_PORT` | — | Port for the web UI (default: `8000`) |
 | `WEB_HOST` | — | Host to bind the web server to (default: `127.0.0.1`) |
+| `CLAUDE_TIMEOUT` | — | Max seconds to wait for any AI response (default: `600`). Increase for long tasks like image or video generation. |
 
 ---
 
@@ -116,7 +117,7 @@ Your browser will open automatically at **http://localhost:8000**. The Telegram 
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  ◈ My Personal Assistant                    ● Claude Code   │  ← header with active AI badge
+│  ◈ Claude Remote                    ● Claude Code   │  ← header with active AI badge
 │─────────────────────────────────────────────────────│
 │  📁 C:\Users\me\projects\myapp          [✎ edit]   │  ← working directory bar
 │─────────────────────────────────────────────────────│
@@ -179,14 +180,14 @@ Click the **✎ edit** pencil next to the directory path, type a new path, and p
 
 ## File Auto-Send
 
-When an AI creates a file in the working directory, My Personal Assistant automatically detects it and sends it to Telegram:
+When an AI creates a file in the working directory, Claude Remote automatically detects it and sends it to Telegram:
 
 | File type | Extensions | Telegram action |
 |-----------|-----------|----------------|
 | Photo | `.png` `.jpg` `.jpeg` `.gif` `.webp` `.bmp` | Sent as photo |
 | Animated GIF | `.gif` | Sent as animation |
 | Video | `.mp4` `.mov` `.avi` `.mkv` `.webm` | Sent as video |
-| Document | `.pdf` `.pptx` `.docx` `.xlsx` `.zip` `.py` `.html` `.css` `.js` `.txt` and any other | Sent as document |
+| Document | `.pdf` `.pptx` `.ppt` `.docx` `.doc` `.xlsx` `.xls` `.csv` `.html` `.htm` `.zip` `.tar` `.gz` `.txt` `.md` | Sent as document |
 
 Files up to **50 MB** are supported. You also get a message in the web chat with a clickable link to view/download the file from the local server at `http://localhost:8000/files/<filename>`.
 
@@ -257,14 +258,12 @@ To have it start automatically when you log into Windows:
 
 ```
 claude-remote/
-├── web_app.py               # Main entry point (Web UI + Telegram bot)
-├── telegram_claude_bot.py   # Original Telegram-only bot (kept as fallback)
-├── requirements.txt         # Python dependencies
-├── .env                     # Your config (never share this)
-├── .env.example             # Config template
-├── setup.bat                # One-time setup script
-├── PLAN.md                  # Architecture and design notes
-└── README.md                # This file
+├── web_app.py       # Main entry point (Web UI + Telegram bot)
+├── requirements.txt # Python dependencies
+├── .env             # Your config (never share this)
+├── .env.example     # Config template
+├── setup.bat        # One-time setup script
+└── README.md        # This file
 ```
 
 ---

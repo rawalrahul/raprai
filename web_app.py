@@ -1,5 +1,5 @@
 """
-web_app.py — My Personal Assistant: Web UI + Telegram Bot in one process.
+web_app.py — Claude Remote: Web UI + Telegram Bot in one process.
 
 Replaces the bare command-prompt window with a local chat UI at http://localhost:8000.
 The Telegram bot continues to work in parallel; both channels share the same state.
@@ -51,7 +51,7 @@ ALLOWED_USER_IDS = set(
 IDLE_TIMEOUT = float(os.environ.get("OUTPUT_IDLE_TIMEOUT", "1.5"))
 MAX_WAIT = float(os.environ.get("OUTPUT_MAX_WAIT", "60"))
 NO_OUTPUT_TIMEOUT = float(os.environ.get("OUTPUT_NO_RESPONSE", "5"))
-CLAUDE_TIMEOUT = float(os.environ.get("CLAUDE_TIMEOUT", "120"))
+CLAUDE_TIMEOUT = float(os.environ.get("CLAUDE_TIMEOUT", "600"))
 _DEFAULT_CWD = os.environ.get("SESSION_CWD", os.getcwd())
 WEB_PORT = int(os.environ.get("WEB_PORT", "8000"))
 WEB_HOST = os.environ.get("WEB_HOST", "127.0.0.1")
@@ -466,7 +466,7 @@ async def _handle_new_files(before: set[str], after: set[str], source: str):
 # FastAPI app + WebSocket
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="My Personal Assistant")
+app = FastAPI(title="Claude Remote")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -592,6 +592,26 @@ async def _handle_web_command(command: str, ws: WebSocket):
 # Telegram handlers  (mirror all activity to web UI)
 # ---------------------------------------------------------------------------
 
+def _update_env(key: str, value: str):
+    """Update or add a key=value line in the .env file."""
+    env_path = pathlib.Path(".env")
+    if not env_path.exists():
+        env_path.write_text(f"{key}={value}\n", encoding="utf-8")
+        return
+    lines = env_path.read_text(encoding="utf-8").splitlines()
+    found = False
+    new_lines = []
+    for line in lines:
+        if line.startswith(f"{key}=") or line.startswith(f"{key} ="):
+            new_lines.append(f"{key}={value}")
+            found = True
+        else:
+            new_lines.append(line)
+    if not found:
+        new_lines.append(f"{key}={value}")
+    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+
 def authorized_only(func):
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -618,7 +638,7 @@ async def _tg_send_chunks(update: Update, text: str, max_len: int = 3800):
 @authorized_only
 async def tg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
-        "My Personal Assistant — Web + Telegram\n\n"
+        "Claude Remote — Web + Telegram\n\n"
         "Open http://localhost:{port} for the web UI.\n\n"
         "AI modes:\n"
         "  /claude   — Activate Claude Code\n"
@@ -635,6 +655,9 @@ async def tg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Directory:\n"
         "  /cwd         — Show working directory\n"
         "  /cwd <path>  — Change working directory\n\n"
+        "Settings:\n"
+        "  /timeout          — Show current AI timeout\n"
+        "  /timeout <secs>   — Change timeout (e.g. /timeout 1800)\n\n"
         "Plain text → active AI or shell."
     ).format(port=WEB_PORT)
     await update.message.reply_text(help_text)
@@ -724,9 +747,17 @@ async def tg_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @authorized_only
 async def tg_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if _session.is_alive():
-        await update.message.reply_text(f"Session alive. PID: {_session.pid()}\nActive AI: {_active_ai or 'shell'}")
+        await update.message.reply_text(
+            f"Session alive. PID: {_session.pid()}\n"
+            f"Active AI: {_active_ai or 'shell'}\n"
+            f"⏱ Timeout: {int(CLAUDE_TIMEOUT)}s"
+        )
     else:
-        await update.message.reply_text(f"No active session.\nActive AI: {_active_ai or 'shell'}")
+        await update.message.reply_text(
+            f"No active session.\n"
+            f"Active AI: {_active_ai or 'shell'}\n"
+            f"⏱ Timeout: {int(CLAUDE_TIMEOUT)}s"
+        )
 
 
 @authorized_only
@@ -761,6 +792,30 @@ async def tg_cwd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @authorized_only
+async def tg_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Get or set the AI timeout: /timeout  or  /timeout <seconds>"""
+    global CLAUDE_TIMEOUT
+    arg = (update.message.text or "").partition(" ")[2].strip()
+    if not arg:
+        await update.message.reply_text(
+            f"⏱ Current AI timeout: {int(CLAUDE_TIMEOUT)}s\n"
+            f"Use /timeout <seconds> to change (e.g. /timeout 1800 for 30 min)"
+        )
+        return
+    try:
+        value = float(arg)
+        if value < 10:
+            await update.message.reply_text("❌ Minimum timeout is 10 seconds.")
+            return
+        CLAUDE_TIMEOUT = value
+        _update_env("CLAUDE_TIMEOUT", str(int(value)))
+        await _push_message("system", f"⏱ AI timeout set to {int(value)}s", source="telegram")
+        await update.message.reply_text(f"⏱ Timeout updated to {int(value)}s (saved to .env)")
+    except ValueError:
+        await update.message.reply_text("❌ Invalid value. Use seconds, e.g. /timeout 1800")
+
+
+@authorized_only
 async def tg_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Forward plain text from Telegram through the shared processor."""
     text = update.message.text or ""
@@ -778,7 +833,7 @@ _HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>My Personal Assistant</title>
+<title>Claude Remote</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -918,7 +973,7 @@ header{
 <div id="app">
 
 <header>
-  <div class="logo">◈ My Personal <em>Assistant</em></div>
+  <div class="logo">◈ Claude <em>Remote</em></div>
   <div class="ai-badge">
     <div class="dot" id="dot"></div>
     <span id="ai-label">Shell</span>
@@ -1133,6 +1188,7 @@ async def _main():
         _telegram_app.add_handler(CommandHandler("interrupt", tg_interrupt))
         _telegram_app.add_handler(CommandHandler("stop",      tg_stop))
         _telegram_app.add_handler(CommandHandler("cwd",       tg_cwd))
+        _telegram_app.add_handler(CommandHandler("timeout",   tg_timeout))
         _telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, tg_text))
         if not ALLOWED_USER_IDS:
             logger.warning("ALLOWED_USER_IDS is empty — Telegram bot is open to anyone!")
