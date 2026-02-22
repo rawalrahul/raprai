@@ -14,6 +14,7 @@ if errorlevel 1 (
 
 :: Install dependencies
 echo Installing Python dependencies...
+echo   (python-telegram-bot, fastapi, uvicorn, python-dotenv)
 python -m pip install --upgrade pip --quiet
 python -m pip install -r requirements.txt
 if errorlevel 1 (
@@ -37,6 +38,12 @@ echo Setup complete!
 echo.
 echo Next steps:
 echo   1. Open .env and set TELEGRAM_BOT_TOKEN and ALLOWED_USER_IDS
-echo   2. Run:  python telegram_claude_bot.py
+echo   2. (Optional) Set SESSION_CWD in .env to your preferred working directory
+echo   3. Run:  python web_app.py
+echo.
+echo This opens a web chat UI at http://localhost:8000
+echo and runs the Telegram bot simultaneously in the same process.
+echo.
+echo (The original telegram_claude_bot.py still works as a Telegram-only fallback.)
 echo.
 pause
