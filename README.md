@@ -18,6 +18,7 @@ Telegram App (your phone)        ←── Bot API  ────┘
 - **Web UI** — chat bubbles, active AI badge, mode buttons, directory bar, thinking indicator
 - **Telegram** — full mirroring: web messages forwarded to Telegram, Telegram messages shown in browser
 - **File auto-send** — if the AI creates a PDF, image, video, or any file, it is automatically sent to Telegram as a proper attachment
+- **Chat history** — every session is auto-saved; browse, view, resume with context, rename, or delete past sessions from the web UI and Telegram
 
 ---
 
@@ -121,7 +122,7 @@ Your browser will open automatically at **http://localhost:8000**. The Telegram 
 │─────────────────────────────────────────────────────│
 │  📁 C:\Users\me\projects\myapp          [✎ edit]   │  ← working directory bar
 │─────────────────────────────────────────────────────│
-│  [Claude Code] [Gemini] [Codex] [Shell]  [⚡ Launch]│  ← mode bar
+│  [Claude Code][Gemini][Codex][Shell] [📂 History][⚡]│  ← mode bar
 │─────────────────────────────────────────────────────│
 │                                                     │
 │                           You                 12:34 │
@@ -151,6 +152,8 @@ Click the **✎ edit** pencil next to the directory path, type a new path, and p
 
 ### Telegram commands
 
+**Session control**
+
 | Command | What it does |
 |---------|-------------|
 | `/launch` | Starts a new terminal session |
@@ -163,8 +166,20 @@ Click the **✎ edit** pencil next to the directory path, type a new path, and p
 | `/status` | Shows whether a session is running and its PID |
 | `/interrupt` | Sends Ctrl+C to the terminal |
 | `/stop` | Kills the current terminal session |
+| `/timeout` | Shows the current AI response timeout |
+| `/timeout <seconds>` | Sets the AI response timeout (e.g. `/timeout 1800`) |
 | `/start` | Shows help text |
 | _(any text)_ | Forwarded directly to the active terminal / AI |
+
+**Chat history**
+
+| Command | What it does |
+|---------|-------------|
+| `/history` | Shows your last 5 saved messages |
+| `/history <n>` | Shows last n messages, max 20 (e.g. `/history 10`) |
+| `/resume` | Loads context from your most recent saved session |
+| `/resume <date>` | Loads context from a specific date (e.g. `/resume 2026-02-22`) |
+| `/clear_context` | Discards any pending resume context |
 
 ### Web UI buttons
 
@@ -174,6 +189,7 @@ Click the **✎ edit** pencil next to the directory path, type a new path, and p
 | **Gemini** | Launches Gemini CLI (equivalent to `/gemini`) |
 | **Codex** | Launches Codex CLI (equivalent to `/codex`) |
 | **Shell** | Sends raw shell commands |
+| **📂 History** | Opens the chat history modal |
 | **⚡ Launch** | Starts a fresh terminal session |
 
 ---
@@ -254,16 +270,58 @@ To have it start automatically when you log into Windows:
 
 ---
 
+## Chat History
+
+Every message you send and receive is automatically saved to daily log files in `chat_logs/`. No setup needed — it just works.
+
+### Web UI — 📂 History button
+
+Click **📂 History** in the mode bar to open the history modal. Each saved session is listed with its name (or date) and message count.
+
+**Click a session row** to expand it, then:
+
+| Button | What it does |
+|--------|-------------|
+| **👁 View** | Replays the session in the chat window (read-only). A yellow banner appears — click **↩ Back to Live** to return. |
+| **▶ Resume with context** | Injects a condensed summary of the last 10 exchanges into your next message, so any AI model can pick up where the conversation left off. A banner confirms the context is ready. |
+| **✎ Rename** | Replaces the date label with a custom name (e.g. *"Portfolio site project"*). Press **Enter** to save, **Esc** to cancel. Names are stored in `chat_logs/chat_names.json`. |
+| **🗑** (top-right of row) | Permanently deletes that day's log file. |
+
+### Telegram — history commands
+
+```
+You:  /resume
+Bot:  ✅ Context from "Portfolio site project" loaded (10 exchanges).
+      Send your next message to continue...
+
+You:  now rewrite the hero section with a dark theme
+Bot:  📎 Context injected. Thinking…
+      (AI responds with full context of the previous session)
+```
+
+### Notes
+
+- History is **not** AI memory — each CLI is stateless. Resume works by prepending a condensed transcript to your next message, giving the AI the context it needs.
+- Log files are stored as `chat_logs/YYYY-MM-DD.jsonl` (one file per day).
+- Custom session names are stored in `chat_logs/chat_names.json`.
+- Both files are plain text and safe to back up or delete.
+
+---
+
 ## Project files
 
 ```
 claude-remote/
-├── web_app.py       # Main entry point (Web UI + Telegram bot)
-├── requirements.txt # Python dependencies
-├── .env             # Your config (never share this)
-├── .env.example     # Config template
-├── setup.bat        # One-time setup script
-└── README.md        # This file
+├── web_app.py            # Main entry point (Web UI + Telegram bot)
+├── requirements.txt      # Python dependencies
+├── .env                  # Your config (never share this)
+├── .env.example          # Config template
+├── setup.bat             # One-time setup script
+├── README.md             # This file
+└── chat_logs/            # Auto-created; stores chat history
+    ├── 2026-02-23.jsonl  # One file per day
+    ├── 2026-02-22.jsonl
+    └── chat_names.json   # Custom session names (auto-created when you rename)
 ```
 
 ---

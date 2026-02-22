@@ -18,13 +18,13 @@ import sys
 import threading
 import time
 import webbrowser
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 from typing import Optional
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from telegram import Bot, Update
@@ -55,6 +55,7 @@ CLAUDE_TIMEOUT = float(os.environ.get("CLAUDE_TIMEOUT", "600"))
 _DEFAULT_CWD = os.environ.get("SESSION_CWD", os.getcwd())
 WEB_PORT = int(os.environ.get("WEB_PORT", "8000"))
 WEB_HOST = os.environ.get("WEB_HOST", "127.0.0.1")
+CHAT_LOG_DIR = pathlib.Path(os.environ.get("CHAT_LOG_DIR", "chat_logs"))
 
 _CMD_EXT = ".cmd" if sys.platform == "win32" else ""
 
@@ -63,6 +64,7 @@ _CMD_EXT = ".cmd" if sys.platform == "win32" else ""
 # ---------------------------------------------------------------------------
 
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][AB012]|\x1b.")
+HISTORY_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _clean_output(raw: str) -> str:
@@ -181,6 +183,7 @@ class TerminalSession:
 # ---------------------------------------------------------------------------
 
 _active_ai: Optional[str] = None        # "claude" | "codex" | "gemini" | None
+_pending_tg_context: Optional[str] = None   # injected into next Telegram message after /resume
 _session_cwd: str = _DEFAULT_CWD        # live working directory — changeable at runtime
 _session = TerminalSession()
 _claude_messages: list[str] = []
@@ -219,6 +222,23 @@ def _ts() -> str:
     return datetime.now().isoformat()
 
 
+def _is_valid_history_date(date: str) -> bool:
+    """Accept only YYYY-MM-DD date keys for history endpoints."""
+    return bool(HISTORY_DATE_RE.fullmatch(date))
+
+
+def _save_message_to_log(msg: dict):
+    """Append a message to today's JSONL log file in CHAT_LOG_DIR."""
+    try:
+        CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        log_file = CHAT_LOG_DIR / f"{date_str}.jsonl"
+        with log_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.warning("Could not save message to log: %s", e)
+
+
 async def _push_message(role: str, content: str, ai: Optional[str] = None, source: str = "web"):
     """Record a chat message and broadcast it to all WS clients."""
     msg = {
@@ -232,6 +252,7 @@ async def _push_message(role: str, content: str, ai: Optional[str] = None, sourc
     _chat_history.append(msg)
     if len(_chat_history) > 200:
         del _chat_history[:-200]
+    _save_message_to_log(msg)
     await _broadcast(msg)
 
 
@@ -478,13 +499,120 @@ async def index():
 async def serve_file(filename: str):
     """Dynamically serve any file from the current _session_cwd."""
     from fastapi.responses import FileResponse as _FR
-    path = pathlib.Path(_session_cwd) / filename
+    base = pathlib.Path(_session_cwd).resolve()
+    path = (base / filename).resolve()
+    try:
+        path.relative_to(base)
+    except ValueError:
+        return HTMLResponse(
+            "<h2>Invalid file path</h2><p>Requested file must be inside current working directory.</p>",
+            status_code=400,
+        )
     if not path.exists() or not path.is_file():
         return HTMLResponse(
             f"<h2>File not found</h2><p><code>{filename}</code> not in <code>{_session_cwd}</code></p>",
             status_code=404,
         )
     return _FR(str(path))
+
+
+@app.get("/history")
+async def history_list():
+    """Return list of saved chat log sessions (date + message count), newest first."""
+    from fastapi.responses import JSONResponse
+    names = _load_chat_names()
+    sessions = []
+    if CHAT_LOG_DIR.exists():
+        for log_file in sorted(CHAT_LOG_DIR.glob("*.jsonl"), reverse=True):
+            date_str = log_file.stem
+            try:
+                count = sum(
+                    1 for line in log_file.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                )
+            except Exception:
+                count = 0
+            sessions.append({"date": date_str, "count": count, "name": names.get(date_str, "")})
+    return JSONResponse(sessions)
+
+
+@app.get("/history/{date}")
+async def history_get(date: str):
+    """Return all messages for a given date (YYYY-MM-DD)."""
+    from fastapi.responses import JSONResponse
+    if not _is_valid_history_date(date):
+        return JSONResponse({"error": "Invalid date format. Use YYYY-MM-DD."}, status_code=400)
+    log_file = CHAT_LOG_DIR / f"{date}.jsonl"
+    if not log_file.exists():
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    messages = []
+    for line in log_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            try:
+                messages.append(json.loads(line))
+            except Exception:
+                pass
+    return JSONResponse(messages)
+
+
+@app.delete("/history/{date}")
+async def history_delete(date: str):
+    """Delete the log file for a given date."""
+    from fastapi.responses import JSONResponse
+    if not _is_valid_history_date(date):
+        return JSONResponse({"error": "Invalid date format. Use YYYY-MM-DD."}, status_code=400)
+    log_file = CHAT_LOG_DIR / f"{date}.jsonl"
+    if not log_file.exists():
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    try:
+        log_file.unlink()
+        _save_chat_name(date, "")  # remove custom name entry if any
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+def _load_chat_names() -> dict:
+    """Load the chat_names.json sidecar file, returning a date→name mapping."""
+    names_file = CHAT_LOG_DIR / "chat_names.json"
+    if names_file.exists():
+        try:
+            return json.loads(names_file.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _save_chat_name(date: str, name: str) -> None:
+    """Persist (or clear) a custom display name for a chat session date."""
+    CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    names_file = CHAT_LOG_DIR / "chat_names.json"
+    names = _load_chat_names()
+    name = name.strip()
+    if name:
+        names[date] = name
+    else:
+        names.pop(date, None)
+    names_file.write_text(json.dumps(names, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+@app.patch("/history/{date}/name")
+async def history_rename(date: str, request: Request):
+    """Set or clear a custom display name for a chat session date."""
+    from fastapi.responses import JSONResponse
+    if not _is_valid_history_date(date):
+        return JSONResponse({"error": "Invalid date format. Use YYYY-MM-DD."}, status_code=400)
+    try:
+        body = await request.json()
+        name = (body.get("name") or "").strip()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    log_file = CHAT_LOG_DIR / f"{date}.jsonl"
+    if not log_file.exists():
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    _save_chat_name(date, name)
+    return JSONResponse({"ok": True, "name": name})
 
 
 @app.websocket("/ws")
@@ -658,6 +786,12 @@ async def tg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Settings:\n"
         "  /timeout          — Show current AI timeout\n"
         "  /timeout <secs>   — Change timeout (e.g. /timeout 1800)\n\n"
+        "History:\n"
+        "  /history              — Last 5 messages\n"
+        "  /history <n>          — Last n messages (max 20)\n"
+        "  /resume               — Load most recent session context\n"
+        "  /resume <date>        — Load context from date (e.g. /resume 2026-02-22)\n"
+        "  /clear_context        — Discard loaded context\n\n"
         "Plain text → active AI or shell."
     ).format(port=WEB_PORT)
     await update.message.reply_text(help_text)
@@ -816,10 +950,136 @@ async def tg_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @authorized_only
+async def tg_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/history [n] — show last n user+assistant messages from the log (default 5, max 20)."""
+    arg = (update.message.text or "").partition(" ")[2].strip()
+    try:
+        n = max(1, min(20, int(arg))) if arg else 5
+    except ValueError:
+        n = 5
+
+    # Walk back through daily log files (today first, then yesterday, etc.) until we have n msgs
+    messages: list[dict] = []
+    for delta in range(7):
+        d = (datetime.now() - timedelta(days=delta)).strftime("%Y-%m-%d")
+        log_file = CHAT_LOG_DIR / f"{d}.jsonl"
+        if not log_file.exists():
+            continue
+        day_msgs = []
+        for line in log_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                m = json.loads(line)
+                if m.get("role") in ("user", "assistant"):
+                    day_msgs.append(m)
+            except Exception:
+                pass
+        messages = day_msgs + messages          # prepend so oldest first
+        if len(messages) >= n:
+            break
+
+    messages = messages[-n:]
+    if not messages:
+        await update.message.reply_text("No history found.")
+        return
+
+    lines_out = []
+    for m in messages:
+        role = "You" if m["role"] == "user" else (m.get("ai") or "AI").title()
+        ts = m.get("timestamp", "")[:16].replace("T", " ")
+        preview = m.get("content", "")[:200]
+        if len(m.get("content", "")) > 200:
+            preview += "…"
+        lines_out.append(f"[{ts}] {role}:\n{preview}")
+
+    await _tg_send_chunks(update, "\n\n".join(lines_out))
+
+
+@authorized_only
+async def tg_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/resume [date] — load a past session's context so the next message continues from it."""
+    global _pending_tg_context
+    arg = (update.message.text or "").partition(" ")[2].strip()
+
+    # Determine which date to load
+    if arg:
+        date_str = arg
+        log_file = CHAT_LOG_DIR / f"{date_str}.jsonl"
+        if not log_file.exists():
+            await update.message.reply_text(f"❌ No history found for {date_str}.")
+            return
+    else:
+        # Default: most recent available log file
+        if not CHAT_LOG_DIR.exists():
+            await update.message.reply_text("No history saved yet.")
+            return
+        logs = sorted(CHAT_LOG_DIR.glob("*.jsonl"), reverse=True)
+        if not logs:
+            await update.message.reply_text("No history saved yet.")
+            return
+        log_file = logs[0]
+        date_str = log_file.stem
+
+    # Load and build context string from last 10 user+assistant turns
+    messages = []
+    for line in log_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            m = json.loads(line)
+            if m.get("role") in ("user", "assistant"):
+                messages.append(m)
+        except Exception:
+            pass
+
+    if not messages:
+        await update.message.reply_text(f"No user/assistant messages found in {date_str}.")
+        return
+
+    turns = messages[-10:]
+    lines_ctx = []
+    for m in turns:
+        role = "User" if m["role"] == "user" else (m.get("ai") or "AI").title()
+        body = (m.get("content") or "")[:300]
+        if len(m.get("content", "")) > 300:
+            body += "…"
+        lines_ctx.append(f"{role}: {body}")
+
+    label = _load_chat_names().get(date_str) or date_str
+    _pending_tg_context = f"[Previous conversation — {label}]\n" + "\n".join(lines_ctx) + "\n[End context]\n\n"
+
+    await update.message.reply_text(
+        f"✅ Context from \"{label}\" loaded ({len(turns)} exchanges).\n"
+        f"Send your next message to continue — the context will be injected automatically.\n"
+        f"Send /clear_context to cancel."
+    )
+
+
+@authorized_only
+async def tg_clear_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Discard any pending resume context without sending it."""
+    global _pending_tg_context
+    if _pending_tg_context:
+        _pending_tg_context = None
+        await update.message.reply_text("✅ Pending context cleared.")
+    else:
+        await update.message.reply_text("No pending context to clear.")
+
+
+@authorized_only
 async def tg_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Forward plain text from Telegram through the shared processor."""
+    global _pending_tg_context
     text = update.message.text or ""
-    await update.message.reply_text("Thinking…")
+    if _pending_tg_context:
+        text = _pending_tg_context + text
+        _pending_tg_context = None
+        await update.message.reply_text("📎 Context injected. Thinking…")
+    else:
+        await update.message.reply_text("Thinking…")
     response = await _process_message(text, source="telegram")
     await _tg_send_chunks(update, response)
 
@@ -967,6 +1227,63 @@ header{
   background:transparent;color:var(--muted);font-size:11px;cursor:pointer;
   font-family:inherit;flex-shrink:0;transition:all .15s;line-height:1.5}
 .dir-edit-btn:hover{color:var(--text);border-color:#3a3a3a}
+
+/* ── History modal ── */
+.modal-overlay{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);
+  z-index:100;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal-box{
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  width:min(420px,92vw);max-height:70vh;display:flex;flex-direction:column;overflow:hidden}
+.modal-header{
+  padding:14px 18px;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.modal-title{font-size:14px;font-weight:600}
+.modal-close{
+  background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;
+  padding:0 4px;line-height:1;transition:color .15s}
+.modal-close:hover{color:var(--text)}
+.modal-body{overflow-y:auto;padding:10px 0;flex:1}
+.sess-item{
+  display:flex;align-items:center;padding:9px 18px;cursor:pointer;
+  border-bottom:1px solid var(--border);gap:10px;transition:background .12s}
+.sess-item:hover{background:var(--surface2)}
+.sess-info{flex:1;min-width:0;overflow:hidden}
+.sess-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sess-subdate{font-size:11px;color:var(--muted)}
+.sess-rename-input{
+  font-size:13px;font-weight:500;background:var(--bg);border:1px solid var(--codex);
+  border-radius:4px;padding:1px 6px;color:var(--text);font-family:inherit;
+  width:100%;box-sizing:border-box;outline:none}
+.sess-del{
+  background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;
+  padding:2px 6px;border-radius:4px;transition:color .12s}
+.sess-del:hover{color:#ef4444}
+.modal-empty{padding:24px 18px;color:var(--muted);font-size:13px;text-align:center}
+.sess-actions{
+  display:none;padding:7px 18px 10px;background:var(--surface2);
+  gap:8px;border-bottom:1px solid var(--border)}
+.sess-actions.open{display:flex}
+.sess-action-btn{
+  padding:4px 12px;border-radius:5px;border:1px solid var(--border);
+  background:transparent;color:var(--dim);font-size:12px;cursor:pointer;
+  font-family:inherit;transition:all .15s}
+.sess-action-btn:hover{color:var(--text);border-color:#3a3a3a}
+.sess-action-btn.resume{border-color:var(--codex);color:var(--codex)}
+.sess-action-btn.resume:hover{background:rgba(34,197,94,.08)}
+
+/* ── History banner ── */
+#hist-banner{
+  display:none;padding:7px 20px;background:#1a1a0d;border-bottom:1px solid #3a3a10;
+  color:#cca840;font-size:12px;align-items:center;gap:10px;flex-shrink:0}
+#hist-banner.on{display:flex}
+#hist-banner-date{flex:1;font-weight:500}
+.hist-live-btn{
+  padding:3px 10px;border-radius:5px;border:1px solid #cca840;
+  background:transparent;color:#cca840;font-size:11px;cursor:pointer;
+  font-family:inherit;transition:all .15s}
+.hist-live-btn:hover{background:#cca840;color:#000}
 </style>
 </head>
 <body>
@@ -987,6 +1304,7 @@ header{
   <button class="mode-btn" id="btn-codex"   onclick="cmd('codex')">Codex</button>
   <button class="mode-btn" id="btn-shell"   onclick="cmd('stop_ai')">Shell</button>
   <div class="spacer"></div>
+  <button class="act-btn" onclick="openHistory()">📂 History</button>
   <button class="act-btn" onclick="cmd('launch')">⚡ Launch</button>
   <button class="act-btn" onclick="cmd('interrupt')">✕ Interrupt</button>
   <button class="act-btn" onclick="cmd('clear')">↺ Clear</button>
@@ -998,6 +1316,11 @@ header{
   <input id="cwd-input" placeholder="Enter full path and press Enter…"
          onkeydown="cwdKey(event)" onblur="cancelCwdEdit()">
   <button class="dir-edit-btn" onclick="startCwdEdit()" title="Change working directory">✎</button>
+</div>
+
+<div id="hist-banner">
+  <span id="hist-banner-date"></span>
+  <button class="hist-live-btn" onclick="returnToLive()">↩ Back to Live</button>
 </div>
 
 <div id="messages">
@@ -1014,14 +1337,28 @@ header{
   <button id="send" onclick="send()">Send</button>
 </div>
 
+<!-- History modal -->
+<div class="modal-overlay" id="hist-modal" onclick="closeHistory(event)">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span class="modal-title">📂 Chat History</span>
+      <button class="modal-close" onclick="closeHistory()">✕</button>
+    </div>
+    <div class="modal-body" id="hist-list"></div>
+  </div>
+</div>
+
 </div>
 <script>
 const AI_LABEL = {claude:'Claude Code',gemini:'Gemini',codex:'Codex',shell:'Shell'};
 const AI_CLASS = {claude:'active-claude',gemini:'active-gemini',codex:'active-codex',shell:'active-shell'};
-let ws = null, activeAi = null;
+let ws = null, activeAi = null, _viewingHistory = false, _liveHistory = [], _pendingContext = '';
+let _sessNames = {};
+function escHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 function connect(){
-  ws = new WebSocket(`ws://${location.host}/ws`);
+  const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${wsProto}://${location.host}/ws`);
   ws.onopen = () => {
     document.getElementById('conn').className = 'ok';
   };
@@ -1032,7 +1369,10 @@ function connect(){
   ws.onerror = () => {};
   ws.onmessage = e => {
     const d = JSON.parse(e.data);
-    if(d.type==='message') renderMsg(d);
+    if(d.type==='message'){
+      _liveHistory.push(d);
+      if(!_viewingHistory) renderMsg(d);
+    }
     else if(d.type==='state') applyState(d);
     else if(d.type==='thinking') setThinking(d.active, d.ai);
     else if(d.type==='cwd') applyCwd(d.path);
@@ -1138,7 +1478,13 @@ function send(){
   const inp = document.getElementById('inp');
   const txt = inp.value.trim();
   if(!txt || !ws || ws.readyState !== 1) return;
-  ws.send(JSON.stringify({type:'message', content:txt}));
+  let content = txt;
+  if(_pendingContext){
+    content = _pendingContext + txt;
+    _pendingContext = '';
+    document.getElementById('hist-banner').classList.remove('on');
+  }
+  ws.send(JSON.stringify({type:'message', content:content}));
   inp.value = '';
   inp.style.height = 'auto';
 }
@@ -1156,6 +1502,160 @@ inp.addEventListener('input', () => {
 inp.addEventListener('keydown', e => {
   if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }
 });
+
+// ── History ──────────────────────────────────────────────────────────────────
+async function openHistory(){
+  const res = await fetch('/history');
+  const sessions = await res.json();
+  const list = document.getElementById('hist-list');
+  if(!sessions.length){
+    list.innerHTML = '<div class="modal-empty">No saved history yet.<br>Messages are saved automatically as you chat.</div>';
+  } else {
+    _sessNames = {};
+    sessions.forEach(s => { if(s.name) _sessNames[s.date] = s.name; });
+    list.innerHTML = sessions.map(s =>
+      `<div>
+        <div class="sess-item" onclick="toggleSess(event,'${s.date}')">
+          <div class="sess-info">
+            <div class="sess-name" id="sess-name-${s.date}">${s.name ? escHtml(s.name) : s.date}</div>
+            <div class="sess-subdate">${s.name ? s.date+' &middot; ' : ''}${s.count} msg</div>
+          </div>
+          <button class="sess-del" title="Delete" onclick="delSession(event,'${s.date}')">🗑</button>
+        </div>
+        <div class="sess-actions" id="sess-act-${s.date}">
+          <button class="sess-action-btn" onclick="loadSession('${s.date}')">&#128065; View</button>
+          <button class="sess-action-btn resume" onclick="resumeSession('${s.date}')">&#9654; Resume with context</button>
+          <button class="sess-action-btn" onclick="startRename(event,'${s.date}')">&#9998; Rename</button>
+        </div>
+      </div>`
+    ).join('');
+  }
+  document.getElementById('hist-modal').classList.add('open');
+}
+
+function closeHistory(e){
+  if(e && e.target !== document.getElementById('hist-modal')) return;
+  document.getElementById('hist-modal').classList.remove('open');
+}
+
+async function loadSession(date){
+  document.getElementById('hist-modal').classList.remove('open');
+  const res = await fetch('/history/'+date);
+  const msgs = await res.json();
+  const wrap = document.getElementById('messages');
+  wrap.innerHTML = '';
+  msgs.forEach(renderMsg);
+  _viewingHistory = true;
+  const viewLabel = _sessNames[date] || date;
+  document.getElementById('hist-banner-date').textContent = '\uD83D\uDCC5 Viewing: '+viewLabel;
+  document.getElementById('hist-banner').classList.add('on');
+  scroll();
+}
+
+function toggleSess(e, date){
+  if(e.target.classList.contains('sess-del')) return;
+  if(e.target.tagName === 'INPUT') return;
+  const actions = document.getElementById('sess-act-'+date);
+  const wasOpen = actions.classList.contains('open');
+  document.querySelectorAll('.sess-actions').forEach(el => el.classList.remove('open'));
+  if(!wasOpen) actions.classList.add('open');
+}
+
+function startRename(e, date){
+  e.stopPropagation();
+  const nameEl = document.getElementById('sess-name-'+date);
+  if(!nameEl || nameEl.tagName === 'INPUT') return;
+  const currentVal = nameEl.textContent === date ? '' : nameEl.textContent;
+  const input = document.createElement('input');
+  input.className = 'sess-rename-input';
+  input.id = 'sess-name-'+date;
+  input.value = currentVal;
+  input.placeholder = date;
+  nameEl.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  async function save(){
+    if(done) return; done = true;
+    const newName = input.value.trim();
+    await fetch('/history/'+date+'/name', {
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name: newName})
+    });
+    if(newName) _sessNames[date] = newName; else delete _sessNames[date];
+    const span = document.createElement('span');
+    span.className = 'sess-name'; span.id = 'sess-name-'+date;
+    span.textContent = newName || date;
+    input.replaceWith(span);
+    const info = span.closest('.sess-info');
+    if(info){
+      const sub = info.querySelector('.sess-subdate');
+      if(sub){ const m = sub.textContent.match(/(\d+ msg)/); const cnt = m?m[1]:''; sub.textContent = newName ? date+' \xB7 '+cnt : cnt; }
+    }
+  }
+  function cancel(){
+    if(done) return; done = true;
+    const span = document.createElement('span');
+    span.className = 'sess-name'; span.id = 'sess-name-'+date;
+    span.textContent = currentVal || date;
+    input.replaceWith(span);
+  }
+  input.addEventListener('keydown', ev => {
+    if(ev.key==='Enter'){ ev.preventDefault(); save(); }
+    if(ev.key==='Escape'){ cancel(); }
+  });
+  input.addEventListener('blur', save);
+}
+
+async function resumeSession(date){
+  document.getElementById('hist-modal').classList.remove('open');
+  const res = await fetch('/history/'+date);
+  const msgs = await res.json();
+
+  // Render the old messages so user can see context
+  const wrap = document.getElementById('messages');
+  wrap.innerHTML = '';
+  msgs.forEach(renderMsg);
+
+  // Build condensed context from last 10 user+assistant turns
+  const turns = msgs.filter(m => m.role==='user' || m.role==='assistant').slice(-10);
+  const lines = turns.map(m => {
+    const role = m.role==='user' ? 'User' : (AI_LABEL[m.ai]||'AI');
+    const body = (m.content||'').length > 300 ? m.content.slice(0,300)+'…' : (m.content||'');
+    return role+': '+body;
+  });
+  const resumeLabel = _sessNames[date] || date;
+  _pendingContext = '[Previous conversation — '+resumeLabel+']\n'+lines.join('\n')+'\n[End context]\n\n';
+
+  // Go live (new messages will append below the old ones)
+  _viewingHistory = false;
+  document.getElementById('hist-banner-date').textContent = '\u25B6 Resumed from '+resumeLabel+' \u2014 context injected on first send';
+  document.getElementById('hist-banner').classList.add('on');
+  document.getElementById('inp').focus();
+  scroll();
+}
+
+async function delSession(e, date){
+  e.stopPropagation();
+  if(!confirm('Delete all history for '+date+'?')) return;
+  await fetch('/history/'+date, {method:'DELETE'});
+  const item = e.target.closest('.sess-item');
+  if(item) item.parentElement.remove();
+  const list = document.getElementById('hist-list');
+  if(!list.querySelector('.sess-item'))
+    list.innerHTML = '<div class="modal-empty">No saved history yet.<br>Messages are saved automatically as you chat.</div>';
+}
+
+function returnToLive(){
+  _viewingHistory = false;
+  _pendingContext = '';
+  document.getElementById('hist-banner').classList.remove('on');
+  const wrap = document.getElementById('messages');
+  wrap.innerHTML = '';
+  _liveHistory.forEach(renderMsg);
+  scroll();
+}
 
 connect();
 </script>
@@ -1189,6 +1689,9 @@ async def _main():
         _telegram_app.add_handler(CommandHandler("stop",      tg_stop))
         _telegram_app.add_handler(CommandHandler("cwd",       tg_cwd))
         _telegram_app.add_handler(CommandHandler("timeout",   tg_timeout))
+        _telegram_app.add_handler(CommandHandler("history",       tg_history))
+        _telegram_app.add_handler(CommandHandler("resume",        tg_resume))
+        _telegram_app.add_handler(CommandHandler("clear_context", tg_clear_context))
         _telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, tg_text))
         if not ALLOWED_USER_IDS:
             logger.warning("ALLOWED_USER_IDS is empty — Telegram bot is open to anyone!")
