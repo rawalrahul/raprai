@@ -182,13 +182,30 @@ class TerminalSession:
 # Shared global state
 # ---------------------------------------------------------------------------
 
-_active_ai: Optional[str] = None        # "claude" | "codex" | "gemini" | None
+# ---------------------------------------------------------------------------
+# Multi-session state  (replaces the old single _active_ai / _session globals)
+# ---------------------------------------------------------------------------
+# _sessions: dict[sid, session_dict]
+# Each session dict:
+#   id          str       "s1", "s2", ...
+#   ai          str|None  "claude" | plugin-key | None (shell)
+#   cwd         str       absolute working directory for this session
+#   status      str       "running" | "stopped"
+#   terminal    TerminalSession  its own cmd.exe process
+#   claude_msgs list      messages for --continue flag (claude only)
+#   name        str       "Claude #1", "Gemini #2", ...
+#   emoji       str       "🤖"
+#   color       str       hex colour "#f59e0b"
+#   created     float     time.time()
+#   last_used   float     updated on every message
+# ---------------------------------------------------------------------------
+_sessions: dict[str, dict] = {}
+_focused_id: Optional[str] = None        # which session Telegram/Web are talking to
+_session_counter: int = 0               # incremented for each new session
+
 _pending_tg_context: Optional[str] = None   # injected into next Telegram message after /resume
-_session_cwd: str = _DEFAULT_CWD        # live working directory — changeable at runtime
 _tg_browse_state: dict = {}             # user_id → {"path": str, "dirs": list, "page": int}
 _BROWSE_PAGE_SIZE = 8
-_session = TerminalSession()
-_claude_messages: list[str] = []
 # For private bot DMs, chat_id == user_id, so pre-init from ALLOWED_USER_IDS.
 # This ensures web-initiated responses are forwarded to Telegram even before
 # the user sends their first Telegram message.
@@ -233,6 +250,61 @@ def _load_integrations() -> None:
             logger.info("Loaded AI integration: %s (%s)", key, _integrations[key]["name"])
         except Exception as exc:
             logger.warning("Failed to load integration %s: %s", path.name, exc)
+
+
+# ---------------------------------------------------------------------------
+# Session helpers
+# ---------------------------------------------------------------------------
+
+def _make_session(ai: Optional[str]) -> dict:
+    """Create, launch, and register a new session. Returns the session dict."""
+    global _session_counter, _focused_id
+    _session_counter += 1
+    sid = f"s{_session_counter}"
+    if ai == "claude":
+        name  = f"Claude #{_session_counter}";  emoji = "🤖"; color = "#f59e0b"
+    elif ai and ai in _integrations:
+        info  = _integrations[ai]
+        name  = f"{info['name']} #{_session_counter}"; emoji = info["emoji"]; color = info["color"]
+    else:
+        name  = f"Shell #{_session_counter}";   emoji = "🐚"; color = "#6b7280"; ai = None
+    t = TerminalSession()
+    t.launch()
+    sess: dict = {
+        "id": sid, "ai": ai, "cwd": _DEFAULT_CWD, "status": "running",
+        "terminal": t, "claude_msgs": [], "name": name, "emoji": emoji,
+        "color": color, "created": time.time(), "last_used": time.time(),
+    }
+    _sessions[sid] = sess
+    return sess
+
+
+def _focused_session() -> Optional[dict]:
+    return _sessions.get(_focused_id) if _focused_id else None
+
+
+def _session_cwd() -> str:
+    """CWD of the focused session (or default if none focused)."""
+    s = _focused_session()
+    return s["cwd"] if s else _DEFAULT_CWD
+
+
+def _session_status_icon(sess: dict) -> str:
+    if sess["status"] == "stopped":
+        return "🔴"
+    ai = sess.get("ai")
+    if ai == "claude":    return "🟡"
+    if ai in _integrations: return "🟡"
+    return "🟢"  # shell
+
+
+def _sessions_state_payload() -> list[dict]:
+    """Serialisable list of all sessions (no terminal objects)."""
+    return [
+        {"id": s["id"], "name": s["name"], "ai": s["ai"], "cwd": s["cwd"],
+         "status": s["status"], "emoji": s["emoji"], "color": s["color"]}
+        for s in _sessions.values()
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -299,35 +371,33 @@ def _save_ai_to_log(model: Optional[str]):
 
 
 def _save_last_state():
-    """Write a persistent last_state.json with current CWD and AI.
-
-    This is the resume fallback for old logs that pre-date per-session CWD records.
-    Whenever the state changes (CWD or AI), this file is updated so _perform_resume
-    can fall back to it when a session log has no embedded CWD record.
-    """
+    """Persist all session state to last_state.json for resume fallback."""
     try:
         CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
         state_file = CHAT_LOG_DIR / "last_state.json"
-        date_str = datetime.now().strftime("%Y-%m-%d")
+        sessions_data = {}
+        for sid, sess in _sessions.items():
+            sessions_data[sid] = {k: v for k, v in sess.items() if k != "terminal"}
         with state_file.open("w", encoding="utf-8") as f:
             json.dump(
-                {"cwd": _session_cwd, "ai": _active_ai, "date": date_str, "timestamp": _ts()},
-                f,
-                ensure_ascii=False,
+                {"sessions": sessions_data, "focused_id": _focused_id,
+                 "counter": _session_counter, "timestamp": _ts()},
+                f, ensure_ascii=False,
             )
     except Exception as e:
         logger.warning("Could not save last state: %s", e)
 
 
-async def _push_message(role: str, content: str, ai: Optional[str] = None, source: str = "web"):
+async def _push_message(role: str, content: str, ai: Optional[str] = None,
+                        source: str = "web", session_id: Optional[str] = None):
     """Record a chat message and broadcast it to all WS clients."""
+    sess = _sessions.get(session_id) if session_id else None
     msg = {
-        "type": "message",
-        "role": role,
-        "content": content,
-        "ai": ai,
-        "source": source,
-        "timestamp": _ts(),
+        "type": "message", "role": role, "content": content, "ai": ai,
+        "source": source, "timestamp": _ts(),
+        "session_id": session_id,
+        "session_name": sess["name"] if sess else None,
+        "session_emoji": sess["emoji"] if sess else None,
     }
     _chat_history.append(msg)
     if len(_chat_history) > 200:
@@ -337,18 +407,22 @@ async def _push_message(role: str, content: str, ai: Optional[str] = None, sourc
 
 
 async def _push_state():
-    _save_ai_to_log(_active_ai)   # persist current AI model to today's log
-    _save_last_state()            # update persistent fallback used by resume
+    _save_last_state()
+    fs = _focused_session()
     await _broadcast({
         "type": "state",
-        "active_ai": _active_ai,
-        "session_alive": _session.is_alive(),
-        "cwd": _session_cwd,
+        "sessions": _sessions_state_payload(),
+        "focused_id": _focused_id,
+        "focused_ai": fs["ai"] if fs else None,
+        "focused_cwd": fs["cwd"] if fs else _DEFAULT_CWD,
+        "focused_status": fs["status"] if fs else None,
     })
 
 
 async def _push_thinking(active: bool, ai: Optional[str] = None):
-    await _broadcast({"type": "thinking", "active": active, "ai": ai or _active_ai})
+    fs = _focused_session()
+    effective_ai = ai or (fs["ai"] if fs else None)
+    await _broadcast({"type": "thinking", "active": active, "ai": effective_ai})
 
 
 # ---------------------------------------------------------------------------
@@ -397,53 +471,63 @@ def _build_claude_cmd(prompt: str, has_history: bool) -> list[str]:
 # Core message processor (shared by web + Telegram)
 # ---------------------------------------------------------------------------
 
-async def _process_message(text: str, source: str = "web") -> str:
+async def _process_message(text: str, source: str = "web",
+                           session_id: Optional[str] = None) -> str:
     """
-    Route `text` to the active AI or shell session.
-    Returns the response string.
-    Broadcasts user message + thinking + response to all WS clients.
+    Route `text` to the given session (or focused session if session_id is None).
+    Returns the response string. Broadcasts to all WS clients.
     """
-    global _active_ai, _claude_messages
+    sid  = session_id or _focused_id
+    sess = _sessions.get(sid) if sid else None
 
-    # Log the user message to web UI
-    await _push_message("user", text, ai=None, source=source)
-
-    if _active_ai == "claude":
-        await _push_thinking(True, "claude")
-        has_history = len(_claude_messages) > 0
-        cmd = _build_claude_cmd(text, has_history)
-        _claude_messages.append(text)
-        before = await asyncio.to_thread(_snapshot_dir, _session_cwd)
-        output = await asyncio.to_thread(_run_ai_print, cmd, _session_cwd, "claude")
-        after  = await asyncio.to_thread(_snapshot_dir, _session_cwd)
-        await _push_thinking(False)
-        await _push_message("assistant", output, ai="claude", source=source)
-        await _handle_new_files(before, after, source)
-        return output
-
-    if _active_ai in _integrations:
-        await _push_thinking(True, _active_ai)
-        cmd    = _integrations[_active_ai]["build_command"](text)
-        before = await asyncio.to_thread(_snapshot_dir, _session_cwd)
-        output = await asyncio.to_thread(_run_ai_print, cmd, _session_cwd, _active_ai)
-        after  = await asyncio.to_thread(_snapshot_dir, _session_cwd)
-        await _push_thinking(False)
-        await _push_message("assistant", output, ai=_active_ai, source=source)
-        await _handle_new_files(before, after, source)
-        return output
-
-    # Fallback: shell session
-    if not _session.is_alive():
-        msg = "No session running. Use Launch button or /launch to start cmd.exe."
+    if not sess or sess["status"] == "stopped":
+        msg = "No active session. Create or resume a session first."
         await _push_message("system", msg, source=source)
         return msg
 
-    before = await asyncio.to_thread(_snapshot_dir, _session_cwd)
-    _session.write(text)
-    output = await asyncio.to_thread(_session.drain)
-    after  = await asyncio.to_thread(_snapshot_dir, _session_cwd)
+    sess["last_used"] = time.time()
+    ai       = sess["ai"]
+    cwd      = sess["cwd"]
+    terminal = sess["terminal"]
+
+    await _push_message("user", text, ai=None, source=source, session_id=sid)
+
+    if ai == "claude":
+        await _push_thinking(True, "claude")
+        has_history = len(sess["claude_msgs"]) > 0
+        cmd = _build_claude_cmd(text, has_history)
+        sess["claude_msgs"].append(text)
+        before = await asyncio.to_thread(_snapshot_dir, cwd)
+        output = await asyncio.to_thread(_run_ai_print, cmd, cwd, "claude")
+        after  = await asyncio.to_thread(_snapshot_dir, cwd)
+        await _push_thinking(False)
+        await _push_message("assistant", output, ai="claude", source=source, session_id=sid)
+        await _handle_new_files(before, after, source)
+        return output
+
+    if ai in _integrations:
+        await _push_thinking(True, ai)
+        cmd    = _integrations[ai]["build_command"](text)
+        before = await asyncio.to_thread(_snapshot_dir, cwd)
+        output = await asyncio.to_thread(_run_ai_print, cmd, cwd, ai)
+        after  = await asyncio.to_thread(_snapshot_dir, cwd)
+        await _push_thinking(False)
+        await _push_message("assistant", output, ai=ai, source=source, session_id=sid)
+        await _handle_new_files(before, after, source)
+        return output
+
+    # Shell mode
+    if not terminal.is_alive():
+        msg = "Terminal stopped. Stop and restart this session."
+        await _push_message("system", msg, source=source, session_id=sid)
+        return msg
+
+    before = await asyncio.to_thread(_snapshot_dir, cwd)
+    terminal.write(text)
+    output = await asyncio.to_thread(terminal.drain)
+    after  = await asyncio.to_thread(_snapshot_dir, cwd)
     output = output or "(no output)"
-    await _push_message("assistant", output, ai="shell", source=source)
+    await _push_message("assistant", output, ai="shell", source=source, session_id=sid)
     await _handle_new_files(before, after, source)
     return output
 
@@ -457,9 +541,11 @@ async def _forward_to_telegram(text: str):
             logger.warning("Telegram forward failed: %s", e)
 
 
-async def _change_cwd(new_path: str, source: str = "web") -> bool:
-    """Validate and switch the working directory. Broadcasts the change to all clients."""
-    global _session_cwd
+async def _change_cwd(new_path: str, source: str = "web",
+                      session_id: Optional[str] = None) -> bool:
+    """Validate and switch the CWD of the focused (or given) session."""
+    sid  = session_id or _focused_id
+    sess = _sessions.get(sid) if sid else None
     if not new_path.strip():
         await _push_message("system", "❌ Path cannot be empty.", source=source)
         return False
@@ -470,13 +556,15 @@ async def _change_cwd(new_path: str, source: str = "web") -> bool:
     if not path.is_dir():
         await _push_message("system", f"❌ Not a directory: {path}", source=source)
         return False
-    _session_cwd = str(path)
-    _save_cwd_to_log(_session_cwd)
-    _save_last_state()            # keep persistent fallback up-to-date
-    logger.info("Working directory changed to: %s", _session_cwd)
-    # Broadcast new CWD to all web clients
-    await _broadcast({"type": "cwd", "path": _session_cwd})
-    await _push_message("system", f"📁 Working directory → {_session_cwd}", source=source)
+    new_cwd = str(path)
+    if sess:
+        sess["cwd"] = new_cwd
+    _save_cwd_to_log(new_cwd)
+    _save_last_state()
+    logger.info("Working directory changed to: %s", new_cwd)
+    await _push_state()
+    await _push_message("system", f"📁 Working directory → {new_cwd}", source=source,
+                        session_id=sid)
     return True
 
 
@@ -553,7 +641,7 @@ async def _send_file_to_telegram(filepath: str, source: str = "web"):
 
     # Build a relative URL path so files inside subdirs work correctly
     try:
-        rel_posix = path.resolve().relative_to(pathlib.Path(_session_cwd).resolve()).as_posix()
+        rel_posix = path.resolve().relative_to(pathlib.Path(_session_cwd()).resolve()).as_posix()
     except ValueError:
         rel_posix = path.name
     local_url = f"http://localhost:{WEB_PORT}/files/{rel_posix}"
@@ -613,9 +701,10 @@ async def index():
 
 @app.get("/files/{filename:path}")
 async def serve_file(filename: str):
-    """Dynamically serve any file from the current _session_cwd."""
+    """Dynamically serve any file from the focused session's CWD."""
     from fastapi.responses import FileResponse as _FR
-    base = pathlib.Path(_session_cwd).resolve()
+    cwd  = _session_cwd()
+    base = pathlib.Path(cwd).resolve()
     path = (base / filename).resolve()
     try:
         path.relative_to(base)
@@ -626,7 +715,7 @@ async def serve_file(filename: str):
         )
     if not path.exists() or not path.is_file():
         return HTMLResponse(
-            f"<h2>File not found</h2><p><code>{filename}</code> not in <code>{_session_cwd}</code></p>",
+            f"<h2>File not found</h2><p><code>{filename}</code> not in <code>{cwd}</code></p>",
             status_code=404,
         )
     return _FR(str(path))
@@ -637,11 +726,11 @@ async def browse_directory(path: str = ""):
     """Return subdirectories and navigation info for the folder browser."""
     from fastapi.responses import JSONResponse
     import string as _string
-    target = path.strip() if path.strip() else _session_cwd
+    cwd    = _session_cwd()
+    target = path.strip() if path.strip() else cwd
     p = pathlib.Path(target).expanduser().resolve()
     if not p.exists() or not p.is_dir():
-        # Fall back to session CWD if given path is bad
-        p = pathlib.Path(_session_cwd).resolve()
+        p = pathlib.Path(cwd).resolve()
     try:
         dirs = sorted(
             [d.name for d in p.iterdir() if d.is_dir()],
@@ -650,7 +739,6 @@ async def browse_directory(path: str = ""):
     except (PermissionError, OSError):
         dirs = []
     parent = str(p.parent) if str(p) != str(p.parent) else None
-    # Enumerate available Windows drive letters
     drives = []
     if sys.platform == "win32":
         drives = [f"{d}:\\" for d in _string.ascii_uppercase if pathlib.Path(f"{d}:\\").exists()]
@@ -795,11 +883,14 @@ async def ws_endpoint(websocket: WebSocket):
     logger.info("WS client connected (total: %d)", len(_ws_clients))
 
     # Send current state + recent history to the new client
+    fs = _focused_session()
     await websocket.send_text(json.dumps({
         "type": "state",
-        "active_ai": _active_ai,
-        "session_alive": _session.is_alive(),
-        "cwd": _session_cwd,
+        "sessions": _sessions_state_payload(),
+        "focused_id": _focused_id,
+        "focused_ai": fs["ai"] if fs else None,
+        "focused_cwd": fs["cwd"] if fs else _DEFAULT_CWD,
+        "focused_status": fs["status"] if fs else None,
     }))
     for msg in _chat_history[-50:]:
         await websocket.send_text(json.dumps(msg))
@@ -837,57 +928,96 @@ async def ws_endpoint(websocket: WebSocket):
 
 
 async def _handle_web_command(command: str, ws: WebSocket):
-    """Handle control commands sent from the web UI."""
-    global _active_ai, _claude_messages
+    """Handle control commands sent from the web UI (multi-session aware)."""
+    global _focused_id
 
-    if command == "claude":
-        _active_ai = "claude"
-        _claude_messages = []
+    # ── new_session:{ai} — create and focus a new session ────────────────────
+    if command.startswith("new_session:"):
+        ai_key = command.split(":", 1)[1].strip() or None
+        if ai_key == "shell":
+            ai_key = None
+        sess = _make_session(ai_key)
+        _focused_id = sess["id"]
         await _push_state()
-        await _push_message("system", "Claude Code active. Send a message to start.", source="web")
+        label = sess["emoji"] + " " + sess["name"]
+        await _push_message("system", f"Session created: {label}", source="web",
+                            session_id=sess["id"])
+        return
 
-    elif command in _integrations:
-        # Any registered integration — activated generically
-        _active_ai = command
-        await _push_state()
-        info = _integrations[command]
-        await _push_message(
-            "system",
-            f"{info['emoji']} {info['name']} active. Send a message to start.",
-            source="web",
-        )
-
-    elif command == "stop_ai":
-        _active_ai = None
-        await _push_state()
-        await _push_message("system", "AI mode off. Messages go to shell session.", source="web")
-
-    elif command == "launch":
-        try:
-            _session.launch()
-            output = await asyncio.to_thread(_session.drain, IDLE_TIMEOUT, 10.0, 5.0)
+    # ── focus:{sid} — switch focused session ─────────────────────────────────
+    if command.startswith("focus:"):
+        sid = command.split(":", 1)[1]
+        if sid in _sessions:
+            _focused_id = sid
             await _push_state()
-            await _push_message("system", "Shell session started.", source="web")
-            if output:
-                await _push_message("assistant", output, ai="shell", source="web")
-        except RuntimeError as e:
-            await _push_message("system", str(e), source="web")
+        return
 
-    elif command == "stop":
-        _session.stop()
-        await _push_state()
-        await _push_message("system", "Session stopped.", source="web")
+    # ── stop_session — stop the focused session ───────────────────────────────
+    if command == "stop_session":
+        sess = _focused_session()
+        if sess:
+            sess["terminal"].stop()
+            sess["status"] = "stopped"
+            await _push_state()
+            await _push_message("system", f"Session stopped: {sess['name']}", source="web",
+                                session_id=sess["id"])
+        return
 
-    elif command == "interrupt":
-        try:
-            _session.send_interrupt()
-            await _push_message("system", "Ctrl+C sent.", source="web")
-        except RuntimeError as e:
-            await _push_message("system", str(e), source="web")
+    # ── delete_session — remove focused session entirely ─────────────────────
+    if command == "delete_session":
+        sess = _focused_session()
+        if sess:
+            sess["terminal"].stop()
+            sid = sess["id"]
+            del _sessions[sid]
+            # focus the most-recently-used remaining session, or None
+            _focused_id = max(_sessions, key=lambda k: _sessions[k]["last_used"],
+                              default=None) if _sessions else None
+            await _push_state()
+        return
 
-    elif command == "clear":
-        _claude_messages = []
-        await _push_message("system", "Claude conversation history cleared.", source="web")
+    # ── switch_ai:{ai} — change AI of focused session ────────────────────────
+    if command.startswith("switch_ai:"):
+        sess = _focused_session()
+        if sess:
+            ai_key = command.split(":", 1)[1].strip()
+            if ai_key == "shell":
+                ai_key = None
+            sess["ai"] = ai_key
+            sess["claude_msgs"] = []
+            if ai_key == "claude":
+                sess["emoji"] = "🤖"; sess["color"] = "#f59e0b"
+            elif ai_key and ai_key in _integrations:
+                info = _integrations[ai_key]
+                sess["emoji"] = info["emoji"]; sess["color"] = info["color"]
+            else:
+                sess["emoji"] = "🐚"; sess["color"] = "#6b7280"
+            await _push_state()
+            await _push_message("system",
+                f"Switched to {sess['emoji']} {ai_key or 'Shell'}", source="web",
+                session_id=sess["id"])
+        return
+
+    # ── interrupt — send Ctrl+C to focused session ────────────────────────────
+    if command == "interrupt":
+        sess = _focused_session()
+        if sess:
+            try:
+                sess["terminal"].send_interrupt()
+                await _push_message("system", "Ctrl+C sent.", source="web",
+                                    session_id=sess["id"])
+            except RuntimeError as e:
+                await _push_message("system", str(e), source="web")
+        return
+
+    # ── clear — clear Claude context for focused session ─────────────────────
+    if command == "clear":
+        sess = _focused_session()
+        if sess:
+            sess["claude_msgs"] = []
+            await _push_message("system", "Claude conversation history cleared.", source="web",
+                                session_id=sess["id"])
+        return
 
 
 # ---------------------------------------------------------------------------
@@ -905,7 +1035,7 @@ def _windows_folder_picker() -> Optional[str]:
         root.wm_attributes("-topmost", 1)
         path = filedialog.askdirectory(
             title="Select Working Directory",
-            initialdir=_session_cwd,
+            initialdir=_session_cwd(),
         )
         root.destroy()
         return str(pathlib.Path(path)) if path else None
@@ -968,148 +1098,200 @@ async def _tg_send_chunks(
 # Inline keyboard helpers
 # ---------------------------------------------------------------------------
 
-def _ai_select_keyboard() -> InlineKeyboardMarkup:
-    """Buttons shown when no AI is active — pick an AI to start.
-    Claude is always first; all loaded integrations follow; Shell mode caps the list.
-    """
+def _sessions_keyboard() -> InlineKeyboardMarkup:
+    """Session list — one button per session + New Session + History/Resume."""
     rows: list = []
-    ai_buttons = [InlineKeyboardButton("🤖 Claude Code", callback_data="action:claude")]
-    for key, info in _integrations.items():
-        ai_buttons.append(
-            InlineKeyboardButton(f"{info['emoji']} {info['name']}", callback_data=f"action:{key}")
-        )
-    ai_buttons.append(InlineKeyboardButton("🐚 Shell mode", callback_data="action:stop_ai"))
-    # Pack 2 per row
-    for i in range(0, len(ai_buttons), 2):
-        rows.append(ai_buttons[i : i + 2])
-    rows.append([InlineKeyboardButton("🔁 Resume last session", callback_data="action:resume")])
+    for sess in sorted(_sessions.values(), key=lambda s: s["last_used"], reverse=True):
+        icon = _session_status_icon(sess)
+        cwd_short = pathlib.Path(sess["cwd"]).name or sess["cwd"]
+        label = f"{icon} {sess['name']}  ·  {cwd_short}"
+        rows.append([InlineKeyboardButton(label, callback_data=f"ms:focus:{sess['id']}")])
+    rows.append([InlineKeyboardButton("➕ New Session", callback_data="ms:new")])
     rows.append([
         InlineKeyboardButton("💬 Past chats",    callback_data="action:history"),
-        InlineKeyboardButton("📁 Change folder", callback_data="action:browse"),
+        InlineKeyboardButton("🔁 Resume old",    callback_data="action:resume"),
     ])
     return InlineKeyboardMarkup(rows)
 
 
-def _running_keyboard() -> InlineKeyboardMarkup:
-    """Buttons shown while an AI session is active."""
+def _session_controls_keyboard() -> InlineKeyboardMarkup:
+    """Controls for the currently-focused session."""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("⏸ Interrupt",     callback_data="action:interrupt"),
-            InlineKeyboardButton("🛑 Stop AI",       callback_data="action:stop"),
+            InlineKeyboardButton("📋 All Sessions",  callback_data="ms:list"),
+            InlineKeyboardButton("📁 Change Dir",    callback_data="ms:browse"),
         ],
         [
-            InlineKeyboardButton("🔀 Switch AI",     callback_data="action:switch"),
-            InlineKeyboardButton("📁 Change folder", callback_data="action:browse"),
+            InlineKeyboardButton("🔀 Switch AI",     callback_data="ms:switch"),
+            InlineKeyboardButton("⏸ Interrupt",      callback_data="ms:interrupt"),
         ],
         [
-            InlineKeyboardButton("💬 Past chats",    callback_data="action:history"),
-            InlineKeyboardButton("🔁 Resume a session", callback_data="action:resume"),
+            InlineKeyboardButton("⏹ Stop Session",  callback_data="ms:stop"),
+            InlineKeyboardButton("🗑 End & Delete",  callback_data="ms:delete"),
         ],
     ])
 
 
+def _new_session_keyboard(resume_sid: str = "") -> InlineKeyboardMarkup:
+    """AI picker for creating a new session (or resuming a stopped one)."""
+    rows: list = []
+    ai_buttons = [InlineKeyboardButton("🤖 Claude Code",
+                                       callback_data=f"ms:new_ai:claude:{resume_sid}")]
+    for key, info in _integrations.items():
+        ai_buttons.append(InlineKeyboardButton(
+            f"{info['emoji']} {info['name']}",
+            callback_data=f"ms:new_ai:{key}:{resume_sid}",
+        ))
+    ai_buttons.append(InlineKeyboardButton("🐚 Shell",
+                                            callback_data=f"ms:new_ai:shell:{resume_sid}"))
+    for i in range(0, len(ai_buttons), 2):
+        rows.append(ai_buttons[i : i + 2])
+    rows.append([InlineKeyboardButton("← Back", callback_data="ms:list")])
+    return InlineKeyboardMarkup(rows)
+
+
+# Keep thin aliases for any remaining code that calls the old names
+def _ai_select_keyboard() -> InlineKeyboardMarkup:
+    return _sessions_keyboard()
+
+
+def _running_keyboard() -> InlineKeyboardMarkup:
+    return _session_controls_keyboard()
+
+
 @authorized_only
 async def tg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Welcome message with AI picker buttons — no commands to memorise."""
-    await update.message.reply_text(
-        "👋 *Claude Remote*\n\n"
-        "Pick an AI to get started, or just type your task.\n"
-        f"Web UI: http://localhost:{WEB_PORT}",
-        parse_mode="Markdown",
-        reply_markup=_ai_select_keyboard(),
-    )
+    """Welcome message — show session list or prompt to create first session."""
+    if _sessions:
+        await update.message.reply_text(
+            "👋 *Claude Remote* — Multi-Session Mode\n\n"
+            "Tap a session to focus it, or create a new one.\n"
+            f"Web UI: http://localhost:{WEB_PORT}",
+            parse_mode="Markdown",
+            reply_markup=_sessions_keyboard(),
+        )
+    else:
+        await update.message.reply_text(
+            "👋 *Claude Remote* — Multi-Session Mode\n\n"
+            "No sessions yet. Create your first session:\n"
+            f"Web UI: http://localhost:{WEB_PORT}",
+            parse_mode="Markdown",
+            reply_markup=_new_session_keyboard(),
+        )
 
 
 @authorized_only
 async def tg_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/menu — show the main action keyboard."""
-    status = "🟢 Running" if _session.is_alive() else "⚪ No session"
-    ai_name = {"claude": "Claude Code", "gemini": "Gemini", "codex": "Codex"}.get(_active_ai or "", "Shell mode")
-    await update.message.reply_text(
-        f"*Claude Remote — Menu*\n"
-        f"Session: {status}   ·   AI: {ai_name}\n"
-        f"📁 `{_session_cwd}`",
-        parse_mode="Markdown",
-        reply_markup=_running_keyboard() if _active_ai else _ai_select_keyboard(),
-    )
+    """/menu — show sessions or controls for focused session."""
+    fs = _focused_session()
+    if fs:
+        ai_label = fs["emoji"] + " " + (fs["ai"] or "Shell")
+        await update.message.reply_text(
+            f"*Claude Remote — {fs['name']}*\n"
+            f"AI: {ai_label}  ·  Status: {fs['status']}\n"
+            f"📁 `{fs['cwd']}`",
+            parse_mode="Markdown",
+            reply_markup=_session_controls_keyboard(),
+        )
+    else:
+        await update.message.reply_text(
+            "*Claude Remote — Sessions*\nNo session focused. Pick one:",
+            parse_mode="Markdown",
+            reply_markup=_sessions_keyboard(),
+        )
 
 
 @authorized_only
 async def tg_launch(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Starting session…")
-    try:
-        _session.launch()
-    except RuntimeError as e:
-        await update.message.reply_text(str(e))
-        await _push_message("system", str(e), source="telegram")
-        return
-    output = await asyncio.to_thread(_session.drain, IDLE_TIMEOUT, 10.0, 5.0)
+    """Create a new shell session (quick shortcut)."""
+    global _focused_id
+    sess = _make_session(None)  # None = shell
+    _focused_id = sess["id"]
+    output = await asyncio.to_thread(sess["terminal"].drain, IDLE_TIMEOUT, 10.0, 5.0)
     await _push_state()
-    await _push_message("system", "Shell session started (via Telegram).", source="telegram")
+    await _push_message("system", f"Session created: {sess['name']} (via Telegram).",
+                        source="telegram", session_id=sess["id"])
     if output:
-        await _push_message("assistant", output, ai="shell", source="telegram")
+        await _push_message("assistant", output, ai="shell", source="telegram",
+                            session_id=sess["id"])
     await update.message.reply_text(
-        output or "✅ Session started. Choose an AI:",
-        reply_markup=_ai_select_keyboard(),
+        f"✅ {sess['name']} started. Type to send shell commands:",
+        reply_markup=_session_controls_keyboard(),
     )
 
 
 @authorized_only
 async def tg_claude(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global _active_ai, _claude_messages
-    _active_ai = "claude"
-    _claude_messages = []
+    """Create or focus a Claude Code session."""
+    global _focused_id
+    sess = _make_session("claude")
+    _focused_id = sess["id"]
     await _push_state()
-    await _push_message("system", "Claude Code active (via Telegram).", source="telegram")
+    await _push_message("system", f"{sess['name']} created (via Telegram).", source="telegram",
+                        session_id=sess["id"])
     await update.message.reply_text(
-        "🤖 *Claude Code* is active.\nJust type your task — I'll send it straight to Claude.",
+        f"🤖 *{sess['name']}* is ready.\nJust type your task.",
         parse_mode="Markdown",
-        reply_markup=_running_keyboard(),
+        reply_markup=_session_controls_keyboard(),
     )
 
 
 @authorized_only
 async def tg_codex(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global _active_ai
-    _active_ai = "codex"
+    """Create a new Codex session (if plugin is loaded)."""
+    global _focused_id
+    if "codex" not in _integrations:
+        await update.message.reply_text("Codex integration not loaded.")
+        return
+    sess = _make_session("codex")
+    _focused_id = sess["id"]
     await _push_state()
-    await _push_message("system", "Codex active (via Telegram).", source="telegram")
     await update.message.reply_text(
-        "💻 *Codex* is active.\nJust type your task.",
+        f"💻 *{sess['name']}* is ready.\nJust type your task.",
         parse_mode="Markdown",
-        reply_markup=_running_keyboard(),
+        reply_markup=_session_controls_keyboard(),
     )
 
 
 @authorized_only
 async def tg_gemini(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global _active_ai
-    _active_ai = "gemini"
+    """Create a new Gemini session (if plugin is loaded)."""
+    global _focused_id
+    if "gemini" not in _integrations:
+        await update.message.reply_text("Gemini integration not loaded.")
+        return
+    sess = _make_session("gemini")
+    _focused_id = sess["id"]
     await _push_state()
-    await _push_message("system", "Gemini active (via Telegram).", source="telegram")
     await update.message.reply_text(
-        "✨ *Gemini* is active.\nJust type your task.",
+        f"✨ *{sess['name']}* is ready.\nJust type your task.",
         parse_mode="Markdown",
-        reply_markup=_running_keyboard(),
+        reply_markup=_session_controls_keyboard(),
     )
 
 
 @authorized_only
 async def tg_stop_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global _active_ai
-    _active_ai = None
+    """Stop the focused session's AI (switch to shell)."""
+    sess = _focused_session()
+    if not sess:
+        await update.message.reply_text("No session focused.", reply_markup=_sessions_keyboard())
+        return
+    sess["ai"] = None
+    sess["emoji"] = "🐚"
+    sess["color"] = "#6b7280"
     await _push_state()
-    await _push_message("system", "AI mode off (via Telegram).", source="telegram")
     await update.message.reply_text(
-        "🐚 Back to shell mode.\nPick an AI to start again:",
-        reply_markup=_ai_select_keyboard(),
+        f"🐚 {sess['name']} switched to Shell mode.",
+        reply_markup=_session_controls_keyboard(),
     )
 
 
 @authorized_only
 async def tg_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global _claude_messages
-    _claude_messages = []
+    sess = _focused_session()
+    if sess:
+        sess["claude_msgs"] = []
     await _push_message("system", "Claude history cleared (via Telegram).", source="telegram")
     await update.message.reply_text("Conversation history cleared.")
 
@@ -1120,68 +1302,80 @@ async def tg_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         await update.message.reply_text("Usage: /cmd <command>")
         return
-    if not _session.is_alive():
-        await update.message.reply_text("No session. /launch first.")
+    sess = _focused_session()
+    if not sess or not sess["terminal"].is_alive():
+        await update.message.reply_text("No active session terminal. Create a session first.")
         return
-    await _push_message("user", f"/cmd {text}", source="telegram")
-    _session.write(text)
-    output = await asyncio.to_thread(_session.drain)
+    await _push_message("user", f"/cmd {text}", source="telegram", session_id=sess["id"])
+    sess["terminal"].write(text)
+    output = await asyncio.to_thread(sess["terminal"].drain)
     output = output or "(no output)"
-    await _push_message("assistant", output, ai="shell", source="telegram")
+    await _push_message("assistant", output, ai="shell", source="telegram", session_id=sess["id"])
     await _tg_send_chunks(update, output)
 
 
 @authorized_only
 async def tg_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if _session.is_alive():
-        await update.message.reply_text(
-            f"Session alive. PID: {_session.pid()}\n"
-            f"Active AI: {_active_ai or 'shell'}\n"
-            f"⏱ Timeout: {int(CLAUDE_TIMEOUT)}s"
-        )
-    else:
-        await update.message.reply_text(
-            f"No active session.\n"
-            f"Active AI: {_active_ai or 'shell'}\n"
-            f"⏱ Timeout: {int(CLAUDE_TIMEOUT)}s"
-        )
+    if not _sessions:
+        await update.message.reply_text("No sessions. Use /start to create one.")
+        return
+    lines = ["*Active Sessions:*"]
+    for sess in sorted(_sessions.values(), key=lambda s: s["last_used"], reverse=True):
+        icon = _session_status_icon(sess)
+        focused = " ← focused" if sess["id"] == _focused_id else ""
+        lines.append(f"{icon} *{sess['name']}* [{sess['ai'] or 'shell'}]{focused}\n"
+                     f"  📁 {sess['cwd']}")
+    lines.append(f"\n⏱ Timeout: {int(CLAUDE_TIMEOUT)}s")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown",
+                                    reply_markup=_sessions_keyboard())
 
 
 @authorized_only
 async def tg_interrupt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    sess = _focused_session()
+    if not sess:
+        await update.message.reply_text("No session focused.")
+        return
     try:
-        _session.send_interrupt()
-        await _push_message("system", "Ctrl+C sent (via Telegram).", source="telegram")
-        await update.message.reply_text(
-            "⏸ Interrupted.",
-            reply_markup=_running_keyboard() if _active_ai else _ai_select_keyboard(),
-        )
+        sess["terminal"].send_interrupt()
+        await _push_message("system", "Ctrl+C sent (via Telegram).", source="telegram",
+                            session_id=sess["id"])
+        await update.message.reply_text("⏸ Interrupted.", reply_markup=_session_controls_keyboard())
     except RuntimeError as e:
         await update.message.reply_text(str(e))
 
 
 @authorized_only
 async def tg_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    _session.stop()
+    sess = _focused_session()
+    if not sess:
+        await update.message.reply_text("No session focused.", reply_markup=_sessions_keyboard())
+        return
+    sess["terminal"].stop()
+    sess["status"] = "stopped"
     await _push_state()
-    await _push_message("system", "Session stopped (via Telegram).", source="telegram")
+    await _push_message("system", f"{sess['name']} stopped (via Telegram).", source="telegram",
+                        session_id=sess["id"])
     await update.message.reply_text(
-        "🛑 Session stopped.\nReady when you are:",
-        reply_markup=_ai_select_keyboard(),
+        f"🛑 {sess['name']} stopped.\nSessions:",
+        reply_markup=_sessions_keyboard(),
     )
 
 
 @authorized_only
 async def tg_cwd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show or change the working directory: /cwd  or  /cwd <path>"""
+    """Show or change the working directory of the focused session."""
     arg = (update.message.text or "").partition(" ")[2].strip()
+    sess = _focused_session()
     if not arg:
-        # Just show current directory
-        await update.message.reply_text(f"📁 Current directory:\n{_session_cwd}")
+        cwd = sess["cwd"] if sess else _DEFAULT_CWD
+        await update.message.reply_text(f"📁 Current directory:\n{cwd}")
         return
     ok = await _change_cwd(arg, source="telegram")
     if ok:
-        await update.message.reply_text(f"📁 Working directory changed to:\n{_session_cwd}")
+        sess = _focused_session()
+        cwd = sess["cwd"] if sess else _DEFAULT_CWD
+        await update.message.reply_text(f"📁 Working directory changed to:\n{cwd}")
 
 
 @authorized_only
@@ -1312,7 +1506,7 @@ async def _show_browse(target, user_id: int, path: str, edit: bool = False, page
 async def tg_browse(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/browse [path] — interactively navigate folders and set working directory."""
     arg = (update.message.text or "").partition(" ")[2].strip()
-    start = arg if arg else _session_cwd
+    start = arg if arg else _session_cwd()
     user_id = update.effective_user.id
     await _show_browse(update.message, user_id, start, edit=False, page=0)
 
@@ -1327,30 +1521,32 @@ async def browse_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     data = query.data
-    state = _tg_browse_state.get(user_id, {"path": _session_cwd, "dirs": [], "page": 0})
+    state = _tg_browse_state.get(user_id, {"path": _session_cwd(), "dirs": [], "page": 0})
     current_path = state["path"]
     dirs = state["dirs"]
 
     if data == "browse_cancel":
         _tg_browse_state.pop(user_id, None)
+        fs = _focused_session()
         await query.edit_message_text(
             "Browse cancelled.",
-            reply_markup=_running_keyboard() if _active_ai else _ai_select_keyboard(),
+            reply_markup=_session_controls_keyboard() if fs else _sessions_keyboard(),
         )
 
     elif data == "browse_select":
         _tg_browse_state.pop(user_id, None)
         ok = await _change_cwd(current_path, source="telegram")
+        fs = _focused_session()
         if ok:
             await query.edit_message_text(
                 f"✅ Working directory set to:\n`{current_path}`\n\nWhat would you like to do next?",
                 parse_mode="Markdown",
-                reply_markup=_running_keyboard() if _active_ai else _ai_select_keyboard(),
+                reply_markup=_session_controls_keyboard() if fs else _sessions_keyboard(),
             )
         else:
             await query.edit_message_text(
                 f"❌ Could not set directory:\n{current_path}",
-                reply_markup=_running_keyboard() if _active_ai else _ai_select_keyboard(),
+                reply_markup=_session_controls_keyboard() if fs else _sessions_keyboard(),
             )
 
     elif data == "browse_up":
@@ -1379,12 +1575,12 @@ async def _perform_resume(message, date_str: str = "") -> None:
     """Core resume logic — usable from both /resume command and inline button.
 
     Loads the session log for `date_str` (or the most recent log if blank),
-    restores the working directory and AI model automatically, injects the
-    conversation context, and replies to `message` with a summary + buttons.
+    creates a new session (restoring AI + CWD), injects the conversation
+    context as a prefix, and replies with a summary + controls keyboard.
     """
-    global _pending_tg_context, _active_ai, _claude_messages
+    global _focused_id, _pending_tg_context
 
-    # Resolve which log file to load
+    # ── Resolve which log file to load ────────────────────────────────────────
     if date_str:
         log_file = CHAT_LOG_DIR / f"{date_str}.jsonl"
         if not log_file.exists():
@@ -1401,7 +1597,7 @@ async def _perform_resume(message, date_str: str = "") -> None:
         log_file = logs[0]
         date_str = log_file.stem
 
-    # Read the log — collect messages, last CWD, last AI
+    # ── Read the log — collect messages, last CWD, last AI ───────────────────
     messages: list[dict] = []
     last_cwd: Optional[str] = None
     last_ai:  Optional[str] = None
@@ -1414,7 +1610,7 @@ async def _perform_resume(message, date_str: str = "") -> None:
             if m.get("type") == "cwd":
                 last_cwd = m["path"]
             elif m.get("type") == "ai":
-                last_ai = m.get("model")      # keep the last one seen
+                last_ai = m.get("model")
             elif m.get("role") in ("user", "assistant"):
                 messages.append(m)
         except Exception:
@@ -1424,7 +1620,30 @@ async def _perform_resume(message, date_str: str = "") -> None:
         await message.reply_text(f"No conversation messages found in session {date_str}.")
         return
 
-    # Build context string from last 10 exchanges
+    # ── Fallback: load CWD/AI from last_state.json if log pre-dates records ──
+    if not last_cwd or not last_ai:
+        try:
+            state_file = CHAT_LOG_DIR / "last_state.json"
+            if state_file.exists():
+                st = json.loads(state_file.read_text(encoding="utf-8"))
+                # last_state.json now stores sessions dict; try to pick the
+                # first session's data as a best-effort fallback
+                sessions_saved = st.get("sessions", {})
+                if sessions_saved:
+                    first = next(iter(sessions_saved.values()))
+                    if not last_cwd:
+                        last_cwd = first.get("cwd") or None
+                    if not last_ai:
+                        last_ai = first.get("ai") or None
+                # Legacy format fallback (pre-multi-session last_state.json)
+                if not last_cwd:
+                    last_cwd = st.get("cwd") or None
+                if not last_ai:
+                    last_ai = st.get("ai") or None
+        except Exception:
+            pass
+
+    # ── Build context string from last 10 exchanges ───────────────────────────
     turns = messages[-10:]
     lines_ctx = []
     for m in turns:
@@ -1435,43 +1654,34 @@ async def _perform_resume(message, date_str: str = "") -> None:
         lines_ctx.append(f"{role}: {body}")
 
     label = _load_chat_names().get(date_str) or date_str
-    _pending_tg_context = (
+    context_prefix = (
         f"[Previous conversation — {label}]\n"
         + "\n".join(lines_ctx)
         + "\n[End context]\n\n"
     )
 
-    # ── Auto-restore working directory ────────────────────────────────────────
-    # Fallback: if this session log pre-dates per-session CWD records, read
-    # from last_state.json (written on every state change going forward).
-    if not last_cwd:
-        try:
-            state_file = CHAT_LOG_DIR / "last_state.json"
-            if state_file.exists():
-                st = json.loads(state_file.read_text(encoding="utf-8"))
-                last_cwd = st.get("cwd") or None
-                if not last_ai:
-                    last_ai = st.get("ai") or None
-        except Exception:
-            pass
+    # ── Create a new session for the resumed work ─────────────────────────────
+    valid_ai = last_ai and (last_ai == "claude" or last_ai in _integrations)
+    ai_to_use = last_ai if valid_ai else None
+    sess = _make_session(ai_to_use)
+    _focused_id = sess["id"]
 
+    # Restore CWD inside the new session
     cwd_note = ""
     if last_cwd:
-        cwd_ok = await _change_cwd(last_cwd, source="telegram")
+        cwd_ok = await _change_cwd(last_cwd, source="telegram", session_id=sess["id"])
         cwd_note = (
             f"\n📁 Directory restored: `{last_cwd}`"
             if cwd_ok
             else f"\n⚠️ Could not restore directory: `{last_cwd}`"
         )
 
-    # ── Auto-restore AI model ─────────────────────────────────────────────────
-    ai_note = ""
-    valid_ai = last_ai and (last_ai == "claude" or last_ai in _integrations)
+    # Inject the context prefix into the next message sent to this session
+    _pending_tg_context = context_prefix
+
+    await _push_state()
+
     if valid_ai:
-        _active_ai = last_ai
-        if last_ai == "claude":
-            _claude_messages = []
-        await _push_state()
         if last_ai == "claude":
             ai_label = "🤖 Claude Code"
         elif last_ai in _integrations:
@@ -1486,7 +1696,7 @@ async def _perform_resume(message, date_str: str = "") -> None:
     await message.reply_text(
         f"✅ *Resumed: {label}* ({len(turns)} exchanges loaded){cwd_note}{ai_note}",
         parse_mode="Markdown",
-        reply_markup=_running_keyboard() if _active_ai else _ai_select_keyboard(),
+        reply_markup=_session_controls_keyboard() if valid_ai else _sessions_keyboard(),
     )
 
 
@@ -1511,88 +1721,92 @@ async def tg_clear_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @authorized_only
 async def tg_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Forward plain text — with natural language shortcut detection."""
-    global _pending_tg_context, _active_ai, _claude_messages
+    global _pending_tg_context, _focused_id
     text = (update.message.text or "").strip()
     low = text.lower()
 
-    # ── Natural language shortcuts (always checked, regardless of AI state) ──
-    # These let users say things like "stop", "history", "start claude"
-    # without memorising any slash commands.
-
+    # ── Natural language shortcuts ──────────────────────────────────────────
     if low in ("menu", "help", "options", "?"):
         await tg_menu.__wrapped__(update, context)
         return
-
+    if low in ("sessions", "list sessions", "show sessions"):
+        await tg_status.__wrapped__(update, context)
+        return
     if low in ("stop", "quit", "kill", "exit session"):
         await tg_stop.__wrapped__(update, context)
         return
-
     if low in ("interrupt", "cancel", "ctrl+c", "ctrl c"):
         await tg_interrupt.__wrapped__(update, context)
         return
-
     if low in ("history", "show history", "past sessions"):
         await tg_history.__wrapped__(update, context)
         return
-
     if low in ("resume", "continue", "load context"):
         await _perform_resume(update.message, date_str="")
         return
-
     if low in ("status", "session status"):
         await tg_status.__wrapped__(update, context)
         return
-
     if low in ("folder", "cwd", "directory", "show folder"):
         await tg_cwd.__wrapped__(update, context)
         return
-
-    if any(low.startswith(p) for p in ("start claude", "use claude", "switch to claude", "claude code")):
+    if low in ("new session", "create session", "new claude", "start claude", "use claude",
+               "claude code"):
         await tg_claude.__wrapped__(update, context)
         return
-
     # Dynamic NL shortcuts for all loaded integrations
     for _ikey, _iinfo in _integrations.items():
         _n = _ikey.lower()
-        if any(low.startswith(p) for p in (f"start {_n}", f"use {_n}", f"switch to {_n}")):
-            _active_ai = _ikey
-            await _push_state()
-            await _push_message("system", f"{_iinfo['name']} active (via Telegram).", source="telegram")
-            await update.message.reply_text(
-                f"{_iinfo['emoji']} *{_iinfo['name']}* is active.\nJust type your task.",
-                parse_mode="Markdown",
-                reply_markup=_running_keyboard(),
-            )
-            return
-
-    if low in ("shell", "shell mode", "stop ai", "no ai"):
-        await tg_stop_ai.__wrapped__(update, context)
+        if any(low.startswith(p) for p in (f"new {_n}", f"start {_n}", f"use {_n}",
+                                            f"switch to {_n}")):
+            if _ikey in _integrations:
+                sess = _make_session(_ikey)
+                _focused_id = sess["id"]
+                await _push_state()
+                await update.message.reply_text(
+                    f"{_iinfo['emoji']} *{sess['name']}* created.\nJust type your task.",
+                    parse_mode="Markdown",
+                    reply_markup=_session_controls_keyboard(),
+                )
+                return
+    if low in ("shell", "shell mode", "new shell"):
+        await tg_launch.__wrapped__(update, context)
         return
 
-    # ── No AI selected → show action buttons for ANY message ─────────────────
-    # Once the user has picked an AI (or shell mode), every message goes straight
-    # to that AI. Before any selection, always guide them with buttons.
-    if not _active_ai:
-        status = "🟢 Running" if _session.is_alive() else "⚪ No session"
+    # ── No focused session → show session list / new session picker ──────────
+    if not _focused_id or _focused_id not in _sessions:
+        if _sessions:
+            await update.message.reply_text(
+                "👋 Tap a session to focus it, or create a new one:",
+                reply_markup=_sessions_keyboard(),
+            )
+        else:
+            await update.message.reply_text(
+                "👋 No sessions yet. Create your first one:",
+                reply_markup=_new_session_keyboard(),
+            )
+        return
+
+    sess = _sessions.get(_focused_id)
+    if sess and sess["status"] == "stopped":
         await update.message.reply_text(
-            f"👋 *Claude Remote* — Ready!\n"
-            f"Session: {status}   ·   AI: none selected\n"
-            f"📁 `{_session_cwd}`\n\n"
-            f"Pick an AI or action to get started:",
+            f"⏹ *{sess['name']}* is stopped. Resume it or switch session:",
             parse_mode="Markdown",
-            reply_markup=_ai_select_keyboard(),
+            reply_markup=_sessions_keyboard(),
         )
         return
 
-    # ── AI is active → forward every message straight to it ──────────────────
+    # ── Focused session is active → forward message ──────────────────────────
     if _pending_tg_context:
         text = _pending_tg_context + text
         _pending_tg_context = None
         await update.message.reply_text("📎 Context injected. Thinking…")
     else:
-        await update.message.reply_text("Thinking…")
+        fs = _focused_session()
+        label = f"{fs['emoji']} {fs['name']}" if fs else "session"
+        await update.message.reply_text(f"Thinking… [{label}]")
     response = await _process_message(text, source="telegram")
-    await _tg_send_chunks(update, response, reply_markup=_running_keyboard())
+    await _tg_send_chunks(update, response, reply_markup=_session_controls_keyboard())
 
 
 # ---------------------------------------------------------------------------
@@ -1600,8 +1814,8 @@ async def tg_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------------------------------------------------------------
 
 async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle all action:* inline keyboard button presses."""
-    global _active_ai, _claude_messages
+    """Handle all ms:* and action:* inline keyboard button presses."""
+    global _focused_id
     query = update.callback_query
     user_id = query.from_user.id
     if ALLOWED_USER_IDS and user_id not in ALLOWED_USER_IDS:
@@ -1609,68 +1823,149 @@ async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await query.answer()
 
-    action = query.data.split(":", 1)[1] if ":" in query.data else query.data
+    data = query.data  # e.g. "ms:focus:s1", "ms:new_ai:claude:", "action:history"
 
-    if action == "claude":
-        _active_ai = "claude"
-        _claude_messages = []
-        await _push_state()
-        await _push_message("system", "Claude Code active (via Telegram).", source="telegram")
-        await query.edit_message_text(
-            "🤖 *Claude Code* is active.\nJust type your task.",
-            parse_mode="Markdown",
-            reply_markup=_running_keyboard(),
-        )
+    # ── ms: multi-session actions ─────────────────────────────────────────────
+    if data.startswith("ms:"):
+        parts = data.split(":")  # ["ms", verb, arg1?, arg2?]
+        verb  = parts[1] if len(parts) > 1 else ""
 
-    elif action in _integrations:
-        # Generic handler for any loaded integration plugin
-        info = _integrations[action]
-        _active_ai = action
-        await _push_state()
-        await _push_message("system", f"{info['name']} active (via Telegram).", source="telegram")
-        await query.edit_message_text(
-            f"{info['emoji']} *{info['name']}* is active.\nJust type your task.",
-            parse_mode="Markdown",
-            reply_markup=_running_keyboard(),
-        )
+        if verb == "list":
+            txt  = "📋 *Sessions* — tap to focus:" if _sessions else "No sessions yet."
+            await query.edit_message_text(txt, parse_mode="Markdown",
+                                          reply_markup=_sessions_keyboard())
 
-    elif action == "stop_ai":
-        _active_ai = None
-        await _push_state()
-        await _push_message("system", "AI mode off (via Telegram).", source="telegram")
-        await query.edit_message_text(
-            "🐚 Shell mode — plain text goes straight to the terminal.\nPick an AI to start again:",
-            reply_markup=_ai_select_keyboard(),
-        )
+        elif verb == "new":
+            await query.edit_message_text("Choose AI for new session:",
+                                          reply_markup=_new_session_keyboard())
 
-    elif action == "stop":
-        _session.stop()
-        await _push_state()
-        await _push_message("system", "Session stopped (via Telegram).", source="telegram")
-        await query.edit_message_text(
-            "🛑 Session stopped.\nReady when you are:",
-            reply_markup=_ai_select_keyboard(),
-        )
-
-    elif action == "interrupt":
-        try:
-            _session.send_interrupt()
-            await _push_message("system", "Ctrl+C sent (via Telegram).", source="telegram")
+        elif verb == "new_ai":
+            # ms:new_ai:{ai}:{resume_sid}
+            ai_key     = parts[2] if len(parts) > 2 else "shell"
+            resume_sid = parts[3] if len(parts) > 3 else ""
+            if ai_key == "shell":
+                ai_key = None
+            if resume_sid and resume_sid in _sessions:
+                # Resume a stopped session with a (possibly different) AI
+                sess = _sessions[resume_sid]
+                sess["ai"]     = ai_key
+                sess["status"] = "running"
+                sess["claude_msgs"] = []
+                if ai_key == "claude":
+                    sess["emoji"] = "🤖"; sess["color"] = "#f59e0b"
+                elif ai_key and ai_key in _integrations:
+                    info = _integrations[ai_key]
+                    sess["emoji"] = info["emoji"]; sess["color"] = info["color"]
+                else:
+                    sess["emoji"] = "🐚"; sess["color"] = "#6b7280"
+                # Restart terminal
+                sess["terminal"].stop()
+                t = TerminalSession()
+                t.launch()
+                sess["terminal"] = t
+                _focused_id = resume_sid
+            else:
+                # Create brand-new session
+                sess = _make_session(ai_key)
+                _focused_id = sess["id"]
+            await _push_state()
+            label = f"{sess['emoji']} *{sess['name']}*"
+            await _push_message("system", f"Session ready: {sess['name']} (via Telegram).",
+                                source="telegram", session_id=sess["id"])
             await query.edit_message_text(
-                "⏸ Interrupted.",
-                reply_markup=_running_keyboard() if _active_ai else _ai_select_keyboard(),
+                f"{label} is ready.\nJust type your task.",
+                parse_mode="Markdown",
+                reply_markup=_session_controls_keyboard(),
             )
-        except RuntimeError as e:
-            await query.edit_message_text(str(e))
 
-    elif action == "switch":
-        await query.edit_message_text(
-            "Switch AI — pick one:",
-            reply_markup=_ai_select_keyboard(),
-        )
+        elif verb == "focus":
+            sid = parts[2] if len(parts) > 2 else ""
+            if sid in _sessions:
+                sess = _sessions[sid]
+                if sess["status"] == "stopped":
+                    await query.edit_message_text(
+                        f"⏹ *{sess['name']}* is stopped. Resume as:",
+                        parse_mode="Markdown",
+                        reply_markup=_new_session_keyboard(resume_sid=sid),
+                    )
+                else:
+                    _focused_id = sid
+                    fs = _sessions[sid]
+                    ai_lbl = fs["emoji"] + " " + (fs["ai"] or "Shell")
+                    await query.edit_message_text(
+                        f"✅ *{fs['name']}* focused\n"
+                        f"AI: {ai_lbl}  ·  📁 {pathlib.Path(fs['cwd']).name or fs['cwd']}\n\n"
+                        f"Type your message to send to this session:",
+                        parse_mode="Markdown",
+                        reply_markup=_session_controls_keyboard(),
+                    )
+            else:
+                await query.edit_message_text("Session not found.", reply_markup=_sessions_keyboard())
 
-    elif action == "history":
-        # Show last 5 messages inline
+        elif verb == "stop":
+            sess = _focused_session()
+            if sess:
+                sess["terminal"].stop()
+                sess["status"] = "stopped"
+                await _push_state()
+                await _push_message("system", f"{sess['name']} stopped (via Telegram).",
+                                    source="telegram", session_id=sess["id"])
+                await query.edit_message_text(
+                    f"⏹ *{sess['name']}* stopped. Sessions:",
+                    parse_mode="Markdown",
+                    reply_markup=_sessions_keyboard(),
+                )
+            else:
+                await query.edit_message_text("No focused session.", reply_markup=_sessions_keyboard())
+
+        elif verb == "delete":
+            sess = _focused_session()
+            if sess:
+                sess["terminal"].stop()
+                sid = sess["id"]
+                name = sess["name"]
+                del _sessions[sid]
+                _focused_id = (max(_sessions, key=lambda k: _sessions[k]["last_used"],
+                                   default=None) if _sessions else None)
+                await _push_state()
+                await query.edit_message_text(
+                    f"🗑 *{name}* deleted. Sessions:",
+                    parse_mode="Markdown",
+                    reply_markup=_sessions_keyboard(),
+                )
+            else:
+                await query.edit_message_text("No focused session.", reply_markup=_sessions_keyboard())
+
+        elif verb == "switch":
+            await query.edit_message_text("Switch AI for this session — pick one:",
+                                          reply_markup=_new_session_keyboard(
+                                              resume_sid=_focused_id or ""))
+
+        elif verb == "interrupt":
+            sess = _focused_session()
+            if sess:
+                try:
+                    sess["terminal"].send_interrupt()
+                    await _push_message("system", "Ctrl+C sent (via Telegram).",
+                                        source="telegram", session_id=sess["id"])
+                    await query.edit_message_text("⏸ Interrupted.",
+                                                  reply_markup=_session_controls_keyboard())
+                except RuntimeError as e:
+                    await query.edit_message_text(str(e))
+            else:
+                await query.edit_message_text("No focused session.", reply_markup=_sessions_keyboard())
+
+        elif verb == "browse":
+            if query.message:
+                cwd = _focused_session()["cwd"] if _focused_session() else _DEFAULT_CWD
+                await _show_browse(query.message, query.from_user.id, cwd, edit=False, page=0)
+
+        return  # end of ms: handling
+
+    # ── action: legacy / shared actions ──────────────────────────────────────
+    action = data.split(":", 1)[1] if ":" in data else data
+
+    if action == "history":
         messages: list[dict] = []
         for delta in range(7):
             d = (datetime.now() - timedelta(days=delta)).strftime("%Y-%m-%d")
@@ -1704,23 +1999,19 @@ async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 preview += "…"
             lines_out.append(f"[{ts}] {role}:\n{preview}")
         history_text = "\n\n".join(lines_out)
-        # Can't edit with too-long text — send new message
         if query.message:
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text=history_text[:3800],
-                reply_markup=_running_keyboard() if _active_ai else _ai_select_keyboard(),
+                reply_markup=_sessions_keyboard(),
             )
 
     elif action == "browse":
-        # Telegram always uses the inline folder browser (paginated inline keyboard).
-        # The Windows native picker is only used from the web UI.
         if query.message:
-            user_id = query.from_user.id
-            await _show_browse(query.message, user_id, _session_cwd, edit=False, page=0)
+            cwd = _focused_session()["cwd"] if _focused_session() else _DEFAULT_CWD
+            await _show_browse(query.message, query.from_user.id, cwd, edit=False, page=0)
 
     elif action == "resume":
-        # Resume the most recent session directly from the inline button
         if query.message:
             await query.edit_message_text("⏳ Loading last session…")
             await _perform_resume(query.message, date_str="")
@@ -1879,6 +2170,11 @@ header{
 .menu-dot.codex{background:var(--codex)}
 .menu-dot.shell{background:var(--shell)}
 .ai-menu-divider{height:1px;background:var(--border);margin:4px 0}
+.ai-menu-item.session-focused{color:var(--text)!important;background:var(--surface2)}
+.session-badge{
+  font-size:10px;color:var(--muted);padding:1px 6px 1px 0;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0}
 
 /* Textarea */
 #inp{
@@ -2005,6 +2301,7 @@ header{
       <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
     </svg>
   </span>
+  <span id="session-badge" class="session-badge" title="Focused session"></span>
   <span id="cwd-display" title="Click to change directory" onclick="startCwdEdit()">—</span>
   <input id="cwd-input" placeholder="Enter full path and press Enter…"
          onkeydown="cwdKey(event)" onblur="cancelCwdEdit()">
@@ -2040,19 +2337,22 @@ header{
     </svg>
   </div>
 
-  <!-- AI dropdown menu — static items; integrations injected dynamically by loadIntegrations() -->
+  <!-- Sessions + AI dropdown menu — sessions injected dynamically by applyState(); integrations by loadIntegrations() -->
   <div class="ai-menu" id="ai-menu">
-    <div class="ai-menu-section">AI Mode</div>
-    <button class="ai-menu-item" onclick="cmd('claude');closeAiMenu()">
-      <span class="menu-dot claude"></span>Claude Code</button>
-    <!-- integration buttons inserted here by loadIntegrations() -->
-    <button class="ai-menu-item" id="shell-mode-btn" onclick="cmd('stop_ai');closeAiMenu()">
-      <span class="menu-dot shell"></span>Shell mode</button>
+    <div class="ai-menu-section">Active Sessions</div>
+    <div id="ai-menu-sessions"><!-- filled by applyState() --></div>
     <div class="ai-menu-divider"></div>
-    <div class="ai-menu-section">Session</div>
-    <button class="ai-menu-item" onclick="cmd('launch');closeAiMenu()">⚡ Launch session</button>
+    <div class="ai-menu-section">New Session</div>
+    <button class="ai-menu-item" onclick="cmd('new_session:claude');closeAiMenu()">
+      <span class="menu-dot claude"></span>New: Claude Code</button>
+    <!-- integration "New: …" buttons inserted here by loadIntegrations() -->
+    <button class="ai-menu-item" id="shell-mode-btn" onclick="cmd('new_session:');closeAiMenu()">
+      <span class="menu-dot shell"></span>New: Shell</button>
+    <div class="ai-menu-divider"></div>
+    <div class="ai-menu-section">Focused Session</div>
     <button class="ai-menu-item" onclick="cmd('interrupt');closeAiMenu()">⏸ Interrupt</button>
-    <button class="ai-menu-item" onclick="cmd('clear');closeAiMenu()">↺ Clear Claude history</button>
+    <button class="ai-menu-item" onclick="cmd('stop_session');closeAiMenu()">⏹ Stop</button>
+    <button class="ai-menu-item" onclick="cmd('clear');closeAiMenu()">↺ Clear history</button>
   </div>
 
   <textarea id="inp" placeholder="Type a message…  (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
@@ -2091,6 +2391,8 @@ header{
 const AI_LABEL = {claude:'Claude Code',shell:'Shell'};
 let ws = null, activeAi = null, _viewingHistory = false, _liveHistory = [], _pendingContext = '';
 let _sessNames = {};
+// Multi-session state
+let _sessions = [], _focusedId = null, _focusedAi = null;
 
 // Load integrations from server and inject menu items + CSS vars dynamically
 async function loadIntegrations(){
@@ -2115,11 +2417,12 @@ async function loadIntegrations(){
       css += `.ai-picker.active-${key} #ai-label{color:var(--${key})}`;
       // Update label map
       AI_LABEL[key] = name;
-      // Inject menu button before Shell mode
+      // Inject "New Session: …" button before Shell mode
       const btn = document.createElement('button');
       btn.className = 'ai-menu-item';
-      btn.innerHTML = `<span class="menu-dot ${key}"></span>${escHtml(name)}`;
-      btn.onclick = () => { cmd(key); closeAiMenu(); };
+      btn.dataset.newAi = key;
+      btn.innerHTML = `<span class="menu-dot ${key}"></span>New: ${escHtml(name)}`;
+      btn.onclick = () => { cmd('new_session:'+key); closeAiMenu(); };
       shellBtn.parentNode.insertBefore(btn, shellBtn);
     }
     const styleEl = document.createElement('style');
@@ -2145,13 +2448,58 @@ function connect(){
 }
 
 function applyState(s){
-  activeAi = s.active_ai;
-  const key = activeAi || 'shell';
-  const picker = document.getElementById('ai-picker');
-  document.getElementById('dot').className = 'dot ' + key;
-  document.getElementById('ai-label').textContent = AI_LABEL[key] || key;
-  picker.className = 'ai-picker' + (activeAi ? ' active-' + activeAi : '');
-  if(s.cwd) applyCwd(s.cwd);
+  // Multi-session state format: { sessions, focused_id, focused_ai, focused_cwd, focused_status }
+  // Also support legacy format: { active_ai, cwd }
+  if(s.sessions !== undefined){
+    _sessions = s.sessions || [];
+    _focusedId = s.focused_id || null;
+    _focusedAi = s.focused_ai || null;
+    activeAi = _focusedAi;
+    // Update sessions list in the dropdown
+    const sessContainer = document.getElementById('ai-menu-sessions');
+    if(sessContainer){
+      if(!_sessions.length){
+        sessContainer.innerHTML = '<div style="padding:7px 13px;font-size:12px;color:var(--muted)">No active sessions</div>';
+      } else {
+        sessContainer.innerHTML = _sessions.map(sess => {
+          const isFocused = sess.id === _focusedId;
+          const icon = sess.status === 'stopped' ? '🔴' : (sess.ai === 'claude' ? '🟡' : sess.ai ? '🟡' : '🟢');
+          return `<button class="ai-menu-item${isFocused ? ' session-focused' : ''}"
+            onclick="cmd('focus:${sess.id}');closeAiMenu()"
+            style="${isFocused ? 'color:var(--text);background:var(--surface2);' : ''}">
+            ${icon} ${escHtml(sess.name)}${isFocused ? ' ✓' : ''}
+            <span style="margin-left:auto;font-size:10px;color:var(--muted)">${escHtml(sess.cwd ? sess.cwd.split(/[/\\]/).pop() || sess.cwd : '')}</span>
+          </button>`;
+        }).join('');
+      }
+    }
+    // Update the focused session display
+    const focusedSess = _sessions.find(s => s.id === _focusedId);
+    const picker = document.getElementById('ai-picker');
+    const badge = document.getElementById('session-badge');
+    if(focusedSess){
+      const aiKey = focusedSess.ai || 'shell';
+      document.getElementById('dot').className = 'dot ' + aiKey;
+      document.getElementById('ai-label').textContent = focusedSess.emoji + ' ' + focusedSess.name;
+      picker.className = 'ai-picker' + (focusedSess.ai ? ' active-' + aiKey : '');
+      if(badge) badge.textContent = (_sessions.length > 1 ? `${_sessions.length} sessions · ` : '');
+    } else {
+      document.getElementById('dot').className = 'dot';
+      document.getElementById('ai-label').textContent = 'No session';
+      picker.className = 'ai-picker';
+      if(badge) badge.textContent = '';
+    }
+    if(s.focused_cwd) applyCwd(s.focused_cwd);
+  } else {
+    // Legacy format
+    activeAi = s.active_ai;
+    const key = activeAi || 'shell';
+    const picker = document.getElementById('ai-picker');
+    document.getElementById('dot').className = 'dot ' + key;
+    document.getElementById('ai-label').textContent = AI_LABEL[key] || key;
+    picker.className = 'ai-picker' + (activeAi ? ' active-' + activeAi : '');
+    if(s.cwd) applyCwd(s.cwd);
+  }
 }
 
 function applyCwd(path){
@@ -2262,8 +2610,10 @@ function setThinking(on, ai){
   const el = document.getElementById('thinking');
   el.className = on ? 'on' : '';
   if(on){
-    const k = ai || activeAi || '';
-    document.getElementById('thlabel').textContent = (AI_LABEL[k]||'AI') + '…';
+    const k = ai || _focusedAi || activeAi || '';
+    const focusedSess = _sessions.find(s => s.id === _focusedId);
+    const label = focusedSess ? (focusedSess.emoji + ' ' + focusedSess.name) : (AI_LABEL[k] || 'AI');
+    document.getElementById('thlabel').textContent = label + '…';
     scroll();
   }
 }
@@ -2282,10 +2632,19 @@ function renderMsg(m){
     meta.className = 'meta';
     if(m.role==='user'){
       const via = m.source==='telegram' ? '<span class="via">via Telegram · </span>' : '';
-      meta.innerHTML = via + 'You';
+      // Show session label on user messages when multiple sessions exist
+      const sessTag = (m.session_name && _sessions.length > 1)
+        ? `<span class="via">[${escHtml(m.session_emoji||'')} ${escHtml(m.session_name)}] </span>`
+        : '';
+      meta.innerHTML = sessTag + via + 'You';
     } else {
       const k = m.ai || '';
-      meta.innerHTML = `<span class="who ${k}">${AI_LABEL[k]||'AI'}</span>`;
+      const aiName = AI_LABEL[k] || k || 'AI';
+      // Show session name badge if multiple sessions or session is identified
+      const sessLabel = (m.session_name && _sessions.length > 1)
+        ? ` <span style="font-size:10px;color:var(--muted);font-weight:normal">${escHtml(m.session_emoji||'')} ${escHtml(m.session_name)}</span>`
+        : '';
+      meta.innerHTML = `<span class="who ${k}">${escHtml(aiName)}</span>${sessLabel}`;
     }
     grp.appendChild(meta);
   }
@@ -2442,9 +2801,6 @@ async def _main():
     # Load AI integration plugins from integrations/ folder
     _load_integrations()
 
-    # Log the initial working directory so resume can restore it
-    _save_cwd_to_log(_session_cwd)
-
     if not BOT_TOKEN:
         logger.warning("TELEGRAM_BOT_TOKEN not set — Telegram bot disabled.")
 
@@ -2473,8 +2829,8 @@ async def _main():
         _telegram_app.add_handler(CommandHandler("history",       tg_history))
         _telegram_app.add_handler(CommandHandler("resume",        tg_resume))
         _telegram_app.add_handler(CommandHandler("clear_context", tg_clear_context))
-        # Inline keyboard callbacks — action buttons come BEFORE browse_callback
-        _telegram_app.add_handler(CallbackQueryHandler(action_callback, pattern=r"^action:"))
+        # Inline keyboard callbacks — action/ms: buttons come BEFORE browse_callback
+        _telegram_app.add_handler(CallbackQueryHandler(action_callback, pattern=r"^(action:|ms:)"))
         _telegram_app.add_handler(CallbackQueryHandler(browse_callback))
         # Plain text + natural language
         _telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, tg_text))
