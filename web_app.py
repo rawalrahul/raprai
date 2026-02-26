@@ -329,7 +329,7 @@ async def _broadcast(data: dict):
     """Push a JSON message to every connected WebSocket client."""
     if not _ws_clients:
         return
-    payload = json.dumps(data)
+    payload = json.dumps(data, default=str)
     dead = set()
     for ws in _ws_clients:
         try:
@@ -1176,20 +1176,13 @@ def _rebuild_hist_cache_sync() -> list:
 
 @app.get("/history")
 async def history_list():
-    """Return cached session list instantly. Refreshes in background if stale."""
+    """Return cached session list instantly. NEVER blocks — triggers background refresh."""
     from fastapi.responses import JSONResponse
-    global _hist_cache, _hist_cache_ts
     age = time.time() - _hist_cache_ts
-    if _hist_cache and age < 30:
-        # Serve from cache instantly
-        return JSONResponse(_hist_cache)
-    if _hist_cache:
-        # Serve stale cache NOW, refresh in background
+    if age > 15 or not _hist_cache_ts:
+        # Trigger background refresh (non-blocking)
         asyncio.get_event_loop().run_in_executor(None, _rebuild_hist_cache_sync)
-        return JSONResponse(_hist_cache)
-    # First load ever — must wait, but do it in thread pool to not block event loop
-    sessions = await asyncio.get_event_loop().run_in_executor(None, _rebuild_hist_cache_sync)
-    return JSONResponse(sessions)
+    return JSONResponse(_hist_cache)  # may be [] on very first call
 
 
 @app.get("/history/{date}")
@@ -1221,6 +1214,7 @@ async def history_get(date: str):
 @app.delete("/history/{date}")
 async def history_delete(date: str):
     """Delete the log file for a given date."""
+    global _hist_cache_ts
     from fastapi.responses import JSONResponse
     if not _is_valid_history_date(date):
         return JSONResponse({"error": "Invalid date format. Use YYYY-MM-DD."}, status_code=400)
@@ -1264,6 +1258,7 @@ def _save_chat_name(date: str, name: str) -> None:
 @app.patch("/history/{date}/name")
 async def history_rename(date: str, request: Request):
     """Set or clear a custom display name for a chat session date."""
+    global _hist_cache_ts
     from fastapi.responses import JSONResponse
     if not _is_valid_history_date(date):
         return JSONResponse({"error": "Invalid date format. Use YYYY-MM-DD."}, status_code=400)
@@ -1276,7 +1271,15 @@ async def history_rename(date: str, request: Request):
     if not log_file.exists():
         return JSONResponse({"error": "Not found"}, status_code=404)
     _save_chat_name(date, name)
+    _hist_cache_ts = 0  # invalidate cache
     return JSONResponse({"ok": True, "name": name})
+
+
+@app.get("/health")
+async def health():
+    """Quick health check — verifies server is up and event loop is free."""
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"ok": True, "sessions": len(_sessions), "ws_clients": len(_ws_clients)})
 
 
 @app.websocket("/ws")
@@ -1285,20 +1288,37 @@ async def ws_endpoint(websocket: WebSocket):
     _ws_clients.add(websocket)
     logger.info("WS client connected (total: %d)", len(_ws_clients))
 
-    # Send current state + recent history to the new client
-    fs = _focused_session()
-    await websocket.send_text(json.dumps({
-        "type": "state",
-        "sessions": _sessions_state_payload(),
-        "focused_id": _focused_id,
-        "focused_ai": fs["ai"] if fs else None,
-        "focused_cwd": fs["cwd"] if fs else _DEFAULT_CWD,
-        "focused_status": fs["status"] if fs else None,
-    }))
-    for msg in _chat_history[-50:]:
-        await websocket.send_text(json.dumps(msg))
-
     try:
+        # Send current state — wrapped in its own try so a serialization
+        # error here doesn't kill the whole connection silently.
+        try:
+            fs = _focused_session()
+            state_msg = {
+                "type": "state",
+                "sessions": _sessions_state_payload(),
+                "focused_id": _focused_id,
+                "focused_ai": fs["ai"] if fs else None,
+                "focused_cwd": fs["cwd"] if fs else _DEFAULT_CWD,
+                "focused_status": fs["status"] if fs else None,
+            }
+            await websocket.send_text(json.dumps(state_msg, default=str))
+        except Exception as init_err:
+            logger.error("WS init-state error: %s", init_err, exc_info=True)
+            # Send a minimal valid state so the client doesn't hang
+            await websocket.send_text(json.dumps({
+                "type": "state", "sessions": [], "focused_id": None,
+                "focused_ai": None, "focused_cwd": _DEFAULT_CWD,
+                "focused_status": None,
+            }))
+
+        # Replay recent chat history
+        for msg in _chat_history[-50:]:
+            try:
+                await websocket.send_text(json.dumps(msg, default=str))
+            except Exception:
+                break
+
+        # Main receive loop
         while True:
             raw = await websocket.receive_text()
             data = json.loads(raw)
@@ -1307,8 +1327,6 @@ async def ws_endpoint(websocket: WebSocket):
                 content = data.get("content", "").strip()
                 if not content:
                     continue
-                # Capture focused session NOW (before the task runs) so we route
-                # to the session the user intended, even if focus changes later.
                 _dispatch_sid = _focused_id
 
                 async def _fire_and_forward(
@@ -1317,19 +1335,16 @@ async def ws_endpoint(websocket: WebSocket):
                 ) -> None:
                     response = await _process_message(_text, source="web",
                                                       session_id=_sid)
-                    # Forward to Telegram after completion
                     await _forward_to_telegram(f"🖥️ You (web): {_text}")
                     for chunk in [response[i:i+3800]
                                   for i in range(0, len(response), 3800)]:
                         await _forward_to_telegram(chunk)
 
-                # create_task so the receive loop is never blocked by the AI run
                 asyncio.create_task(_fire_and_forward())
 
             elif data.get("type") == "command":
                 cmd = data.get("command", "")
                 if cmd == "cwd":
-                    # CWD change carries its path in the same message
                     await _change_cwd(data.get("path", ""), source="web")
                 else:
                     try:
@@ -1348,7 +1363,7 @@ async def ws_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        logger.warning("WS error: %s", e)
+        logger.error("WS error: %s", e, exc_info=True)
     finally:
         _ws_clients.discard(websocket)
         logger.info("WS client disconnected (total: %d)", len(_ws_clients))
@@ -3157,7 +3172,7 @@ header{
     <button class="sb-tab" onclick="switchSbTab('scheduled',this)">Scheduled</button>
   </div>
   <div class="sb-panel active" id="sb-panel-history">
-    <div class="sb-empty">Loading…</div>
+    <div class="sb-empty">No saved sessions yet</div>
   </div>
   <div class="sb-panel" id="sb-panel-scheduled">
     <div id="sb-sched-list"><div class="sb-empty">Loading…</div></div>
@@ -3382,10 +3397,18 @@ function escHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').r
 
 function connect(){
   const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${wsProto}://${location.host}/ws`);
-  ws.onopen = () => { document.getElementById('conn').className = 'ok'; };
-  ws.onclose = () => { document.getElementById('conn').className = ''; setTimeout(connect, 2500); };
-  ws.onerror = () => {};
+  const url = `${wsProto}://${location.host}/ws`;
+  console.log('[TaskForge] Connecting WS:', url);
+  ws = new WebSocket(url);
+  ws.onopen = () => {
+    console.log('[TaskForge] WS connected');
+    document.getElementById('conn').className = 'ok';
+    try { cmd('schedule_list'); } catch(e){ console.warn('schedule_list err', e); }
+    try { loadSbHistory(); } catch(e){ console.warn('loadSbHistory err', e); }
+    try { _sbSchedPopulateAi(); } catch(e){ console.warn('_sbSchedPopulateAi err', e); }
+  };
+  ws.onclose = (ev) => { console.warn('[TaskForge] WS closed', ev.code, ev.reason); document.getElementById('conn').className = ''; setTimeout(connect, 2500); };
+  ws.onerror = (ev) => { console.error('[TaskForge] WS error', ev); };
   ws.onmessage = e => {
     const d = JSON.parse(e.data);
     if(d.type==='message'){ _liveHistory.push(d); if(!_viewingHistory) renderMsg(d); }
@@ -3397,6 +3420,9 @@ function connect(){
 }
 
 function applyState(s){
+  // Clear "Connecting to server…" placeholder once we get real state
+  const _ph = document.querySelector('#messages .grp.system .bubble');
+  if(_ph && _ph.textContent === 'Connecting to server…') _ph.closest('.grp').remove();
   // Multi-session state format: { sessions, focused_id, focused_ai, focused_cwd, focused_status }
   // Also support legacy format: { active_ai, cwd }
   if(s.sessions !== undefined){
@@ -3735,9 +3761,7 @@ function _schedPopulateAiSelect(){
 
 // ── History modal ─────────────────────────────────────────────────────────────
 let _histSessions = [];   // full session list loaded from /history
-const AI_COLOR = {        // accent colours for session cards
-  claude:'#f59e0b', gemini:'#3b82f6', codex:'#22c55e', shell:'#6b7280'
-};
+// AI_COLOR already declared above — reuse it for session cards
 const AI_DISPLAY = {claude:'Claude Code', gemini:'Gemini', codex:'Codex', shell:'Shell'};
 
 function _fmtDate(dateStr, ts){
@@ -4002,21 +4026,36 @@ function switchSbTab(tab, btn){
   document.querySelectorAll('.sb-panel').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('sb-panel-' + tab).classList.add('active');
+  if(tab === 'history') loadSbHistory();
   if(tab === 'scheduled') cmd('schedule_list');
 }
 
 // ── Left Sidebar: History ────────────────────────────────────────────────────
+let _sbHistLoading = false;
 function loadSbHistory(){
+  if(_sbHistLoading) return;
   const el = document.getElementById('sb-panel-history');
-  // Show stale cached data instantly while refreshing in background
   if(!_sbHistSessions.length){
     el.innerHTML = '<div class="sb-empty" style="opacity:.5">Loading…</div>';
   }
+  _sbHistLoading = true;
   fetch('/history').then(r => r.json()).then(sessions => {
-    _sbHistSessions = sessions;
-    renderSbHistory(sessions);
+    _sbHistLoading = false;
+    if(sessions.length){
+      _sbHistSessions = sessions;
+      renderSbHistory(sessions);
+    } else if(!_sbHistSessions.length){
+      // Cache might still be warming — retry once after 2s
+      setTimeout(() => {
+        fetch('/history').then(r => r.json()).then(s2 => {
+          _sbHistSessions = s2;
+          renderSbHistory(s2);
+        }).catch(() => {});
+      }, 2000);
+    }
   }).catch(() => {
-    if(!_sbHistSessions.length) el.innerHTML = '<div class="sb-empty">Could not load history</div>';
+    _sbHistLoading = false;
+    if(!_sbHistSessions.length) el.innerHTML = '<div class="sb-empty">No saved sessions</div>';
   });
 }
 function renderSbHistory(sessions){
@@ -4145,9 +4184,7 @@ openSchedules = function(){
   }
 };
 
-// ── Init sidebars on load ────────────────────────────────────────────────────
-setTimeout(() => { loadSbHistory(); cmd('schedule_list'); _sbSchedPopulateAi(); }, 500);
-
+// ── Init ─────────────────────────────────────────────────────────────────────
 connect();
 loadIntegrations();
 </script>
@@ -4164,6 +4201,11 @@ async def _main():
 
     # Load AI integration plugins from integrations/ folder
     _load_integrations()
+
+    # Warm history cache in background so first /history request is instant
+    import concurrent.futures
+    _thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+    _thread_pool.submit(_rebuild_hist_cache_sync)
 
     if not BOT_TOKEN:
         logger.warning("TELEGRAM_BOT_TOKEN not set — Telegram bot disabled.")
@@ -4207,7 +4249,7 @@ async def _main():
         app,
         host=WEB_HOST,
         port=WEB_PORT,
-        log_level="warning",  # keep console clean
+        log_level="info",
     )
     server = uvicorn.Server(config)
 
