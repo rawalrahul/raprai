@@ -1,11 +1,12 @@
 """
-web_app.py — Claude Remote: Web UI + Telegram Bot in one process.
+web_app.py — TaskForge: Web UI + Telegram Bot in one process.
 
 Replaces the bare command-prompt window with a local chat UI at http://localhost:8000.
 The Telegram bot continues to work in parallel; both channels share the same state.
 """
 
 import asyncio
+import difflib
 import json
 import logging
 import os
@@ -21,6 +22,12 @@ import webbrowser
 from datetime import datetime, timedelta
 from functools import wraps
 from typing import Optional
+
+try:
+    from croniter import croniter as _Croniter
+    _CRONITER_OK = True
+except ImportError:
+    _CRONITER_OK = False
 
 import uvicorn
 from dotenv import load_dotenv
@@ -51,7 +58,7 @@ ALLOWED_USER_IDS = set(
 IDLE_TIMEOUT = float(os.environ.get("OUTPUT_IDLE_TIMEOUT", "1.5"))
 MAX_WAIT = float(os.environ.get("OUTPUT_MAX_WAIT", "60"))
 NO_OUTPUT_TIMEOUT = float(os.environ.get("OUTPUT_NO_RESPONSE", "5"))
-CLAUDE_TIMEOUT = float(os.environ.get("CLAUDE_TIMEOUT", "600"))
+CLAUDE_TIMEOUT = float(os.environ.get("CLAUDE_TIMEOUT", "0"))  # 0 = unlimited (AI tool controls its own timeout)
 _DEFAULT_CWD = os.environ.get("SESSION_CWD", os.getcwd())
 WEB_PORT = int(os.environ.get("WEB_PORT", "8000"))
 WEB_HOST = os.environ.get("WEB_HOST", "127.0.0.1")
@@ -269,11 +276,18 @@ def _make_session(ai: Optional[str]) -> dict:
     else:
         name  = f"Shell #{_session_counter}";   emoji = "🐚"; color = "#6b7280"; ai = None
     t = TerminalSession()
-    t.launch()
+    if ai is None:
+        # Shell sessions need cmd.exe immediately.
+        # AI sessions (claude / integrations) use _run_ai_popen instead — no cmd.exe needed.
+        # Launching Popen on the event-loop thread for AI sessions blocked new-session creation
+        # while another AI task was in flight; skipping it here makes creation instant.
+        t.launch()
     sess: dict = {
         "id": sid, "ai": ai, "cwd": _DEFAULT_CWD, "status": "running",
         "terminal": t, "claude_msgs": [], "name": name, "emoji": emoji,
         "color": color, "created": time.time(), "last_used": time.time(),
+        "busy": False, "task_start": None,  # progress tracking
+        "proc": None,  # running Popen object (AI subprocess), killable
     }
     _sessions[sid] = sess
     return sess
@@ -292,17 +306,17 @@ def _session_cwd() -> str:
 def _session_status_icon(sess: dict) -> str:
     if sess["status"] == "stopped":
         return "🔴"
-    ai = sess.get("ai")
-    if ai == "claude":    return "🟡"
-    if ai in _integrations: return "🟡"
-    return "🟢"  # shell
+    if sess.get("busy"):
+        return "🟡"   # actively processing a task
+    return "🟢"       # idle (running but waiting for input)
 
 
 def _sessions_state_payload() -> list[dict]:
     """Serialisable list of all sessions (no terminal objects)."""
     return [
         {"id": s["id"], "name": s["name"], "ai": s["ai"], "cwd": s["cwd"],
-         "status": s["status"], "emoji": s["emoji"], "color": s["color"]}
+         "status": s["status"], "emoji": s["emoji"], "color": s["color"],
+         "busy": s.get("busy", False)}
         for s in _sessions.values()
     ]
 
@@ -419,44 +433,79 @@ async def _push_state():
     })
 
 
-async def _push_thinking(active: bool, ai: Optional[str] = None):
-    fs = _focused_session()
-    effective_ai = ai or (fs["ai"] if fs else None)
-    await _broadcast({"type": "thinking", "active": active, "ai": effective_ai})
+async def _push_thinking(active: bool, ai: Optional[str] = None,
+                         session_id: Optional[str] = None):
+    """Broadcast thinking state.  session_id lets the client track per-session state."""
+    effective_ai = ai
+    if not effective_ai and session_id:
+        s = _sessions.get(session_id)
+        if s:
+            effective_ai = s["ai"]
+    if not effective_ai:
+        fs = _focused_session()
+        effective_ai = fs["ai"] if fs else None
+    await _broadcast({
+        "type": "thinking",
+        "active": active,
+        "ai": effective_ai,
+        "session_id": session_id,
+    })
 
 
 # ---------------------------------------------------------------------------
 # AI runner
 # ---------------------------------------------------------------------------
 
-def _run_ai_print(cmd: list[str], cwd: str, name: str) -> str:
+def _run_ai_popen(cmd: list[str], cwd: str, name: str, sess: dict) -> str:
+    """Run an AI CLI subprocess, storing the Popen handle in sess['proc'] so it
+    can be killed externally by stop_session / interrupt handlers.
+    CLAUDE_TIMEOUT == 0 means unlimited.
+    """
+    _timeout = CLAUDE_TIMEOUT if CLAUDE_TIMEOUT > 0 else None
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
             cwd=cwd,
-            timeout=CLAUDE_TIMEOUT,
         )
-        stdout = result.stdout.strip()
-        stderr = result.stderr.strip()
+        sess["proc"] = proc  # store so stop/interrupt can kill it
+        try:
+            stdout, stderr = proc.communicate(timeout=_timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            sess["proc"] = None
+            return f"(timed out after {int(_timeout)}s — use /timeout 0 for unlimited)"
+        finally:
+            sess["proc"] = None  # clear after natural completion
 
-        if result.returncode != 0:
-            # Combine stdout + stderr so nothing is hidden
+        stdout = stdout.strip()
+        stderr = stderr.strip()
+
+        if proc.returncode != 0:
             parts = [p for p in [stdout, stderr] if p]
-            output = "\n".join(parts) if parts else f"({name} exited {result.returncode})"
-        else:
-            output = stdout or "(no output)"
+            return "\n".join(parts) if parts else f"({name} exited {proc.returncode})"
+        return stdout or "(no output)"
 
-        return output
     except FileNotFoundError:
         return f"Error: '{cmd[0]}' not found in PATH."
-    except subprocess.TimeoutExpired:
-        return f"(timed out after {CLAUDE_TIMEOUT}s)"
     except Exception as e:
         return f"(error: {e})"
+
+
+def _kill_session_proc(sess: dict) -> None:
+    """Kill the running AI subprocess for a session (if any). Safe to call always."""
+    proc = sess.get("proc")
+    if proc is not None:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        sess["proc"] = None
 
 
 def _build_claude_cmd(prompt: str, has_history: bool) -> list[str]:
@@ -486,49 +535,61 @@ async def _process_message(text: str, source: str = "web",
         return msg
 
     sess["last_used"] = time.time()
+    sess["busy"]       = True
+    sess["task_start"] = time.time()
+    await _push_state()  # immediately reflect 🟡 busy status on web UI and Telegram
+
     ai       = sess["ai"]
     cwd      = sess["cwd"]
     terminal = sess["terminal"]
 
     await _push_message("user", text, ai=None, source=source, session_id=sid)
 
-    if ai == "claude":
-        await _push_thinking(True, "claude")
-        has_history = len(sess["claude_msgs"]) > 0
-        cmd = _build_claude_cmd(text, has_history)
-        sess["claude_msgs"].append(text)
-        before = await asyncio.to_thread(_snapshot_dir, cwd)
-        output = await asyncio.to_thread(_run_ai_print, cmd, cwd, "claude")
-        after  = await asyncio.to_thread(_snapshot_dir, cwd)
-        await _push_thinking(False)
-        await _push_message("assistant", output, ai="claude", source=source, session_id=sid)
-        await _handle_new_files(before, after, source)
-        return output
+    output = ""  # safe default — overwritten in every branch below
+    try:
+        if ai == "claude":
+            await _push_thinking(True, "claude", session_id=sid)
+            has_history = len(sess["claude_msgs"]) > 0
+            cmd = _build_claude_cmd(text, has_history)
+            sess["claude_msgs"].append(text)
+            before = await asyncio.to_thread(_snapshot_dir, cwd)
+            output = await asyncio.to_thread(_run_ai_popen, cmd, cwd, "claude", sess)
+            after  = await asyncio.to_thread(_snapshot_dir, cwd)
+            await _push_thinking(False, session_id=sid)
+            await _push_message("assistant", output, ai="claude", source=source, session_id=sid)
+            await _handle_diff(before, after, source, cwd)
 
-    if ai in _integrations:
-        await _push_thinking(True, ai)
-        cmd    = _integrations[ai]["build_command"](text)
-        before = await asyncio.to_thread(_snapshot_dir, cwd)
-        output = await asyncio.to_thread(_run_ai_print, cmd, cwd, ai)
-        after  = await asyncio.to_thread(_snapshot_dir, cwd)
-        await _push_thinking(False)
-        await _push_message("assistant", output, ai=ai, source=source, session_id=sid)
-        await _handle_new_files(before, after, source)
-        return output
+        elif ai in _integrations:
+            await _push_thinking(True, ai, session_id=sid)
+            cmd    = _integrations[ai]["build_command"](text)
+            before = await asyncio.to_thread(_snapshot_dir, cwd)
+            output = await asyncio.to_thread(_run_ai_popen, cmd, cwd, ai, sess)
+            after  = await asyncio.to_thread(_snapshot_dir, cwd)
+            await _push_thinking(False, session_id=sid)
+            await _push_message("assistant", output, ai=ai, source=source, session_id=sid)
+            await _handle_diff(before, after, source, cwd)
 
-    # Shell mode
-    if not terminal.is_alive():
-        msg = "Terminal stopped. Stop and restart this session."
-        await _push_message("system", msg, source=source, session_id=sid)
-        return msg
+        else:
+            # Shell mode
+            if not terminal.is_alive():
+                output = "Terminal stopped. Stop and restart this session."
+                await _push_message("system", output, source=source, session_id=sid)
+            else:
+                before = await asyncio.to_thread(_snapshot_dir, cwd)
+                terminal.write(text)
+                output = await asyncio.to_thread(terminal.drain)
+                after  = await asyncio.to_thread(_snapshot_dir, cwd)
+                output = output or "(no output)"
+                await _push_message("assistant", output, ai="shell", source=source, session_id=sid)
+                await _handle_diff(before, after, source, cwd)
 
-    before = await asyncio.to_thread(_snapshot_dir, cwd)
-    terminal.write(text)
-    output = await asyncio.to_thread(terminal.drain)
-    after  = await asyncio.to_thread(_snapshot_dir, cwd)
-    output = output or "(no output)"
-    await _push_message("assistant", output, ai="shell", source=source, session_id=sid)
-    await _handle_new_files(before, after, source)
+    finally:
+        elapsed            = time.time() - sess["task_start"]
+        sess["busy"]       = False
+        sess["task_start"] = None
+        await _push_state()  # flip session back to 🟢 idle
+        await _tg_progress_notify(sess, output, elapsed, source)
+
     return output
 
 
@@ -539,6 +600,59 @@ async def _forward_to_telegram(text: str):
             await _telegram_app.bot.send_message(chat_id=_telegram_chat_id, text=text)
         except Exception as e:
             logger.warning("Telegram forward failed: %s", e)
+
+
+async def _tg_progress_notify(sess: dict, output: str, elapsed: float, source: str) -> None:
+    """Send a compact Telegram ping when a session finishes a task.
+
+    Fires when:
+    - Multiple sessions are currently running (parallel work) — every completion
+      gets a timestamped ping so you can track which session finished when.
+    - The task was triggered from the web UI (source=="web") — so you get a phone
+      notification even when away from the browser.
+
+    Skipped for single-session Telegram use — the normal reply is sufficient.
+    """
+    if not (_telegram_app and _telegram_chat_id):
+        return
+
+    running = [s for s in _sessions.values() if s["status"] == "running"]
+    multi   = len(running) >= 2
+    web_src = source == "web"
+
+    if not multi and not web_src:
+        return  # single session via Telegram — reply already serves as notification
+
+    # Format elapsed time
+    if elapsed < 60:
+        elapsed_str = f"{elapsed:.0f}s"
+    elif elapsed < 3600:
+        elapsed_str = f"{elapsed/60:.1f}m"
+    else:
+        elapsed_str = f"{elapsed/3600:.1f}h"
+
+    # Truncate output preview to one readable line
+    preview = " ".join(output.strip().splitlines()[:3])
+    if len(preview) > 300:
+        preview = preview[:297] + "…"
+
+    lines = [f"✅ {sess['emoji']} *{sess['name']}* — {elapsed_str}"]
+    if preview:
+        lines.append(preview)
+
+    # Check if all running sessions are now idle (busy == False)
+    still_busy = [s for s in running if s.get("busy")]
+    if not still_busy and multi:
+        lines.append(f"\n🏁 All {len(running)} sessions idle")
+
+    try:
+        await _telegram_app.bot.send_message(
+            chat_id=_telegram_chat_id,
+            text="\n".join(lines),
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        logger.warning("Progress notify failed: %s", e)
 
 
 async def _change_cwd(new_path: str, source: str = "web",
@@ -597,29 +711,73 @@ _SKIP_DIRS = frozenset({
 })
 
 
-def _snapshot_dir(cwd: str) -> set[str]:
-    """Return a set of absolute file paths in cwd, scanning up to 2 levels deep.
+def _snapshot_dir(cwd: str) -> dict[str, tuple[int, float]]:
+    """Return {abs_path: (size_bytes, mtime)} for files in cwd (2 levels deep).
 
-    Goes one level into newly-created subdirectories so files created inside
-    a new folder (e.g. an HTML output directory) are still detected.
+    Goes one level into subdirectories so files created inside a new folder
+    (e.g. an HTML output dir) are still detected.
     Skips common large/build directories to stay fast.
     """
-    result: set[str] = set()
+    result: dict[str, tuple[int, float]] = {}
     try:
         base = pathlib.Path(cwd)
         for entry in base.iterdir():
             if entry.is_file():
-                result.add(str(entry))
+                try:
+                    st = entry.stat()
+                    result[str(entry)] = (st.st_size, st.st_mtime)
+                except Exception:
+                    pass
             elif entry.is_dir() and entry.name not in _SKIP_DIRS:
                 try:
                     for child in entry.iterdir():
                         if child.is_file():
-                            result.add(str(child))
+                            try:
+                                st = child.stat()
+                                result[str(child)] = (st.st_size, st.st_mtime)
+                            except Exception:
+                                pass
                 except Exception:
                     pass
     except Exception:
         pass
     return result
+
+
+def _diff_snapshots(before: dict, after: dict) -> dict:
+    """Compare two snapshots; return {new, modified, deleted} path lists."""
+    b = set(before)
+    a = set(after)
+    return {
+        "new":      sorted(a - b),
+        "modified": sorted(p for p in b & a if before[p] != after[p]),
+        "deleted":  sorted(b - a),
+    }
+
+
+def _git_diff_stat(cwd: str) -> Optional[str]:
+    """Run `git diff --stat` in cwd. Returns None if not a git repo or no diff."""
+    try:
+        r = subprocess.run(
+            ["git", "diff", "--stat"],
+            cwd=cwd, capture_output=True, text=True, timeout=10,
+        )
+        out = r.stdout.strip()
+        return out if out else None
+    except Exception:
+        return None
+
+
+def _git_is_repo(cwd: str) -> bool:
+    """Return True if cwd is inside a git repository."""
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=cwd, capture_output=True, text=True, timeout=5,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
 
 
 async def _send_file_to_telegram(filepath: str, source: str = "web"):
@@ -665,33 +823,212 @@ async def _send_file_to_telegram(filepath: str, source: str = "web"):
         logger.warning("Could not send %s to Telegram: %s", path.name, e)
 
 
-async def _handle_new_files(before: set[str], after: set[str], source: str):
-    """Diff snapshots, notify in web chat, and forward each new file to Telegram."""
-    new_files = sorted(after - before)
-    for filepath in new_files:
+async def _handle_diff(before: dict, after: dict, source: str, cwd: str):
+    """Diff snapshots → notify web chat + Telegram about new, modified, deleted files."""
+    diff = _diff_snapshots(before, after)
+
+    # ── New files ─────────────────────────────────────────────────────────────
+    for filepath in diff["new"]:
         path = pathlib.Path(filepath)
         ext  = path.suffix.lower()
         if ext not in _ALL_SENDABLE:
             continue
-
         local_url = f"http://localhost:{WEB_PORT}/files/{path.name}"
-        size_kb   = path.stat().st_size // 1024
-
-        # Notify in web chat
+        try:
+            size_kb = path.stat().st_size // 1024
+        except Exception:
+            size_kb = 0
         await _push_message(
             "system",
             f"📎 New file: {path.name} ({size_kb} KB)  →  {local_url}",
             source=source,
         )
-        # Send to Telegram
         await _send_file_to_telegram(filepath, source)
+
+    # ── Modified files ────────────────────────────────────────────────────────
+    if diff["modified"]:
+        # Prefer git diff --stat (shows insertions/deletions per file)
+        git_stat = await asyncio.to_thread(_git_diff_stat, cwd) if _git_is_repo(cwd) else None
+        if git_stat:
+            summary = f"📝 Changes:\n```\n{git_stat[:1400]}\n```"
+        else:
+            lines = [f"📝 Modified {len(diff['modified'])} file(s):"]
+            for fp in diff["modified"][:12]:
+                p = pathlib.Path(fp)
+                old_sz, _ = before[fp]
+                new_sz, _ = after[fp]
+                delta     = new_sz - old_sz
+                lines.append(f"  ✏️ {p.name}  ({delta:+,} B)")
+            if len(diff["modified"]) > 12:
+                lines.append(f"  … and {len(diff['modified']) - 12} more")
+            summary = "\n".join(lines)
+
+        await _push_message("system", summary, source=source)
+
+        if _telegram_app and _telegram_chat_id:
+            tg_text = git_stat or "\n".join(
+                f"✏️ {pathlib.Path(fp).name}" for fp in diff["modified"][:10]
+            )
+            try:
+                await _telegram_app.bot.send_message(
+                    chat_id=_telegram_chat_id,
+                    text=f"📝 *Changes:*\n```\n{tg_text[:1400]}\n```",
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                logger.warning("Diff Telegram notify failed: %s", e)
+
+    # ── Deleted files ─────────────────────────────────────────────────────────
+    if diff["deleted"]:
+        names = ", ".join(pathlib.Path(fp).name for fp in diff["deleted"][:6])
+        if len(diff["deleted"]) > 6:
+            names += f" +{len(diff['deleted']) - 6} more"
+        await _push_message("system", f"🗑️ Deleted: {names}", source=source)
+
+
+# Keep old name as alias so any external callers don't break
+async def _handle_new_files(before, after, source: str):
+    cwd = _session_cwd()
+    # Support both old set[str] and new dict[str, tuple] snapshots
+    if isinstance(before, set):
+        before = {p: (0, 0.0) for p in before}
+        after  = {p: (0, 0.0) for p in after}
+    await _handle_diff(before, after, source, cwd)
+
+
+# ---------------------------------------------------------------------------
+# Scheduled / cron AI tasks
+# ---------------------------------------------------------------------------
+
+_scheduled_tasks: dict[str, dict] = {}
+_sched_counter: int = 0
+_SCHED_FILE = CHAT_LOG_DIR / "scheduled_tasks.json"
+
+
+def _next_cron_run(cron_expr: str) -> Optional[float]:
+    """Return the next fire time (Unix timestamp) for cron_expr, or None on error."""
+    if not _CRONITER_OK:
+        return None
+    try:
+        return _Croniter(cron_expr, datetime.now()).get_next(float)
+    except Exception:
+        return None
+
+
+def _make_sched_task(cron: str, ai: Optional[str], prompt: str,
+                     cwd: Optional[str] = None, name: Optional[str] = None) -> dict:
+    global _sched_counter
+    _sched_counter += 1
+    tid = f"t{_sched_counter}"
+    return {
+        "id":        tid,
+        "name":      name or f"Task #{_sched_counter}",
+        "ai":        ai,
+        "cwd":       cwd or _DEFAULT_CWD,
+        "prompt":    prompt,
+        "cron":      cron,
+        "enabled":   True,
+        "next_run":  _next_cron_run(cron),
+        "last_run":  None,
+        "run_count": 0,
+        "created":   time.time(),
+    }
+
+
+def _load_scheduled_tasks() -> None:
+    global _scheduled_tasks, _sched_counter
+    try:
+        if _SCHED_FILE.exists():
+            data = json.loads(_SCHED_FILE.read_text(encoding="utf-8"))
+            _scheduled_tasks = data.get("tasks", {})
+            _sched_counter   = data.get("counter", 0)
+            # Recompute next_run so they're correct after a restart
+            for task in _scheduled_tasks.values():
+                if task.get("enabled") and task.get("cron"):
+                    task["next_run"] = _next_cron_run(task["cron"])
+    except Exception as e:
+        logger.warning("Could not load scheduled tasks: %s", e)
+
+
+def _save_scheduled_tasks() -> None:
+    try:
+        CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        with _SCHED_FILE.open("w", encoding="utf-8") as f:
+            json.dump({"tasks": _scheduled_tasks, "counter": _sched_counter},
+                      f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.warning("Could not save scheduled tasks: %s", e)
+
+
+async def _run_scheduled_task(task: dict) -> None:
+    """Execute one scheduled task in a temporary session and report via Telegram."""
+    logger.info("Running scheduled task %s: %s", task["id"], task["name"])
+
+    sess = _make_session(task["ai"])
+    if task.get("cwd"):
+        sess["cwd"] = task["cwd"]
+
+    # Announce start
+    announce = f"⏰ *{task['name']}* starting…"
+    await _push_message("system", announce, source="schedule", session_id=sess["id"])
+    if _telegram_app and _telegram_chat_id:
+        try:
+            await _telegram_app.bot.send_message(
+                chat_id=_telegram_chat_id, text=announce, parse_mode="Markdown"
+            )
+        except Exception:
+            pass
+
+    # Run the prompt (reuses all session machinery incl. progress notify)
+    await _process_message(task["prompt"], source="schedule", session_id=sess["id"])
+
+    task["run_count"] = task.get("run_count", 0) + 1
+    task["last_run"]  = time.time()
+    _save_scheduled_tasks()
+
+    # Clean up ephemeral session
+    sess["terminal"].stop()
+    if sess["id"] in _sessions:
+        del _sessions[sess["id"]]
+    # Re-focus whatever was focused before (if anything)
+    await _push_state()
+
+
+async def _cron_runner() -> None:
+    """Background loop: fires scheduled tasks when they're due (checks every 30 s)."""
+    while True:
+        await asyncio.sleep(30)
+        now = time.time()
+        for task in list(_scheduled_tasks.values()):
+            if not task.get("enabled"):
+                continue
+            nxt = task.get("next_run")
+            if nxt and now >= nxt:
+                # Advance to next occurrence BEFORE launching so a slow task
+                # can't double-fire on the next 30-second tick.
+                task["next_run"] = _next_cron_run(task["cron"])
+                task["last_run"] = now
+                _save_scheduled_tasks()
+                asyncio.create_task(_run_scheduled_task(task))
+
+
+def _sched_tasks_payload() -> list[dict]:
+    """JSON-safe list of scheduled tasks for the web UI."""
+    out = []
+    for t in _scheduled_tasks.values():
+        nr = datetime.fromtimestamp(t["next_run"]).strftime("%Y-%m-%d %H:%M") if t.get("next_run") else "—"
+        lr = datetime.fromtimestamp(t["last_run"]).strftime("%Y-%m-%d %H:%M") if t.get("last_run") else "never"
+        out.append({**{k: v for k, v in t.items() if k not in ("next_run","last_run")},
+                    "next_run_fmt": nr, "last_run_fmt": lr,
+                    "next_run": t.get("next_run"), "last_run": t.get("last_run")})
+    return out
 
 
 # ---------------------------------------------------------------------------
 # FastAPI app + WebSocket
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="Claude Remote")
+app = FastAPI(title="TaskForge")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -771,23 +1108,87 @@ async def list_integrations_endpoint():
     ])
 
 
+# ── History cache — serves instantly, refreshes in background ─────────────────
+_hist_cache: list = []       # cached session metadata list
+_hist_cache_ts: float = 0.0  # last refresh timestamp
+
+
+def _scan_log_fast(log_file: pathlib.Path) -> dict:
+    """Read only the last 4 KB of a log file to extract metadata quickly."""
+    date_str = log_file.stem
+    try:
+        size = log_file.stat().st_size
+        mtime = log_file.stat().st_mtime
+        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            if size > 4096:
+                f.seek(size - 4096)
+                f.readline()  # discard partial line
+            tail_lines = f.readlines()
+        preview = ""
+        last_ai = ""
+        last_ts: Optional[float] = None
+        count_tail = 0
+        for line in tail_lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            if rec.get("type") == "message":
+                count_tail += 1
+                if rec.get("role") == "assistant":
+                    txt = rec.get("content", "")
+                    if txt:
+                        preview = txt[:100].replace("\n", " ")
+                if rec.get("ai"):
+                    last_ai = rec["ai"]
+                if rec.get("ts"):
+                    last_ts = rec["ts"]
+        return {
+            "date": date_str, "count": count_tail if size <= 4096 else max(1, size // 200),
+            "name": "", "preview": preview, "ai": last_ai,
+            "ts": last_ts, "mtime": mtime,
+        }
+    except Exception:
+        return {"date": date_str, "count": 0, "name": "", "preview": "", "ai": "", "ts": None, "mtime": 0}
+
+
+def _rebuild_hist_cache_sync() -> list:
+    """Synchronous cache rebuild — run in thread pool."""
+    global _hist_cache, _hist_cache_ts
+    if not CHAT_LOG_DIR.exists():
+        _hist_cache = []
+        _hist_cache_ts = time.time()
+        return _hist_cache
+    log_files = list(CHAT_LOG_DIR.glob("*.jsonl"))
+    sessions = [_scan_log_fast(f) for f in log_files]
+    sessions.sort(key=lambda s: s.get("mtime", 0), reverse=True)
+    names = _load_chat_names()
+    for s in sessions:
+        s["name"] = names.get(s["date"], "")
+        s.pop("mtime", None)
+    _hist_cache = sessions
+    _hist_cache_ts = time.time()
+    return sessions
+
+
 @app.get("/history")
 async def history_list():
-    """Return list of saved chat log sessions (date + message count), newest first."""
+    """Return cached session list instantly. Refreshes in background if stale."""
     from fastapi.responses import JSONResponse
-    names = _load_chat_names()
-    sessions = []
-    if CHAT_LOG_DIR.exists():
-        for log_file in sorted(CHAT_LOG_DIR.glob("*.jsonl"), reverse=True):
-            date_str = log_file.stem
-            try:
-                count = sum(
-                    1 for line in log_file.read_text(encoding="utf-8").splitlines()
-                    if line.strip() and '"type": "message"' in line
-                )
-            except Exception:
-                count = 0
-            sessions.append({"date": date_str, "count": count, "name": names.get(date_str, "")})
+    global _hist_cache, _hist_cache_ts
+    age = time.time() - _hist_cache_ts
+    if _hist_cache and age < 30:
+        # Serve from cache instantly
+        return JSONResponse(_hist_cache)
+    if _hist_cache:
+        # Serve stale cache NOW, refresh in background
+        asyncio.get_event_loop().run_in_executor(None, _rebuild_hist_cache_sync)
+        return JSONResponse(_hist_cache)
+    # First load ever — must wait, but do it in thread pool to not block event loop
+    sessions = await asyncio.get_event_loop().run_in_executor(None, _rebuild_hist_cache_sync)
     return JSONResponse(sessions)
 
 
@@ -829,6 +1230,7 @@ async def history_delete(date: str):
     try:
         log_file.unlink()
         _save_chat_name(date, "")  # remove custom name entry if any
+        _hist_cache_ts = 0  # invalidate cache
         return JSONResponse({"ok": True})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -858,6 +1260,7 @@ def _save_chat_name(date: str, name: str) -> None:
     names_file.write_text(json.dumps(names, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+@app.post("/history/{date}/rename")
 @app.patch("/history/{date}/name")
 async def history_rename(date: str, request: Request):
     """Set or clear a custom display name for a chat session date."""
@@ -904,11 +1307,24 @@ async def ws_endpoint(websocket: WebSocket):
                 content = data.get("content", "").strip()
                 if not content:
                     continue
-                response = await _process_message(content, source="web")
-                # Forward to Telegram: prompt first (for context), then the response
-                await _forward_to_telegram(f"🖥️ You (web): {content}")
-                for chunk in [response[i:i+3800] for i in range(0, len(response), 3800)]:
-                    await _forward_to_telegram(chunk)
+                # Capture focused session NOW (before the task runs) so we route
+                # to the session the user intended, even if focus changes later.
+                _dispatch_sid = _focused_id
+
+                async def _fire_and_forward(
+                    _text: str = content,
+                    _sid: str = _dispatch_sid,
+                ) -> None:
+                    response = await _process_message(_text, source="web",
+                                                      session_id=_sid)
+                    # Forward to Telegram after completion
+                    await _forward_to_telegram(f"🖥️ You (web): {_text}")
+                    for chunk in [response[i:i+3800]
+                                  for i in range(0, len(response), 3800)]:
+                        await _forward_to_telegram(chunk)
+
+                # create_task so the receive loop is never blocked by the AI run
+                asyncio.create_task(_fire_and_forward())
 
             elif data.get("type") == "command":
                 cmd = data.get("command", "")
@@ -916,7 +1332,18 @@ async def ws_endpoint(websocket: WebSocket):
                     # CWD change carries its path in the same message
                     await _change_cwd(data.get("path", ""), source="web")
                 else:
-                    await _handle_web_command(cmd, websocket)
+                    try:
+                        await _handle_web_command(cmd, websocket)
+                    except Exception as _cmd_err:
+                        logger.warning("Command error (%s): %s", cmd, _cmd_err)
+                        try:
+                            await websocket.send_text(json.dumps({
+                                "type": "message", "role": "system",
+                                "content": f"⚠️ Command failed: {_cmd_err}",
+                                "source": "web", "timestamp": _ts(),
+                            }))
+                        except Exception:
+                            pass
 
     except WebSocketDisconnect:
         pass
@@ -956,8 +1383,12 @@ async def _handle_web_command(command: str, ws: WebSocket):
     if command == "stop_session":
         sess = _focused_session()
         if sess:
+            _kill_session_proc(sess)          # kill AI subprocess immediately
             sess["terminal"].stop()
             sess["status"] = "stopped"
+            sess["busy"]      = False
+            sess["task_start"] = None
+            await _push_thinking(False, session_id=sess["id"])  # clear spinner NOW
             await _push_state()
             await _push_message("system", f"Session stopped: {sess['name']}", source="web",
                                 session_id=sess["id"])
@@ -983,6 +1414,9 @@ async def _handle_web_command(command: str, ws: WebSocket):
             ai_key = command.split(":", 1)[1].strip()
             if ai_key == "shell":
                 ai_key = None
+                # AI sessions skip cmd.exe at creation; launch it now on first shell switch
+                if not sess["terminal"].is_alive():
+                    await asyncio.to_thread(sess["terminal"].launch)
             sess["ai"] = ai_key
             sess["claude_msgs"] = []
             if ai_key == "claude":
@@ -1003,9 +1437,20 @@ async def _handle_web_command(command: str, ws: WebSocket):
         sess = _focused_session()
         if sess:
             try:
-                sess["terminal"].send_interrupt()
-                await _push_message("system", "Ctrl+C sent.", source="web",
-                                    session_id=sess["id"])
+                if sess["ai"]:
+                    # AI session — kill the subprocess directly (more reliable than Ctrl+C)
+                    _kill_session_proc(sess)
+                    sess["busy"]       = False
+                    sess["task_start"] = None
+                    await _push_thinking(False, session_id=sess["id"])  # clear spinner NOW
+                    await _push_state()
+                    await _push_message("system", "⏸ Task cancelled.", source="web",
+                                        session_id=sess["id"])
+                else:
+                    # Shell session — send Ctrl+C to the terminal
+                    sess["terminal"].send_interrupt()
+                    await _push_message("system", "Ctrl+C sent.", source="web",
+                                        session_id=sess["id"])
             except RuntimeError as e:
                 await _push_message("system", str(e), source="web")
         return
@@ -1017,6 +1462,74 @@ async def _handle_web_command(command: str, ws: WebSocket):
             sess["claude_msgs"] = []
             await _push_message("system", "Claude conversation history cleared.", source="web",
                                 session_id=sess["id"])
+        return
+
+    # ── schedule_list — return scheduled tasks to web UI ─────────────────────
+    if command == "schedule_list":
+        await ws.send_text(json.dumps({
+            "type":  "schedule_list",
+            "tasks": _sched_tasks_payload(),
+        }))
+        return
+
+    # ── schedule_add:<cron>|<ai>|<prompt> ────────────────────────────────────
+    if command.startswith("schedule_add:"):
+        parts = command[len("schedule_add:"):].split("|", 2)
+        if len(parts) < 3:
+            await _push_message("system", "❌ Invalid schedule_add format.", source="web")
+            return
+        cron_expr, ai_key, prompt = parts[0].strip(), parts[1].strip() or None, parts[2].strip()
+        if not prompt:
+            await _push_message("system", "❌ Prompt cannot be empty.", source="web")
+            return
+        if _next_cron_run(cron_expr) is None:
+            await _push_message("system",
+                f"❌ Invalid cron expression: {cron_expr}  (needs 5 fields, e.g. 0 9 * * *)",
+                source="web")
+            return
+        if ai_key not in ("claude", None, "", *_integrations):
+            ai_key = None
+        task = _make_sched_task(cron_expr, ai_key or None, prompt,
+                                cwd=_session_cwd())
+        _scheduled_tasks[task["id"]] = task
+        _save_scheduled_tasks()
+        nr = datetime.fromtimestamp(task["next_run"]).strftime("%Y-%m-%d %H:%M") \
+             if task.get("next_run") else "?"
+        await _push_message("system",
+            f"⏰ Scheduled *{task['name']}* (`{task['id']}`)\n"
+            f"`{cron_expr}` · {ai_key or 'shell'} · next: {nr}",
+            source="web")
+        await ws.send_text(json.dumps({"type": "schedule_list", "tasks": _sched_tasks_payload()}))
+        return
+
+    # ── schedule_delete:<id> ──────────────────────────────────────────────────
+    if command.startswith("schedule_delete:"):
+        tid = command[len("schedule_delete:"):].strip()
+        if tid in _scheduled_tasks:
+            name = _scheduled_tasks[tid]["name"]
+            del _scheduled_tasks[tid]
+            _save_scheduled_tasks()
+            await _push_message("system", f"🗑️ Deleted scheduled task: {name}", source="web")
+        await ws.send_text(json.dumps({"type": "schedule_list", "tasks": _sched_tasks_payload()}))
+        return
+
+    # ── schedule_toggle:<id> ──────────────────────────────────────────────────
+    if command.startswith("schedule_toggle:"):
+        tid = command[len("schedule_toggle:"):].strip()
+        if tid in _scheduled_tasks:
+            task = _scheduled_tasks[tid]
+            task["enabled"] = not task["enabled"]
+            if task["enabled"]:
+                task["next_run"] = _next_cron_run(task["cron"])
+            _save_scheduled_tasks()
+        await ws.send_text(json.dumps({"type": "schedule_list", "tasks": _sched_tasks_payload()}))
+        return
+
+    # ── schedule_run:<id> — manual trigger ────────────────────────────────────
+    if command.startswith("schedule_run:"):
+        tid = command[len("schedule_run:"):].strip()
+        if tid in _scheduled_tasks:
+            asyncio.create_task(_run_scheduled_task(_scheduled_tasks[tid]))
         return
 
 
@@ -1123,11 +1636,10 @@ def _session_controls_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("🔀 Switch AI",     callback_data="ms:switch"),
-            InlineKeyboardButton("⏸ Interrupt",      callback_data="ms:interrupt"),
+            InlineKeyboardButton("⏸ Cancel Task",    callback_data="ms:interrupt"),
         ],
         [
-            InlineKeyboardButton("⏹ Stop Session",  callback_data="ms:stop"),
-            InlineKeyboardButton("🗑 End & Delete",  callback_data="ms:delete"),
+            InlineKeyboardButton("🗑 Delete Session", callback_data="ms:delete"),
         ],
     ])
 
@@ -1164,7 +1676,7 @@ async def tg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Welcome message — show session list or prompt to create first session."""
     if _sessions:
         await update.message.reply_text(
-            "👋 *Claude Remote* — Multi-Session Mode\n\n"
+            "👋 *TaskForge* — Multi-Session Mode\n\n"
             "Tap a session to focus it, or create a new one.\n"
             f"Web UI: http://localhost:{WEB_PORT}",
             parse_mode="Markdown",
@@ -1172,7 +1684,7 @@ async def tg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         await update.message.reply_text(
-            "👋 *Claude Remote* — Multi-Session Mode\n\n"
+            "👋 *TaskForge* — Multi-Session Mode\n\n"
             "No sessions yet. Create your first session:\n"
             f"Web UI: http://localhost:{WEB_PORT}",
             parse_mode="Markdown",
@@ -1187,7 +1699,7 @@ async def tg_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if fs:
         ai_label = fs["emoji"] + " " + (fs["ai"] or "Shell")
         await update.message.reply_text(
-            f"*Claude Remote — {fs['name']}*\n"
+            f"*TaskForge — {fs['name']}*\n"
             f"AI: {ai_label}  ·  Status: {fs['status']}\n"
             f"📁 `{fs['cwd']}`",
             parse_mode="Markdown",
@@ -1195,7 +1707,7 @@ async def tg_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         await update.message.reply_text(
-            "*Claude Remote — Sessions*\nNo session focused. Pick one:",
+            "*TaskForge — Sessions*\nNo session focused. Pick one:",
             parse_mode="Markdown",
             reply_markup=_sessions_keyboard(),
         )
@@ -1325,7 +1837,8 @@ async def tg_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         focused = " ← focused" if sess["id"] == _focused_id else ""
         lines.append(f"{icon} *{sess['name']}* [{sess['ai'] or 'shell'}]{focused}\n"
                      f"  📁 {sess['cwd']}")
-    lines.append(f"\n⏱ Timeout: {int(CLAUDE_TIMEOUT)}s")
+    timeout_label = "unlimited" if CLAUDE_TIMEOUT == 0 else f"{int(CLAUDE_TIMEOUT)}s"
+    lines.append(f"\n⏱ Timeout: {timeout_label}")
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown",
                                     reply_markup=_sessions_keyboard())
 
@@ -1337,10 +1850,23 @@ async def tg_interrupt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No session focused.")
         return
     try:
-        sess["terminal"].send_interrupt()
-        await _push_message("system", "Ctrl+C sent (via Telegram).", source="telegram",
-                            session_id=sess["id"])
-        await update.message.reply_text("⏸ Interrupted.", reply_markup=_session_controls_keyboard())
+        if sess["ai"]:
+            # AI session — kill the subprocess
+            _kill_session_proc(sess)
+            sess["busy"]       = False
+            sess["task_start"] = None
+            await _push_thinking(False, session_id=sess["id"])
+            await _push_state()
+            await _push_message("system", "⏹ AI task interrupted (via Telegram).",
+                                source="telegram", session_id=sess["id"])
+            await update.message.reply_text("⏹ AI task interrupted.",
+                                            reply_markup=_session_controls_keyboard())
+        else:
+            sess["terminal"].send_interrupt()
+            await _push_message("system", "Ctrl+C sent (via Telegram).", source="telegram",
+                                session_id=sess["id"])
+            await update.message.reply_text("⏸ Ctrl+C sent.",
+                                            reply_markup=_session_controls_keyboard())
     except RuntimeError as e:
         await update.message.reply_text(str(e))
 
@@ -1351,8 +1877,12 @@ async def tg_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not sess:
         await update.message.reply_text("No session focused.", reply_markup=_sessions_keyboard())
         return
+    _kill_session_proc(sess)          # kill AI subprocess immediately
     sess["terminal"].stop()
-    sess["status"] = "stopped"
+    sess["status"]    = "stopped"
+    sess["busy"]      = False
+    sess["task_start"] = None
+    await _push_thinking(False, session_id=sess["id"])  # clear spinner on web NOW
     await _push_state()
     await _push_message("system", f"{sess['name']} stopped (via Telegram).", source="telegram",
                         session_id=sess["id"])
@@ -1380,26 +1910,142 @@ async def tg_cwd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @authorized_only
 async def tg_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Get or set the AI timeout: /timeout  or  /timeout <seconds>"""
+    """Get or set the AI timeout: /timeout  or  /timeout <seconds>  or  /timeout 0 for unlimited"""
     global CLAUDE_TIMEOUT
     arg = (update.message.text or "").partition(" ")[2].strip()
     if not arg:
+        limit_str = "unlimited (AI tool controls its own timeout)" if CLAUDE_TIMEOUT == 0 else f"{int(CLAUDE_TIMEOUT)}s"
         await update.message.reply_text(
-            f"⏱ Current AI timeout: {int(CLAUDE_TIMEOUT)}s\n"
-            f"Use /timeout <seconds> to change (e.g. /timeout 1800 for 30 min)"
+            f"⏱ Current AI timeout: {limit_str}\n"
+            f"Use /timeout <seconds> to set a hard cap, or /timeout 0 for unlimited."
         )
         return
     try:
         value = float(arg)
-        if value < 10:
-            await update.message.reply_text("❌ Minimum timeout is 10 seconds.")
+        if value < 0:
+            await update.message.reply_text("❌ Use 0 for unlimited, or a positive number of seconds.")
+            return
+        if 0 < value < 10:
+            await update.message.reply_text("❌ Minimum timeout is 10 seconds (or 0 for unlimited).")
             return
         CLAUDE_TIMEOUT = value
         _update_env("CLAUDE_TIMEOUT", str(int(value)))
-        await _push_message("system", f"⏱ AI timeout set to {int(value)}s", source="telegram")
-        await update.message.reply_text(f"⏱ Timeout updated to {int(value)}s (saved to .env)")
+        label = "unlimited" if value == 0 else f"{int(value)}s"
+        await _push_message("system", f"⏱ AI timeout set to {label}", source="telegram")
+        await update.message.reply_text(f"⏱ Timeout updated to {label} (saved to .env)")
     except ValueError:
-        await update.message.reply_text("❌ Invalid value. Use seconds, e.g. /timeout 1800")
+        await update.message.reply_text("❌ Invalid value. Use seconds (e.g. /timeout 1800) or 0 for unlimited.")
+
+
+@authorized_only
+async def tg_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/schedule [list | add <cron5> <ai> <prompt> | delete <id> | on <id> | off <id>]"""
+    text  = (update.message.text or "").strip()
+    parts = text.split(None, 2)
+    sub   = parts[1].strip().lower() if len(parts) > 1 else "list"
+    rest  = parts[2].strip() if len(parts) > 2 else ""
+
+    # ── list ─────────────────────────────────────────────────────────────────
+    if sub in ("list", "ls", "") or not sub:
+        if not _scheduled_tasks:
+            await update.message.reply_text(
+                "No scheduled tasks.\n"
+                "Add one: /schedule add 0 9 * * * claude Review git diff"
+            )
+            return
+        lines = ["*Scheduled Tasks:*"]
+        for task in _scheduled_tasks.values():
+            ico = "✅" if task["enabled"] else "⏸"
+            nr  = datetime.fromtimestamp(task["next_run"]).strftime("%m/%d %H:%M") \
+                  if task.get("next_run") else "—"
+            lines.append(
+                f"{ico} `{task['id']}` *{task['name']}*\n"
+                f"  `{task['cron']}`  ·  {task['ai'] or 'shell'}  ·  next: {nr}"
+            )
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        return
+
+    # ── add <cron5> <ai> <prompt> ─────────────────────────────────────────────
+    if sub == "add":
+        tokens = rest.split()
+        if len(tokens) < 7:
+            await update.message.reply_text(
+                "Usage: /schedule add <cron 5 fields> <ai> <prompt>\n"
+                "Example: /schedule add 0 9 * * * claude Review git diff today\n"
+                "AI options: claude  shell  (or any integration key)"
+            )
+            return
+        cron_expr = " ".join(tokens[:5])
+        ai_raw    = tokens[5]
+        prompt    = " ".join(tokens[6:])
+        ai_key    = ai_raw if ai_raw in ("claude", *_integrations) else None
+
+        if _next_cron_run(cron_expr) is None:
+            if not _CRONITER_OK:
+                await update.message.reply_text("❌ croniter not installed — run: pip install croniter")
+            else:
+                await update.message.reply_text(f"❌ Invalid cron: `{cron_expr}`", parse_mode="Markdown")
+            return
+
+        task = _make_sched_task(cron_expr, ai_key, prompt)
+        _scheduled_tasks[task["id"]] = task
+        _save_scheduled_tasks()
+        nr = datetime.fromtimestamp(task["next_run"]).strftime("%Y-%m-%d %H:%M")
+        await update.message.reply_text(
+            f"✅ Scheduled *{task['name']}* (`{task['id']}`)\n"
+            f"`{cron_expr}` · {ai_key or 'shell'}\n"
+            f"Next run: {nr}",
+            parse_mode="Markdown",
+        )
+        return
+
+    # ── delete <id> ───────────────────────────────────────────────────────────
+    if sub in ("delete", "del", "rm", "remove"):
+        tid = rest.strip()
+        if tid in _scheduled_tasks:
+            name = _scheduled_tasks[tid]["name"]
+            del _scheduled_tasks[tid]
+            _save_scheduled_tasks()
+            await update.message.reply_text(f"🗑️ Deleted: {name}")
+        else:
+            await update.message.reply_text(f"❌ Task not found: `{tid}`", parse_mode="Markdown")
+        return
+
+    # ── on / off <id> ─────────────────────────────────────────────────────────
+    if sub in ("on", "off", "enable", "disable"):
+        tid     = rest.strip()
+        enable  = sub in ("on", "enable")
+        if tid in _scheduled_tasks:
+            _scheduled_tasks[tid]["enabled"] = enable
+            if enable:
+                _scheduled_tasks[tid]["next_run"] = _next_cron_run(_scheduled_tasks[tid]["cron"])
+            _save_scheduled_tasks()
+            icon = "✅" if enable else "⏸"
+            state = "enabled" if enable else "paused"
+            await update.message.reply_text(f"{icon} Task `{tid}` {state}.", parse_mode="Markdown")
+        else:
+            await update.message.reply_text(f"❌ Task not found: `{tid}`", parse_mode="Markdown")
+        return
+
+    # ── run <id> (manual trigger) ─────────────────────────────────────────────
+    if sub in ("run", "trigger", "now"):
+        tid = rest.strip()
+        if tid in _scheduled_tasks:
+            task = _scheduled_tasks[tid]
+            await update.message.reply_text(f"▶️ Running *{task['name']}* now…", parse_mode="Markdown")
+            asyncio.create_task(_run_scheduled_task(task))
+        else:
+            await update.message.reply_text(f"❌ Task not found: `{tid}`", parse_mode="Markdown")
+        return
+
+    await update.message.reply_text(
+        "Subcommands:\n"
+        "  /schedule list\n"
+        "  /schedule add <cron5> <ai> <prompt>\n"
+        "  /schedule delete <id>\n"
+        "  /schedule on <id>  /  off <id>\n"
+        "  /schedule run <id>   ← manual trigger"
+    )
 
 
 @authorized_only
@@ -1805,8 +2451,26 @@ async def tg_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         fs = _focused_session()
         label = f"{fs['emoji']} {fs['name']}" if fs else "session"
         await update.message.reply_text(f"Thinking… [{label}]")
-    response = await _process_message(text, source="telegram")
-    await _tg_send_chunks(update, response, reply_markup=_session_controls_keyboard())
+
+    # Fire-and-forget: run the AI task in the background so the Telegram
+    # handler returns immediately and new updates (button clicks, commands,
+    # new-session requests) can be processed in parallel.
+    async def _tg_fire(
+        _text: str = text,
+        _update: Update = update,
+    ) -> None:
+        try:
+            response = await _process_message(_text, source="telegram")
+            await _tg_send_chunks(_update, response,
+                                  reply_markup=_session_controls_keyboard())
+        except Exception as exc:
+            logger.warning("tg_fire error: %s", exc)
+            try:
+                await _update.message.reply_text(f"⚠️ Error: {exc}")
+            except Exception:
+                pass
+
+    asyncio.create_task(_tg_fire())
 
 
 # ---------------------------------------------------------------------------
@@ -1861,7 +2525,9 @@ async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Restart terminal
                 sess["terminal"].stop()
                 t = TerminalSession()
-                t.launch()
+                if ai_key is None:
+                    # Only shell sessions need cmd.exe immediately
+                    t.launch()
                 sess["terminal"] = t
                 _focused_id = resume_sid
             else:
@@ -2026,7 +2692,7 @@ _HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Claude Remote</title>
+<title>TaskForge</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -2037,16 +2703,136 @@ _HTML = r"""<!DOCTYPE html>
 }
 html,body{height:100%;background:var(--bg);color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.5}
-#app{height:100vh;display:flex;flex-direction:column;max-width:820px;margin:0 auto;
-  border-left:1px solid var(--border);border-right:1px solid var(--border)}
+#app{height:100vh;display:flex;flex-direction:row;overflow:hidden}
+
+/* ── Left Sidebar ── */
+#left-sidebar{
+  width:260px;flex-shrink:0;display:flex;flex-direction:column;
+  background:var(--bg);border-right:1px solid var(--border);overflow:hidden}
+.sb-search{padding:10px 12px;flex-shrink:0;border-bottom:1px solid var(--border)}
+.sb-search input{
+  width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+  padding:7px 10px 7px 30px;font-size:12px;color:var(--text);outline:none;box-sizing:border-box;
+  font-family:inherit;transition:border-color .15s}
+.sb-search input:focus{border-color:#3a3a3a}
+.sb-search{position:relative}
+.sb-search svg{position:absolute;left:22px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--muted)}
+.sb-tabs{display:flex;flex-shrink:0;border-bottom:1px solid var(--border)}
+.sb-tab{
+  flex:1;padding:8px 0;font-size:11px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--muted);background:none;border:none;border-bottom:2px solid transparent;
+  cursor:pointer;transition:all .15s;text-align:center;font-family:inherit}
+.sb-tab:hover{color:var(--dim)}
+.sb-tab.active{color:var(--text);border-bottom-color:var(--claude)}
+.sb-panel{flex:1;overflow-y:auto;min-height:0;display:none}
+.sb-panel.active{display:block}
+.sb-panel::-webkit-scrollbar{width:4px}
+.sb-panel::-webkit-scrollbar-track{background:transparent}
+.sb-panel::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.sb-empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:12px}
+.sb-hcard{
+  padding:9px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s}
+.sb-hcard:hover{background:var(--surface2)}
+.sb-hcard-name{
+  font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;margin-bottom:2px}
+.sb-hcard-meta{font-size:10px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.sb-hcard-ai{
+  font-size:9px;padding:1px 5px;border-radius:3px;font-weight:500;
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);color:var(--muted)}
+.sb-sched-item{padding:9px 14px;border-bottom:1px solid var(--border);font-size:12px}
+.sb-sched-top{display:flex;align-items:center;gap:6px;margin-bottom:3px}
+.sb-sched-name{font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb-sched-prompt{color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px}
+.sb-sched-meta{font-size:10px;color:var(--muted);margin-bottom:5px}
+.sb-sched-btns{display:flex;gap:4px}
+.sb-sched-btns button{
+  flex:1;padding:2px;font-size:10px;background:var(--surface);border:1px solid var(--border);
+  cursor:pointer;border-radius:3px;color:var(--dim);font-family:inherit;transition:all .12s}
+.sb-sched-btns button:hover{background:var(--surface2);color:var(--text)}
+.sb-add-form{padding:10px 14px;border-top:1px solid var(--border);flex-shrink:0}
+.sb-add-form summary{cursor:pointer;font-size:11px;color:var(--muted);user-select:none}
+.sb-add-form input,.sb-add-form textarea,.sb-add-form select{
+  width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);
+  border-radius:5px;padding:5px 8px;font-size:12px;outline:none;font-family:inherit;box-sizing:border-box;
+  margin-top:6px}
+.sb-add-form textarea{resize:vertical}
+.sb-add-form input:focus,.sb-add-form textarea:focus{border-color:var(--claude)}
+.sb-add-form button.sb-add-btn{
+  margin-top:8px;padding:5px 14px;background:var(--claude);color:#000;border:none;
+  border-radius:5px;cursor:pointer;font-weight:600;font-size:12px;font-family:inherit;float:right}
+
+/* ── Center Panel ── */
+#center-panel{flex:1;display:flex;flex-direction:column;min-width:0;
+  border-right:1px solid var(--border)}
+
+/* ── Right Sidebar ── */
+#right-sidebar{
+  width:280px;flex-shrink:0;display:flex;flex-direction:column;
+  background:var(--bg);overflow:hidden}
+.rs-header{
+  padding:12px 14px;font-size:11px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--muted);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.rs-list{flex:1;overflow-y:auto;min-height:0}
+.rs-list::-webkit-scrollbar{width:4px}
+.rs-list::-webkit-scrollbar-track{background:transparent}
+.rs-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.rs-item{
+  padding:10px 14px;border-bottom:1px solid var(--border);display:flex;
+  align-items:flex-start;gap:10px;cursor:pointer;transition:background .12s}
+.rs-item:hover{background:var(--surface2)}
+.rs-item.focused{background:var(--surface2)}
+.rs-dot{
+  width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:4px;transition:background .3s}
+.rs-dot.idle{background:var(--codex)}
+.rs-dot.busy{background:var(--claude);animation:sess-pulse 1.2s ease-in-out infinite}
+.rs-dot.stopped{background:#ef4444}
+.rs-info{flex:1;min-width:0}
+.rs-name{
+  font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;margin-bottom:2px}
+.rs-meta{font-size:10px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.rs-ai-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+.rs-timer{font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:10px}
+.rs-actions{display:none;gap:4px;flex-shrink:0;margin-top:2px}
+.rs-item:hover .rs-actions{display:flex}
+.rs-act{
+  background:var(--surface);border:1px solid var(--border);color:var(--muted);
+  border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;transition:all .12s;
+  font-family:inherit}
+.rs-act:hover{background:var(--surface2);color:var(--text);border-color:#3a3a3a}
+.rs-empty{padding:32px 14px;text-align:center;color:var(--muted);font-size:12px}
+.rs-new-btn{
+  flex-shrink:0;margin:10px 14px;padding:8px;border-radius:7px;border:1px dashed var(--border);
+  background:none;color:var(--dim);font-size:12px;cursor:pointer;font-family:inherit;
+  transition:all .15s;text-align:center}
+.rs-new-btn:hover{border-color:#3a3a3a;color:var(--text);background:var(--surface)}
+
+/* ── Mobile sidebar toggles ── */
+.sb-toggle{
+  background:none;border:none;color:var(--dim);cursor:pointer;padding:5px;
+  border-radius:6px;display:none;align-items:center;transition:color .15s;line-height:1}
+.sb-toggle:hover{color:var(--text)}
+@media(max-width:900px){
+  #left-sidebar,#right-sidebar{display:none;position:fixed;top:0;height:100vh;z-index:95;
+    box-shadow:0 0 40px rgba(0,0,0,.6)}
+  #left-sidebar{left:0}
+  #right-sidebar{right:0}
+  #left-sidebar.open,#right-sidebar.open{display:flex}
+  #center-panel{border-right:none}
+  .sb-toggle{display:flex}
+  .sb-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:94}
+  .sb-overlay.open{display:block}
+}
 
 /* ── Header ── */
 header{
   padding:13px 20px;border-bottom:1px solid var(--border);
   display:flex;align-items:center;justify-content:space-between;
   background:var(--surface);flex-shrink:0}
-.logo{font-size:15px;font-weight:600;letter-spacing:-.3px;color:var(--text)}
-.logo em{color:var(--claude);font-style:normal}
+.logo{font-size:15px;font-weight:700;letter-spacing:-.3px;color:var(--text)}
+.logo em{color:#818cf8;font-style:normal}
 .header-right{display:flex;align-items:center;gap:14px}
 .icon-btn{
   background:none;border:none;color:var(--dim);cursor:pointer;
@@ -2152,7 +2938,8 @@ header{
 .ai-menu{
   display:none;position:absolute;bottom:calc(100% + 8px);left:16px;
   background:var(--surface);border:1px solid var(--border);border-radius:10px;
-  min-width:195px;z-index:50;overflow:hidden;
+  min-width:195px;z-index:50;overflow-y:auto;
+  max-height:calc(100vh - 120px);
   box-shadow:0 8px 32px rgba(0,0,0,.5)}
 .ai-menu.open{display:block}
 .ai-menu-section{
@@ -2171,6 +2958,13 @@ header{
 .menu-dot.shell{background:var(--shell)}
 .ai-menu-divider{height:1px;background:var(--border);margin:4px 0}
 .ai-menu-item.session-focused{color:var(--text)!important;background:var(--surface2)}
+.ai-menu-item.session-busy{opacity:.9}
+@keyframes sess-pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes spin{to{transform:rotate(360deg)}}
+.sess-busy-dot{
+  display:inline-block;width:6px;height:6px;border-radius:50%;
+  background:var(--accent,#f59e0b);margin-left:6px;vertical-align:middle;
+  animation:sess-pulse 1.2s ease-in-out infinite}
 .session-badge{
   font-size:10px;color:var(--muted);padding:1px 6px 1px 0;
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
@@ -2191,62 +2985,134 @@ header{
 #send:hover{opacity:.85}
 #send:disabled{opacity:.35;cursor:not-allowed}
 
-/* ── History banner ── */
+/* ── History viewing/resume banner ── */
+/* History viewing / resume banner — sits between dir-bar and messages */
 #hist-banner{
-  display:none;padding:7px 20px;background:#1a1a0d;border-bottom:1px solid #3a3a10;
-  color:#cca840;font-size:12px;align-items:center;gap:10px;flex-shrink:0}
+  display:none;align-items:center;gap:10px;flex-shrink:0;
+  padding:0 18px;height:36px;font-size:12px;
+  border-bottom:1px solid var(--border);transition:background .2s}
 #hist-banner.on{display:flex}
-#hist-banner-date{flex:1;font-weight:500}
+#hist-banner.view{background:rgba(99,102,241,.08);border-color:rgba(99,102,241,.25);color:#a5b4fc}
+#hist-banner.resume{background:rgba(34,197,94,.07);border-color:rgba(34,197,94,.25);color:var(--codex)}
+#hist-banner-icon{font-size:14px;flex-shrink:0}
+#hist-banner-date{flex:1;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hist-live-btn{
-  padding:3px 10px;border-radius:5px;border:1px solid #cca840;
-  background:transparent;color:#cca840;font-size:11px;cursor:pointer;
-  font-family:inherit;transition:all .15s}
-.hist-live-btn:hover{background:#cca840;color:#000}
+  padding:3px 11px;border-radius:5px;font-size:11px;cursor:pointer;
+  font-family:inherit;transition:all .15s;font-weight:500;flex-shrink:0;
+  background:transparent;border:1px solid currentColor;color:inherit}
+.hist-live-btn:hover{opacity:.75}
 
-/* ── History modal ── */
+/* ── Schedule modal rows ── */
+.sched-row{
+  padding:10px 16px;border-bottom:1px solid var(--border);font-size:13px}
+.sched-row:last-child{border-bottom:none}
+.sched-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px}
+.sched-prompt{color:var(--muted);font-size:12px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sched-times{color:var(--muted);font-size:11px;margin-bottom:5px}
+.sched-actions{display:flex;gap:6px}
+.sched-actions button{
+  background:var(--surface2);border:1px solid var(--border);color:var(--text);
+  border-radius:5px;padding:2px 8px;cursor:pointer;font-size:12px}
+.sched-actions button:hover{background:var(--border)}
+.sched-ai-badge{
+  font-size:10px;padding:1px 6px;border-radius:9px;background:var(--surface2);
+  border:1px solid var(--border);color:var(--muted);text-transform:uppercase}
+.sched-ai-badge.claude{background:#f59e0b22;border-color:#f59e0b55;color:#f59e0b}
+#sched-modal .modal-box{padding:0 0 16px}
+#sched-modal .modal-header{padding:14px 18px}
+#sched-modal details>summary{padding:0 16px}
+#sched-modal details>div{padding:0 16px}
+#sched-modal input,#sched-modal textarea,#sched-modal select{
+  background:var(--surface2);color:var(--text);border:1px solid var(--border);
+  border-radius:6px;padding:6px 9px;font-size:13px;outline:none}
+#sched-modal input:focus,#sched-modal textarea:focus{border-color:var(--accent,#f59e0b)}
+/* ── Shared modal chrome ── */
 .modal-overlay{
-  display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);
-  z-index:100;align-items:center;justify-content:center}
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);
+  z-index:100;align-items:center;justify-content:center;backdrop-filter:blur(2px)}
 .modal-overlay.open{display:flex}
 .modal-box{
-  background:var(--surface);border:1px solid var(--border);border-radius:12px;
-  width:min(420px,92vw);max-height:70vh;display:flex;flex-direction:column;overflow:hidden}
+  background:var(--surface);border:1px solid var(--border);border-radius:14px;
+  width:min(420px,92vw);max-height:74vh;display:flex;flex-direction:column;overflow:hidden;
+  box-shadow:0 24px 64px rgba(0,0,0,.5)}
 .modal-header{
-  padding:14px 18px;border-bottom:1px solid var(--border);
-  display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-.modal-title{font-size:14px;font-weight:600}
+  padding:15px 18px;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
+  background:var(--surface2)}
+.modal-title{font-size:14px;font-weight:700;letter-spacing:.01em}
 .modal-close{
   background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;
-  padding:0 4px;line-height:1;transition:color .15s}
-.modal-close:hover{color:var(--text)}
-.modal-body{overflow-y:auto;padding:10px 0;flex:1}
-.sess-item{
-  display:flex;align-items:center;padding:9px 18px;cursor:pointer;
-  border-bottom:1px solid var(--border);gap:10px;transition:background .12s}
-.sess-item:hover{background:var(--surface2)}
-.sess-info{flex:1;min-width:0;overflow:hidden}
-.sess-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sess-subdate{font-size:11px;color:var(--muted)}
-.sess-rename-input{
-  font-size:13px;font-weight:500;background:var(--bg);border:1px solid var(--codex);
-  border-radius:4px;padding:1px 6px;color:var(--text);font-family:inherit;
-  width:100%;box-sizing:border-box;outline:none}
-.sess-del{
-  background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;
-  padding:2px 6px;border-radius:4px;transition:color .12s}
-.sess-del:hover{color:#ef4444}
-.modal-empty{padding:24px 18px;color:var(--muted);font-size:13px;text-align:center}
-.sess-actions{
-  display:none;padding:7px 18px 10px;background:var(--surface2);
-  gap:8px;border-bottom:1px solid var(--border)}
-.sess-actions.open{display:flex}
-.sess-action-btn{
-  padding:4px 12px;border-radius:5px;border:1px solid var(--border);
+  padding:0 4px;line-height:1;transition:color .15s;border-radius:4px}
+.modal-close:hover{color:var(--text);background:var(--surface)}
+.modal-body{overflow-y:auto;padding:8px 0;flex:1}
+.modal-empty{
+  padding:48px 24px;text-align:center;color:var(--muted);font-size:13px;
+  line-height:1.7;display:flex;flex-direction:column;align-items:center;gap:8px}
+.modal-empty svg{opacity:.3;margin-bottom:4px}
+
+/* ── History search bar ── */
+.hist-search{
+  padding:10px 14px;border-bottom:1px solid var(--border);flex-shrink:0;
+  background:var(--surface)}
+.hist-search input{
+  width:100%;background:var(--bg);border:1px solid var(--border);border-radius:7px;
+  padding:6px 10px;font-size:12px;color:var(--text);font-family:inherit;
+  outline:none;box-sizing:border-box;transition:border-color .15s}
+.hist-search input:focus{border-color:#3a3a3a}
+
+/* ── History session cards ── */
+.hcard{
+  display:flex;align-items:stretch;cursor:pointer;
+  border-bottom:1px solid var(--border);transition:background .12s;
+  position:relative}
+.hcard:last-child{border-bottom:none}
+.hcard:hover{background:var(--surface2)}
+.hcard:hover .hcard-del{opacity:1}
+.hcard-accent{
+  width:3px;flex-shrink:0;border-radius:0}
+.hcard-body{
+  flex:1;padding:11px 14px 10px;min-width:0;overflow:hidden}
+.hcard-top{
+  display:flex;align-items:center;gap:8px;margin-bottom:3px}
+.hcard-name{
+  font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.hcard-ai-badge{
+  font-size:10px;padding:1px 6px;border-radius:4px;flex-shrink:0;
+  font-weight:500;opacity:.85;background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.1);color:var(--muted)}
+.hcard-meta{
+  font-size:11px;color:var(--muted);margin-bottom:5px;display:flex;
+  align-items:center;gap:6px}
+.hcard-preview{
+  font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;line-height:1.4;font-style:italic}
+.hcard-actions{
+  display:none;align-items:center;gap:6px;padding:8px 14px 10px;
+  background:var(--bg);border-bottom:1px solid var(--border)}
+.hcard-actions.open{display:flex}
+.hcard-del{
+  position:absolute;right:12px;top:12px;background:none;border:none;
+  color:var(--muted);cursor:pointer;font-size:13px;padding:3px 5px;
+  border-radius:4px;transition:all .12s;opacity:0}
+.hcard-del:hover{color:#ef4444;background:rgba(239,68,68,.1)}
+.hact{
+  padding:4px 12px;border-radius:6px;border:1px solid var(--border);
   background:transparent;color:var(--dim);font-size:12px;cursor:pointer;
-  font-family:inherit;transition:all .15s}
-.sess-action-btn:hover{color:var(--text);border-color:#3a3a3a}
-.sess-action-btn.resume{border-color:var(--codex);color:var(--codex)}
-.sess-action-btn.resume:hover{background:rgba(34,197,94,.08)}
+  font-family:inherit;transition:all .15s;display:flex;align-items:center;gap:4px}
+.hact:hover{color:var(--text);border-color:#4a4a4a;background:var(--surface)}
+.hact.primary{
+  border-color:rgba(99,102,241,.5);color:#818cf8}
+.hact.primary:hover{background:rgba(99,102,241,.1);border-color:#818cf8}
+.hact.resume{
+  border-color:rgba(34,197,94,.4);color:var(--codex)}
+.hact.resume:hover{background:rgba(34,197,94,.08);border-color:var(--codex)}
+
+/* ── Rename inline input ── */
+.sess-rename-input{
+  font-size:13px;font-weight:600;background:var(--bg);border:1px solid var(--codex);
+  border-radius:5px;padding:2px 7px;color:var(--text);font-family:inherit;
+  width:100%;box-sizing:border-box;outline:none}
 
 /* ── Browse modal ── */
 .browse-box{width:min(480px,94vw)}
@@ -2280,20 +3146,78 @@ header{
 <body>
 <div id="app">
 
+<!-- ── Left Sidebar ── -->
+<div id="left-sidebar">
+  <div class="sb-search">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input id="sb-search-inp" placeholder="Search sessions…" oninput="filterSidebarHistory(this.value)" autocomplete="off">
+  </div>
+  <div class="sb-tabs">
+    <button class="sb-tab active" onclick="switchSbTab('history',this)">History</button>
+    <button class="sb-tab" onclick="switchSbTab('scheduled',this)">Scheduled</button>
+  </div>
+  <div class="sb-panel active" id="sb-panel-history">
+    <div class="sb-empty">Loading…</div>
+  </div>
+  <div class="sb-panel" id="sb-panel-scheduled">
+    <div id="sb-sched-list"><div class="sb-empty">Loading…</div></div>
+    <details class="sb-add-form">
+      <summary>+ Add scheduled task</summary>
+      <input id="sb-sched-cron" placeholder="Cron  e.g. 0 9 * * *">
+      <select id="sb-sched-ai">
+        <option value="claude">Claude Code</option>
+        <option value="">Shell</option>
+      </select>
+      <textarea id="sb-sched-prompt" rows="2" placeholder="Prompt to run…"></textarea>
+      <button class="sb-add-btn" onclick="sbSchedAdd()">Schedule</button>
+    </details>
+  </div>
+</div>
+
+<!-- ── Sidebar overlay (mobile) ── -->
+<div class="sb-overlay" id="sb-overlay" onclick="closeSidebars()"></div>
+
+<!-- ── Center Panel ── -->
+<div id="center-panel">
+
 <header>
-  <div class="logo">◈ Claude <em>Remote</em></div>
+  <div class="logo">⚡ Task<em>Forge</em></div>
   <div class="header-right">
-    <button class="icon-btn" onclick="openHistory()" title="Chat history">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3 3h18v18H3z" style="display:none"/>
-        <rect x="3" y="3" width="18" height="3" rx="1"/>
-        <rect x="3" y="8" width="18" height="2" rx="1" opacity=".6"/>
-        <rect x="3" y="12" width="12" height="2" rx="1" opacity=".4"/>
-      </svg>
+    <button class="sb-toggle" id="toggle-left" onclick="toggleLeft()" title="History & Scheduled">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
     </button>
+    <button class="sb-toggle" id="toggle-right" onclick="toggleRight()" title="Sessions">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+    </button>
+    <!-- Schedule & History buttons removed — now in left sidebar -->
     <div id="conn" title="WebSocket status"></div>
   </div>
 </header>
+
+<!-- ── Schedules modal ────────────────────────────────────────────────────── -->
+<div id="sched-modal" class="modal-overlay" onclick="if(event.target===this)closeSchedules()" style="display:none">
+  <div class="modal-box" style="max-width:600px">
+    <div class="modal-header">
+      <span>⏰ Scheduled Tasks</span>
+      <button class="modal-close" onclick="closeSchedules()">✕</button>
+    </div>
+    <div id="sched-list" style="max-height:320px;overflow-y:auto;margin-bottom:12px"></div>
+    <details id="sched-add-details" style="margin-top:8px">
+      <summary style="cursor:pointer;font-size:13px;color:var(--muted);padding:4px 0">
+        + Add scheduled task
+      </summary>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+        <input id="sched-cron"   placeholder="Cron expression  e.g.  0 9 * * *" style="width:100%">
+        <select id="sched-ai" style="width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px">
+          <option value="claude">Claude Code</option>
+          <option value="">Shell</option>
+        </select>
+        <textarea id="sched-prompt" rows="3" placeholder="Prompt to run (e.g. Review git diff and summarise changes)" style="width:100%;resize:vertical"></textarea>
+        <button onclick="schedAdd()" style="align-self:flex-end;padding:6px 18px;background:var(--accent,#f59e0b);color:#000;border:none;border-radius:6px;cursor:pointer;font-weight:600">Schedule</button>
+      </div>
+    </details>
+  </div>
+</div>
 
 <div class="dir-bar">
   <span class="dir-icon">
@@ -2313,8 +3237,9 @@ header{
 </div>
 
 <div id="hist-banner">
+  <span id="hist-banner-icon">📖</span>
   <span id="hist-banner-date"></span>
-  <button class="hist-live-btn" onclick="returnToLive()">↩ Back to Live</button>
+  <button class="hist-live-btn" onclick="returnToLive()">↩ Back to live</button>
 </div>
 
 <div id="messages">
@@ -2350,9 +3275,9 @@ header{
       <span class="menu-dot shell"></span>New: Shell</button>
     <div class="ai-menu-divider"></div>
     <div class="ai-menu-section">Focused Session</div>
-    <button class="ai-menu-item" onclick="cmd('interrupt');closeAiMenu()">⏸ Interrupt</button>
-    <button class="ai-menu-item" onclick="cmd('stop_session');closeAiMenu()">⏹ Stop</button>
-    <button class="ai-menu-item" onclick="cmd('clear');closeAiMenu()">↺ Clear history</button>
+    <button class="ai-menu-item" onclick="cmd('interrupt');closeAiMenu()">⏸ Cancel Task</button>
+    <button class="ai-menu-item" onclick="if(confirm('Delete this session?'))cmd('delete_session');closeAiMenu()">🗑 Delete Session</button>
+    <button class="ai-menu-item" onclick="cmd('clear');closeAiMenu()">↺ Clear Chat</button>
   </div>
 
   <textarea id="inp" placeholder="Type a message…  (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
@@ -2360,11 +3285,14 @@ header{
 </div>
 
 <!-- History modal -->
-<div class="modal-overlay" id="hist-modal" onclick="closeHistory(event)">
-  <div class="modal-box">
+<div class="modal-overlay" id="hist-modal" onclick="if(event.target===this)closeHistory()">
+  <div class="modal-box" style="width:min(540px,94vw)">
     <div class="modal-header">
-      <span class="modal-title">Chat History</span>
+      <span class="modal-title">Session History</span>
       <button class="modal-close" onclick="closeHistory()">✕</button>
+    </div>
+    <div class="hist-search">
+      <input id="hist-search-inp" placeholder="Search sessions…" oninput="filterHistory(this.value)" autocomplete="off">
     </div>
     <div class="modal-body" id="hist-list"></div>
   </div>
@@ -2386,13 +3314,30 @@ header{
   </div>
 </div>
 
+</div><!-- /center-panel -->
+
+<!-- ── Right Sidebar: Session Dashboard ── -->
+<div id="right-sidebar">
+  <div class="rs-header">
+    <span>Active Sessions</span>
+    <span id="rs-count" style="font-size:10px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0"></span>
+  </div>
+  <div class="rs-list" id="rs-list">
+    <div class="rs-empty">No sessions yet</div>
+  </div>
+  <button class="rs-new-btn" onclick="toggleAiMenu(event)">+ New Session</button>
 </div>
+
+</div><!-- /app -->
 <script>
 const AI_LABEL = {claude:'Claude Code',shell:'Shell'};
 let ws = null, activeAi = null, _viewingHistory = false, _liveHistory = [], _pendingContext = '';
 let _sessNames = {};
 // Multi-session state
 let _sessions = [], _focusedId = null, _focusedAi = null;
+// Sidebar state
+let _sbHistSessions = [], _sbSchedTasks = [], _sessionTimers = {}, _integrationKeys = {};
+const AI_COLOR = {claude:'var(--claude)',gemini:'var(--gemini)',codex:'var(--codex)',shell:'var(--shell)'};
 
 // Load integrations from server and inject menu items + CSS vars dynamically
 async function loadIntegrations(){
@@ -2415,8 +3360,10 @@ async function loadIntegrations(){
       css += `.who.${key}{color:var(--${key})}`;
       css += `.ai-picker.active-${key}{border-color:rgba(${r},${g},${b},.35);background:rgba(${r},${g},${b},.05)}`;
       css += `.ai-picker.active-${key} #ai-label{color:var(--${key})}`;
-      // Update label map
+      // Update label map + integration registry
       AI_LABEL[key] = name;
+      _integrationKeys[key] = name;
+      AI_COLOR[key] = 'var(--' + key + ')';
       // Inject "New Session: …" button before Shell mode
       const btn = document.createElement('button');
       btn.className = 'ai-menu-item';
@@ -2428,6 +3375,7 @@ async function loadIntegrations(){
     const styleEl = document.createElement('style');
     styleEl.textContent = css;
     document.head.appendChild(styleEl);
+    _sbSchedPopulateAi();
   } catch(e){ console.warn('loadIntegrations failed', e); }
 }
 function escHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -2442,8 +3390,9 @@ function connect(){
     const d = JSON.parse(e.data);
     if(d.type==='message'){ _liveHistory.push(d); if(!_viewingHistory) renderMsg(d); }
     else if(d.type==='state') applyState(d);
-    else if(d.type==='thinking') setThinking(d.active, d.ai);
+    else if(d.type==='thinking') setThinking(d.active, d.ai, d.session_id);
     else if(d.type==='cwd') applyCwd(d.path);
+    else if(d.type==='schedule_list') renderSchedules(d.tasks);
   };
 }
 
@@ -2463,12 +3412,16 @@ function applyState(s){
       } else {
         sessContainer.innerHTML = _sessions.map(sess => {
           const isFocused = sess.id === _focusedId;
-          const icon = sess.status === 'stopped' ? '🔴' : (sess.ai === 'claude' ? '🟡' : sess.ai ? '🟡' : '🟢');
-          return `<button class="ai-menu-item${isFocused ? ' session-focused' : ''}"
+          const icon = sess.status === 'stopped' ? '🔴' : sess.busy ? '🟡' : '🟢';
+          const busyTag = sess.busy
+            ? `<span class="sess-busy-dot" title="Working…"></span>`
+            : '';
+          const folder = sess.cwd ? sess.cwd.split(/[/\\]/).pop() || sess.cwd : '';
+          return `<button class="ai-menu-item${isFocused ? ' session-focused' : ''}${sess.busy ? ' session-busy' : ''}"
             onclick="cmd('focus:${sess.id}');closeAiMenu()"
             style="${isFocused ? 'color:var(--text);background:var(--surface2);' : ''}">
-            ${icon} ${escHtml(sess.name)}${isFocused ? ' ✓' : ''}
-            <span style="margin-left:auto;font-size:10px;color:var(--muted)">${escHtml(sess.cwd ? sess.cwd.split(/[/\\]/).pop() || sess.cwd : '')}</span>
+            ${icon} ${escHtml(sess.name)}${isFocused ? ' ✓' : ''}${busyTag}
+            <span style="margin-left:auto;font-size:10px;color:var(--muted)">${escHtml(folder)}</span>
           </button>`;
         }).join('');
       }
@@ -2482,7 +3435,15 @@ function applyState(s){
       document.getElementById('dot').className = 'dot ' + aiKey;
       document.getElementById('ai-label').textContent = focusedSess.emoji + ' ' + focusedSess.name;
       picker.className = 'ai-picker' + (focusedSess.ai ? ' active-' + aiKey : '');
-      if(badge) badge.textContent = (_sessions.length > 1 ? `${_sessions.length} sessions · ` : '');
+      if(badge){
+        const busyCount = _sessions.filter(s => s.busy).length;
+        if(_sessions.length > 1 && busyCount > 0)
+          badge.textContent = `${busyCount}/${_sessions.length} running · `;
+        else if(_sessions.length > 1)
+          badge.textContent = `${_sessions.length} sessions · `;
+        else
+          badge.textContent = '';
+      }
     } else {
       document.getElementById('dot').className = 'dot';
       document.getElementById('ai-label').textContent = 'No session';
@@ -2490,6 +3451,11 @@ function applyState(s){
       if(badge) badge.textContent = '';
     }
     if(s.focused_cwd) applyCwd(s.focused_cwd);
+    // After focus may have changed, update the thinking indicator so it always
+    // reflects the currently focused session (not whatever was thinking before).
+    _refreshThinkingUI();
+    // Update right sidebar session dashboard
+    updateRightSidebar(_sessions, _focusedId);
   } else {
     // Legacy format
     activeAi = s.active_ai;
@@ -2605,16 +3571,33 @@ function closeBrowseModal(){ document.getElementById('browse-modal').classList.r
 function closeBrowse(e){ if(e.target.id === 'browse-modal') closeBrowseModal(); }
 function esc(s){ return s.replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 
-// ── Thinking ─────────────────────────────────────────────────────────────────
-function setThinking(on, ai){
-  const el = document.getElementById('thinking');
-  el.className = on ? 'on' : '';
-  if(on){
-    const k = ai || _focusedAi || activeAi || '';
-    const focusedSess = _sessions.find(s => s.id === _focusedId);
-    const label = focusedSess ? (focusedSess.emoji + ' ' + focusedSess.name) : (AI_LABEL[k] || 'AI');
+// ── Thinking (per-session) ────────────────────────────────────────────────────
+// Track which sessions are currently "thinking" so we can show/hide the
+// indicator correctly when sessions run in parallel or the user switches focus.
+const _thinkingState = {};   // { session_id: { active: bool, ai: string } }
+
+function setThinking(active, ai, session_id){
+  // Update per-session tracking
+  if(session_id){
+    if(active) _thinkingState[session_id] = { active: true, ai: ai };
+    else        delete _thinkingState[session_id];
+  }
+  // Show the indicator only for the focused session
+  _refreshThinkingUI();
+}
+
+function _refreshThinkingUI(){
+  const el      = document.getElementById('thinking');
+  const focused = _thinkingState[_focusedId];
+  if(focused && focused.active){
+    el.className = 'on';
+    const k     = focused.ai || _focusedAi || activeAi || '';
+    const sess  = _sessions.find(s => s.id === _focusedId);
+    const label = sess ? (sess.emoji + ' ' + sess.name) : (AI_LABEL[k] || 'AI');
     document.getElementById('thlabel').textContent = label + '…';
     scroll();
+  } else {
+    el.className = '';
   }
 }
 
@@ -2666,7 +3649,7 @@ function send(){
   if(_pendingContext){
     content = _pendingContext + txt;
     _pendingContext = '';
-    document.getElementById('hist-banner').classList.remove('on');
+    returnToLive();   // clear the resume banner
   }
   ws.send(JSON.stringify({type:'message', content:content}));
   inp.value = '';
@@ -2686,103 +3669,484 @@ inp.addEventListener('keydown', e => {
 });
 
 // ── History modal ─────────────────────────────────────────────────────────────
-async function openHistory(){
-  const res = await fetch('/history');
-  const sessions = await res.json();
+// ── Schedules modal ──────────────────────────────────────────────────────────
+let _schedTasks = [];
+
+function openSchedules(){
+  document.getElementById('sched-modal').style.display = 'flex';
+  cmd('schedule_list');  // request fresh list from server
+}
+function closeSchedules(){
+  document.getElementById('sched-modal').style.display = 'none';
+}
+
+function renderSchedules(tasks){
+  _schedTasks = tasks || [];
+  // Update sidebar scheduled tasks
+  updateSbScheduled(_schedTasks);
+  const el = document.getElementById('sched-list');
+  if(!_schedTasks.length){
+    el.innerHTML = '<div class="modal-empty">No scheduled tasks yet.<br>Use the form below to add one.</div>';
+    return;
+  }
+  el.innerHTML = _schedTasks.map(t => {
+    const ico = t.enabled ? '✅' : '⏸';
+    const ai  = t.ai || 'shell';
+    return `<div class="sched-row">
+      <div class="sched-meta">
+        ${ico} <strong>${escHtml(t.name)}</strong>
+        <code style="margin-left:6px;font-size:11px">${escHtml(t.cron)}</code>
+        <span class="sched-ai-badge ${ai}">${ai}</span>
+      </div>
+      <div class="sched-prompt">${escHtml(t.prompt.length>80 ? t.prompt.slice(0,80)+'…' : t.prompt)}</div>
+      <div class="sched-times">Next: ${escHtml(t.next_run_fmt)} &nbsp;·&nbsp; Last: ${escHtml(t.last_run_fmt)} &nbsp;·&nbsp; Runs: ${t.run_count||0}</div>
+      <div class="sched-actions">
+        <button onclick="cmd('schedule_run:${t.id}')" title="Run now">▶</button>
+        <button onclick="cmd('schedule_toggle:${t.id}')" title="${t.enabled?'Pause':'Enable'}">${t.enabled?'⏸':'▶️'}</button>
+        <button onclick="if(confirm('Delete ${escHtml(t.name)}?'))cmd('schedule_delete:${t.id}')" title="Delete" style="color:#f87171">🗑</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function schedAdd(){
+  const cron   = document.getElementById('sched-cron').value.trim();
+  const ai     = document.getElementById('sched-ai').value;
+  const prompt = document.getElementById('sched-prompt').value.trim();
+  if(!cron || !prompt){ alert('Cron expression and prompt are required.'); return; }
+  cmd(`schedule_add:${cron}|${ai}|${prompt}`);
+  document.getElementById('sched-cron').value   = '';
+  document.getElementById('sched-prompt').value = '';
+  document.getElementById('sched-add-details').open = false;
+}
+
+// Populate the AI dropdown in schedules modal with loaded integrations
+function _schedPopulateAiSelect(){
+  const sel = document.getElementById('sched-ai');
+  if(!sel) return;
+  // Remove existing integration options (keep claude + shell)
+  [...sel.options].filter(o => o.dataset.integration).forEach(o => o.remove());
+  Object.entries(_integrationKeys||{}).forEach(([key, name]) => {
+    const opt = document.createElement('option');
+    opt.value = key; opt.textContent = name; opt.dataset.integration = '1';
+    sel.insertBefore(opt, sel.options[sel.options.length-1]);
+  });
+}
+
+// ── History modal ─────────────────────────────────────────────────────────────
+let _histSessions = [];   // full session list loaded from /history
+const AI_COLOR = {        // accent colours for session cards
+  claude:'#f59e0b', gemini:'#3b82f6', codex:'#22c55e', shell:'#6b7280'
+};
+const AI_DISPLAY = {claude:'Claude Code', gemini:'Gemini', codex:'Codex', shell:'Shell'};
+
+function _fmtDate(dateStr, ts){
+  // dateStr = YYYY-MM-DD; ts = unix timestamp of last message (optional)
+  try {
+    const d = ts ? new Date(ts * 1000) : new Date(dateStr + 'T12:00:00');
+    const now = new Date();
+    const diffDays = Math.floor((now - d) / 86400000);
+    if(diffDays === 0) return 'Today';
+    if(diffDays === 1) return 'Yesterday';
+    if(diffDays < 7)  return d.toLocaleDateString(undefined,{weekday:'long'});
+    return d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
+  } catch(e){ return dateStr; }
+}
+
+function _renderHistoryList(sessions){
   const list = document.getElementById('hist-list');
   if(!sessions.length){
-    list.innerHTML = '<div class="modal-empty">No saved history yet.<br>Messages are saved automatically as you chat.</div>';
-  } else {
-    _sessNames = {};
-    sessions.forEach(s => { if(s.name) _sessNames[s.date] = s.name; });
-    list.innerHTML = sessions.map(s =>
-      `<div>
-        <div class="sess-item" onclick="toggleSess(event,'${s.date}')">
-          <div class="sess-info">
-            <div class="sess-name" id="sess-name-${s.date}">${s.name ? escHtml(s.name) : s.date}</div>
-            <div class="sess-subdate">${s.name ? s.date+' &middot; ' : ''}${s.count} msg</div>
-          </div>
-          <button class="sess-del" title="Delete" onclick="delSession(event,'${s.date}')">🗑</button>
-        </div>
-        <div class="sess-actions" id="sess-act-${s.date}">
-          <button class="sess-action-btn" onclick="loadSession('${s.date}')">&#128065; View</button>
-          <button class="sess-action-btn resume" onclick="resumeSession('${s.date}')">&#9654; Resume with context</button>
-          <button class="sess-action-btn" onclick="startRename(event,'${s.date}')">&#9998; Rename</button>
-        </div>
-      </div>`
-    ).join('');
+    list.innerHTML = `<div class="modal-empty">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      No saved sessions yet.<br>Sessions are saved automatically as you chat.
+    </div>`;
+    return;
   }
+  list.innerHTML = sessions.map(s => {
+    const displayName = s.name || _fmtDate(s.date, s.ts);
+    const subline     = (s.name ? _fmtDate(s.date, s.ts) + ' · ' : '') +
+                        s.count + ' message' + (s.count !== 1 ? 's' : '');
+    const accentColor = AI_COLOR[s.ai] || '#4b5563';
+    const aiBadge     = s.ai ? `<span class="hcard-ai-badge">${escHtml(AI_DISPLAY[s.ai] || s.ai)}</span>` : '';
+    const preview     = s.preview
+      ? `<div class="hcard-preview">${escHtml(s.preview)}</div>` : '';
+    return `
+    <div class="hcard" id="hcard-${s.date}">
+      <div class="hcard-accent" style="background:${accentColor}"></div>
+      <div class="hcard-body" onclick="toggleHistCard('${s.date}')">
+        <div class="hcard-top">
+          <div class="hcard-name" id="hcard-name-${s.date}">${escHtml(displayName)}</div>
+          ${aiBadge}
+        </div>
+        <div class="hcard-meta">${escHtml(subline)}</div>
+        ${preview}
+      </div>
+      <button class="hcard-del" title="Delete session" onclick="delSession(event,'${s.date}')">✕</button>
+    </div>
+    <div class="hcard-actions" id="hcard-act-${s.date}">
+      <button class="hact primary" onclick="loadSession('${s.date}')">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>View
+      </button>
+      <button class="hact resume" onclick="resumeSession('${s.date}')">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>Resume
+      </button>
+      <button class="hact" onclick="startRename(event,'${s.date}')">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>Rename
+      </button>
+    </div>`;
+  }).join('');
+}
+
+async function openHistory(){
+  // Reset search
+  const sinp = document.getElementById('hist-search-inp');
+  if(sinp) sinp.value = '';
+
+  const list = document.getElementById('hist-list');
+  list.innerHTML = '<div class="modal-empty" style="padding:32px 0"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:.3;animation:spin 1s linear infinite"><path d="M21 12a9 9 0 11-18 0"/></svg></div>';
   document.getElementById('hist-modal').classList.add('open');
+
+  try {
+    const res = await fetch('/history');
+    _histSessions = await res.json();
+    _sessNames = {};
+    _histSessions.forEach(s => { if(s.name) _sessNames[s.date] = s.name; });
+    _renderHistoryList(_histSessions);
+  } catch(e){
+    list.innerHTML = '<div class="modal-empty">Failed to load sessions.</div>';
+  }
 }
-function closeHistory(e){
-  if(e && e.target !== document.getElementById('hist-modal')) return;
+
+function filterHistory(q){
+  const lq = q.toLowerCase().trim();
+  if(!lq){ _renderHistoryList(_histSessions); return; }
+  const filtered = _histSessions.filter(s =>
+    (s.name || s.date).toLowerCase().includes(lq) ||
+    (s.preview || '').toLowerCase().includes(lq) ||
+    (s.ai || '').toLowerCase().includes(lq)
+  );
+  _renderHistoryList(filtered);
+}
+
+function closeHistory(){
   document.getElementById('hist-modal').classList.remove('open');
 }
+
+function toggleHistCard(date){
+  const act = document.getElementById('hcard-act-' + date);
+  const isOpen = act.classList.contains('open');
+  document.querySelectorAll('.hcard-actions.open').forEach(el => el.classList.remove('open'));
+  if(!isOpen) act.classList.add('open');
+}
+
 async function loadSession(date){
-  document.getElementById('hist-modal').classList.remove('open');
-  const res = await fetch('/history/'+date);
+  closeHistory();
+  const res = await fetch('/history/' + date);
   const data = await res.json();
   const msgs = data.messages || data;
   _viewingHistory = true;
-  const name = _sessNames[date] || date;
-  document.getElementById('hist-banner-date').textContent = '📖 Viewing: ' + name;
-  document.getElementById('hist-banner').classList.add('on');
+  const name = _sessNames[date] || _fmtDate(date);
+  const banner = document.getElementById('hist-banner');
+  banner.className = 'on view';
+  document.getElementById('hist-banner-icon').textContent = '📖';
+  document.getElementById('hist-banner-date').textContent = 'Viewing: ' + name;
   const wrap = document.getElementById('messages');
   wrap.innerHTML = '';
   msgs.forEach(renderMsg);
   scroll();
 }
+
 function returnToLive(){
   _viewingHistory = false;
-  document.getElementById('hist-banner').classList.remove('on');
+  const banner = document.getElementById('hist-banner');
+  banner.className = '';
   const wrap = document.getElementById('messages');
   wrap.innerHTML = '';
   _liveHistory.forEach(renderMsg);
   scroll();
 }
+
 async function resumeSession(date){
-  document.getElementById('hist-modal').classList.remove('open');
-  const res = await fetch('/history/'+date+'/resume');
+  closeHistory();
+  const res = await fetch('/history/' + date + '/resume');
   const data = await res.json();
   _pendingContext = data.context || '';
-  const name = _sessNames[date] || date;
-  document.getElementById('hist-banner-date').textContent = '▶ Context loaded from: ' + name + ' — send your message to continue';
-  document.getElementById('hist-banner').classList.add('on');
+  const name = _sessNames[date] || _fmtDate(date);
+  const banner = document.getElementById('hist-banner');
+  banner.className = 'on resume';
+  document.getElementById('hist-banner-icon').textContent = '▶';
+  document.getElementById('hist-banner-date').textContent = 'Context from: ' + name + ' — type your message to continue';
   document.getElementById('inp').focus();
 }
-function toggleSess(e, date){
-  if(e.target.classList.contains('sess-del') || e.target.classList.contains('sess-rename-input')) return;
-  const act = document.getElementById('sess-act-'+date);
-  const isOpen = act.classList.contains('open');
-  document.querySelectorAll('.sess-actions.open').forEach(el => el.classList.remove('open'));
-  if(!isOpen) act.classList.add('open');
-}
+
 async function delSession(e, date){
   e.stopPropagation();
-  if(!confirm('Delete session ' + (date) + '?')) return;
-  await fetch('/history/'+date, {method:'DELETE'});
-  openHistory();
+  if(!confirm('Delete session "' + (_sessNames[date] || date) + '"?')) return;
+  await fetch('/history/' + date, {method: 'DELETE'});
+  // Remove from local list and re-render
+  _histSessions = _histSessions.filter(s => s.date !== date);
+  _renderHistoryList(_histSessions);
 }
+
 function startRename(e, date){
   e.stopPropagation();
-  const nameEl = document.getElementById('sess-name-'+date);
+  const nameEl = document.getElementById('hcard-name-' + date);
   const cur = nameEl.textContent;
   nameEl.innerHTML = `<input class="sess-rename-input" value="${escHtml(cur)}"
     onkeydown="finishRename(event,'${date}')" onblur="finishRename(event,'${date}',true)">`;
   const inp = nameEl.querySelector('input');
   inp.focus(); inp.select();
 }
+
 async function finishRename(e, date, blur){
   if(!blur && e.key !== 'Enter' && e.key !== 'Escape') return;
-  const inp = document.getElementById('sess-name-'+date).querySelector('input');
+  const nameEl = document.getElementById('hcard-name-' + date);
+  if(!nameEl) return;
+  const inp = nameEl.querySelector('input');
   if(!inp) return;
   const newName = (e.key === 'Escape') ? '' : inp.value.trim();
   if(newName && newName !== date){
-    await fetch('/history/'+date+'/rename', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:newName})});
+    await fetch('/history/' + date + '/rename', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: newName})
+    });
     _sessNames[date] = newName;
+    // Update local cache
+    const s = _histSessions.find(s => s.date === date);
+    if(s) s.name = newName;
   }
-  openHistory();
+  // Re-render just this card's name
+  const s = _histSessions.find(s => s.date === date);
+  if(nameEl && s){
+    nameEl.textContent = s.name || _fmtDate(s.date, s.ts);
+  }
 }
+
+// ── Right Sidebar: Session Dashboard ──────────────────────────────────────────
+function _fmtElapsed(ts){
+  if(!ts) return '';
+  const sec = Math.floor((Date.now() - ts) / 1000);
+  if(sec < 60) return sec + 's';
+  const m = Math.floor(sec / 60);
+  if(m < 60) return m + 'm ' + (sec % 60) + 's';
+  return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+}
+function updateRightSidebar(sessions, focusedId){
+  const el = document.getElementById('rs-list');
+  const countEl = document.getElementById('rs-count');
+  if(!el) return;
+  if(!sessions.length){
+    el.innerHTML = '<div class="rs-empty">No sessions yet.<br>Create one below.</div>';
+    if(countEl) countEl.textContent = '';
+    return;
+  }
+  const busy = sessions.filter(s => s.busy).length;
+  if(countEl) countEl.textContent = busy > 0 ? busy + ' running' : sessions.length + ' total';
+  el.innerHTML = sessions.map(sess => {
+    const f = sess.id === focusedId;
+    let dot = 'idle';
+    if(sess.status === 'stopped') dot = 'stopped';
+    else if(sess.busy) dot = 'busy';
+    const aiKey = sess.ai || 'shell';
+    const color = AI_COLOR[aiKey] || 'var(--shell)';
+    const folder = sess.cwd ? sess.cwd.split(/[/\\]/).pop() || '' : '';
+    const timer = sess.busy && sess.task_start ? _fmtElapsed(sess.task_start) : '';
+    return `<div class="rs-item${f ? ' focused' : ''}" data-sid="${sess.id}" onclick="cmd('focus:${sess.id}')">
+      <div class="rs-dot ${dot}"></div>
+      <div class="rs-info">
+        <div class="rs-name">${escHtml(sess.name)}</div>
+        <div class="rs-meta">
+          <div class="rs-ai-dot" style="background:${color}"></div>
+          <span>${aiKey}</span>
+          ${timer ? `<span class="rs-timer">${timer}</span>` : ''}
+          ${folder ? `<span style="opacity:.5">${escHtml(folder)}</span>` : ''}
+        </div>
+      </div>
+      <div class="rs-actions">
+        <button class="rs-act" onclick="event.stopPropagation();cmd('interrupt')" title="Cancel running task">⏸</button>
+        <button class="rs-act" onclick="event.stopPropagation();if(confirm('Delete this session?'))cmd('delete_session')" title="Delete session">🗑</button>
+      </div>
+    </div>`;
+  }).join('');
+  // Manage elapsed timers
+  Object.keys(_sessionTimers).forEach(id => {
+    if(!sessions.find(s => s.id === id && s.busy && s.task_start)){
+      clearInterval(_sessionTimers[id]);
+      delete _sessionTimers[id];
+    }
+  });
+  sessions.forEach(sess => {
+    if(sess.busy && sess.task_start && !_sessionTimers[sess.id]){
+      _sessionTimers[sess.id] = setInterval(() => {
+        const te = document.querySelector(`.rs-item[data-sid="${sess.id}"] .rs-timer`);
+        if(te) te.textContent = _fmtElapsed(sess.task_start);
+      }, 1000);
+    }
+  });
+}
+
+// ── Left Sidebar: Tab Switching ──────────────────────────────────────────────
+function switchSbTab(tab, btn){
+  document.querySelectorAll('.sb-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.sb-panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('sb-panel-' + tab).classList.add('active');
+  if(tab === 'scheduled') cmd('schedule_list');
+}
+
+// ── Left Sidebar: History ────────────────────────────────────────────────────
+function loadSbHistory(){
+  const el = document.getElementById('sb-panel-history');
+  // Show stale cached data instantly while refreshing in background
+  if(!_sbHistSessions.length){
+    el.innerHTML = '<div class="sb-empty" style="opacity:.5">Loading…</div>';
+  }
+  fetch('/history').then(r => r.json()).then(sessions => {
+    _sbHistSessions = sessions;
+    renderSbHistory(sessions);
+  }).catch(() => {
+    if(!_sbHistSessions.length) el.innerHTML = '<div class="sb-empty">Could not load history</div>';
+  });
+}
+function renderSbHistory(sessions){
+  const el = document.getElementById('sb-panel-history');
+  if(!sessions.length){
+    el.innerHTML = '<div class="sb-empty">No saved sessions yet</div>';
+    return;
+  }
+  el.innerHTML = sessions.map(s => {
+    const name = s.name || _fmtDate(s.date, s.ts);
+    const ai = s.ai || '';
+    const color = AI_COLOR[ai] || '';
+    return `<div class="sb-hcard" onclick="loadSession('${s.date}')">
+      <div style="display:flex;align-items:center;gap:6px">
+        <div class="sb-hcard-name" style="flex:1">${escHtml(name)}</div>
+        ${ai ? `<span class="sb-hcard-ai" style="${color ? 'border-color:' + color + ';color:' + color : ''}">${ai}</span>` : ''}
+      </div>
+      <div class="sb-hcard-meta">
+        <span>${_fmtDate(s.date, s.ts)}</span>
+        <span>${s.count || 0} msg${(s.count||0) !== 1 ? 's' : ''}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+function filterSidebarHistory(q){
+  const lq = q.toLowerCase().trim();
+  if(!lq){ renderSbHistory(_sbHistSessions); return; }
+  renderSbHistory(_sbHistSessions.filter(s =>
+    (s.name || s.date).toLowerCase().includes(lq) ||
+    (s.preview || '').toLowerCase().includes(lq) ||
+    (s.ai || '').toLowerCase().includes(lq)
+  ));
+}
+
+// ── Left Sidebar: Scheduled Tasks ────────────────────────────────────────────
+function updateSbScheduled(tasks){
+  const el = document.getElementById('sb-sched-list');
+  if(!el) return;
+  if(!tasks.length){
+    el.innerHTML = '<div class="sb-empty">No scheduled tasks</div>';
+    return;
+  }
+  el.innerHTML = tasks.map(t => {
+    const ico = t.enabled ? '✅' : '⏸';
+    const ai = t.ai || 'shell';
+    return `<div class="sb-sched-item">
+      <div class="sb-sched-top">
+        <span>${ico}</span>
+        <span class="sb-sched-name">${escHtml(t.name)}</span>
+        <span class="sb-hcard-ai">${ai}</span>
+      </div>
+      <div class="sb-sched-prompt">${escHtml(t.prompt.length > 60 ? t.prompt.slice(0,60) + '…' : t.prompt)}</div>
+      <div class="sb-sched-meta"><code style="font-size:10px">${escHtml(t.cron)}</code> · Next: ${escHtml(t.next_run_fmt)}</div>
+      <div class="sb-sched-btns">
+        <button onclick="cmd('schedule_run:${t.id}')" title="Run now">▶ Run</button>
+        <button onclick="cmd('schedule_toggle:${t.id}')">${t.enabled ? '⏸' : '▶'}</button>
+        <button onclick="if(confirm('Delete?'))cmd('schedule_delete:${t.id}')" style="color:#f87171">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+function sbSchedAdd(){
+  const cron   = document.getElementById('sb-sched-cron').value.trim();
+  const ai     = document.getElementById('sb-sched-ai').value;
+  const prompt = document.getElementById('sb-sched-prompt').value.trim();
+  if(!cron || !prompt){ alert('Cron expression and prompt are required.'); return; }
+  cmd(`schedule_add:${cron}|${ai}|${prompt}`);
+  document.getElementById('sb-sched-cron').value = '';
+  document.getElementById('sb-sched-prompt').value = '';
+}
+
+// Also populate sidebar AI dropdown with integrations
+function _sbSchedPopulateAi(){
+  const sel = document.getElementById('sb-sched-ai');
+  if(!sel) return;
+  [...sel.options].filter(o => o.dataset.integration).forEach(o => o.remove());
+  Object.entries(_integrationKeys||{}).forEach(([key, name]) => {
+    const opt = document.createElement('option');
+    opt.value = key; opt.textContent = name; opt.dataset.integration = '1';
+    sel.insertBefore(opt, sel.options[sel.options.length - 1]);
+  });
+}
+
+// ── Mobile sidebar toggles ───────────────────────────────────────────────────
+function toggleLeft(){
+  const el = document.getElementById('left-sidebar');
+  const ov = document.getElementById('sb-overlay');
+  const isOpen = el.classList.contains('open');
+  closeSidebars();
+  if(!isOpen){ el.classList.add('open'); ov.classList.add('open'); }
+}
+function toggleRight(){
+  const el = document.getElementById('right-sidebar');
+  const ov = document.getElementById('sb-overlay');
+  const isOpen = el.classList.contains('open');
+  closeSidebars();
+  if(!isOpen){ el.classList.add('open'); ov.classList.add('open'); }
+}
+function closeSidebars(){
+  document.getElementById('left-sidebar').classList.remove('open');
+  document.getElementById('right-sidebar').classList.remove('open');
+  document.getElementById('sb-overlay').classList.remove('open');
+}
+
+// ── Redirect old modal openers to sidebars (on desktop) / toggle (mobile) ────
+const _origOpenHistory = openHistory;
+openHistory = function(){
+  if(window.innerWidth > 900){
+    switchSbTab('history', document.querySelector('.sb-tab'));
+    loadSbHistory();
+  } else {
+    toggleLeft();
+    switchSbTab('history', document.querySelector('.sb-tab'));
+    loadSbHistory();
+  }
+};
+const _origOpenSchedules = openSchedules;
+openSchedules = function(){
+  if(window.innerWidth > 900){
+    switchSbTab('scheduled', document.querySelectorAll('.sb-tab')[1]);
+    cmd('schedule_list');
+  } else {
+    toggleLeft();
+    switchSbTab('scheduled', document.querySelectorAll('.sb-tab')[1]);
+    cmd('schedule_list');
+  }
+};
+
+// ── Init sidebars on load ────────────────────────────────────────────────────
+setTimeout(() => { loadSbHistory(); cmd('schedule_list'); _sbSchedPopulateAi(); }, 500);
 
 connect();
 loadIntegrations();
@@ -2806,7 +4170,7 @@ async def _main():
 
     # --- Build Telegram application ---
     if BOT_TOKEN:
-        _telegram_app = Application.builder().token(BOT_TOKEN).build()
+        _telegram_app = Application.builder().token(BOT_TOKEN).concurrent_updates(True).build()
         # Primary commands users need to know
         _telegram_app.add_handler(CommandHandler("start",   tg_start))
         _telegram_app.add_handler(CommandHandler("menu",    tg_menu))
@@ -2829,6 +4193,7 @@ async def _main():
         _telegram_app.add_handler(CommandHandler("history",       tg_history))
         _telegram_app.add_handler(CommandHandler("resume",        tg_resume))
         _telegram_app.add_handler(CommandHandler("clear_context", tg_clear_context))
+        _telegram_app.add_handler(CommandHandler("schedule",      tg_schedule))
         # Inline keyboard callbacks — action/ms: buttons come BEFORE browse_callback
         _telegram_app.add_handler(CallbackQueryHandler(action_callback, pattern=r"^(action:|ms:)"))
         _telegram_app.add_handler(CallbackQueryHandler(browse_callback))
@@ -2854,6 +4219,9 @@ async def _main():
         await asyncio.sleep(1.2)
         webbrowser.open(url)
 
+    # Load persisted scheduled tasks and start the cron runner
+    _load_scheduled_tasks()
+    asyncio.create_task(_cron_runner())
     asyncio.create_task(_open_browser())
 
     if _telegram_app:
