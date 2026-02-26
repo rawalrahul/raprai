@@ -361,13 +361,23 @@ def _save_message_to_log(msg: dict):
 
 
 def _save_cwd_to_log(path: str):
-    """Persist the current working directory as a record in today's JSONL log."""
+    """Persist the current working directory as a record in today's JSONL log.
+
+    Also auto-names the session after the folder if no name has been set yet —
+    so "2026-02-26" becomes e.g. "my-project" in the history sidebar.
+    """
     try:
         CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
         date_str = datetime.now().strftime("%Y-%m-%d")
         log_file = CHAT_LOG_DIR / f"{date_str}.jsonl"
         with log_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps({"type": "cwd", "path": path, "timestamp": _ts()}, ensure_ascii=False) + "\n")
+        # Auto-name the session from the folder name — only if no custom name yet
+        existing = _load_chat_names()
+        if not existing.get(date_str):
+            folder_name = pathlib.Path(path).name or path
+            if folder_name and folder_name not in (".", "~", "/"):
+                _save_chat_name(date_str, folder_name)
     except Exception as e:
         logger.warning("Could not save CWD to log: %s", e)
 
@@ -905,6 +915,65 @@ _sched_counter: int = 0
 _SCHED_FILE = CHAT_LOG_DIR / "scheduled_tasks.json"
 
 
+def _natural_to_cron(text: str) -> Optional[str]:
+    """Convert natural language schedule description to a cron expression.
+
+    Examples
+    --------
+    "daily at 9am"               → "0 9 * * *"
+    "every monday at 9am"        → "0 9 * * 1"
+    "weekly on friday at 5pm"    → "0 17 * * 5"
+    "monthly on the 1st at 8am"  → "0 8 1 * *"
+    "every weekday at 6:30pm"    → "30 18 * * 1-5"
+    """
+    import re as _re
+    t = text.strip().lower()
+
+    # ── parse time ────────────────────────────────────────────────────────────
+    _time_re = _re.compile(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)?')
+    m = _time_re.search(t)
+    if not m:
+        return None
+    hour   = int(m.group(1))
+    minute = int(m.group(2) or 0)
+    ampm   = m.group(3)
+    if ampm == "pm" and hour != 12:
+        hour += 12
+    if ampm == "am" and hour == 12:
+        hour = 0
+
+    # ── named days ────────────────────────────────────────────────────────────
+    _days = {
+        "monday":0, "mon":0, "tuesday":1, "tue":1,
+        "wednesday":2, "wed":2, "thursday":3, "thu":3,
+        "friday":4, "fri":4, "saturday":5, "sat":5,
+        "sunday":6, "sun":6,
+    }
+
+    # weekday / weekend shorthands
+    if any(x in t for x in ("weekday", "week day", "every weekday", "workday")):
+        return f"{minute} {hour} * * 1-5"
+    if any(x in t for x in ("weekend",)):
+        return f"{minute} {hour} * * 6,0"
+
+    # specific day name
+    for day_name, day_num in _days.items():
+        if day_name in t:
+            return f"{minute} {hour} * * {day_num}"
+
+    # ── daily ─────────────────────────────────────────────────────────────────
+    if any(x in t for x in ("every day", "daily", "each day", "everyday")):
+        return f"{minute} {hour} * * *"
+
+    # ── monthly (with optional day-of-month) ──────────────────────────────────
+    if any(x in t for x in ("monthly", "every month", "each month", "once a month")):
+        dom_m = _re.search(r"(\d{1,2})(?:st|nd|rd|th)?", t)
+        dom = int(dom_m.group(1)) if dom_m else 1
+        return f"{minute} {hour} {dom} * *"
+
+    return None
+
+
 def _next_cron_run(cron_expr: str) -> Optional[float]:
     """Return the next fire time (Unix timestamp) for cron_expr, or None on error."""
     if not _CRONITER_OK:
@@ -1114,22 +1183,49 @@ _hist_cache_ts: float = 0.0  # last refresh timestamp
 
 
 def _scan_log_fast(log_file: pathlib.Path) -> dict:
-    """Read only the last 4 KB of a log file to extract metadata quickly."""
+    """Read the first 2 KB and last 4 KB of a log file to extract metadata quickly.
+
+    The head scan finds the initial CWD (used as a default session name for old
+    sessions that pre-date the auto-naming feature).
+    """
     date_str = log_file.stem
     try:
         size = log_file.stat().st_size
         mtime = log_file.stat().st_mtime
         with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            # Head: first 2 KB — look for initial cwd record
+            head_raw = f.read(min(2048, size))
+            head_lines = head_raw.splitlines()
+            first_cwd: str = ""
+            for line in head_lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                if rec.get("type") == "cwd" and rec.get("path"):
+                    folder = pathlib.Path(rec["path"]).name or ""
+                    if folder and folder not in (".", "~", "/"):
+                        first_cwd = folder
+                    break  # only need the first one
+
+            # Tail: last 4 KB — look for recent messages/ai
             if size > 4096:
                 f.seek(size - 4096)
                 f.readline()  # discard partial line
-            tail_lines = f.readlines()
+                tail_lines = f.readlines()
+            else:
+                # Already read the whole file in head; parse again from lines
+                tail_lines = head_lines
+
         preview = ""
         last_ai = ""
         last_ts: Optional[float] = None
         count_tail = 0
         for line in tail_lines:
-            line = line.strip()
+            line = line.strip() if isinstance(line, str) else line
             if not line:
                 continue
             try:
@@ -1150,9 +1246,11 @@ def _scan_log_fast(log_file: pathlib.Path) -> dict:
             "date": date_str, "count": count_tail if size <= 4096 else max(1, size // 200),
             "name": "", "preview": preview, "ai": last_ai,
             "ts": last_ts, "mtime": mtime,
+            "default_name": first_cwd,  # folder name fallback for old sessions
         }
     except Exception:
-        return {"date": date_str, "count": 0, "name": "", "preview": "", "ai": "", "ts": None, "mtime": 0}
+        return {"date": date_str, "count": 0, "name": "", "preview": "", "ai": "", "ts": None, "mtime": 0,
+                "default_name": ""}
 
 
 def _rebuild_hist_cache_sync() -> list:
@@ -1167,7 +1265,9 @@ def _rebuild_hist_cache_sync() -> list:
     sessions.sort(key=lambda s: s.get("mtime", 0), reverse=True)
     names = _load_chat_names()
     for s in sessions:
-        s["name"] = names.get(s["date"], "")
+        # Prefer: (1) custom rename, (2) auto-saved folder name from chat_names.json,
+        # (3) folder name extracted live from the log head (for old sessions)
+        s["name"] = names.get(s["date"], "") or s.pop("default_name", "")
         s.pop("mtime", None)
     _hist_cache = sessions
     _hist_cache_ts = time.time()
@@ -1183,6 +1283,86 @@ async def history_list():
         # Trigger background refresh (non-blocking)
         asyncio.get_event_loop().run_in_executor(None, _rebuild_hist_cache_sync)
     return JSONResponse(_hist_cache)  # may be [] on very first call
+
+
+@app.get("/history/search")
+async def history_search(q: str = ""):
+    """Full-text search across all chat log files.
+
+    Returns up to 20 matching sessions, each with a `snippet` showing the
+    matching excerpt (±60 chars of context) and `match_count` hits.
+    """
+    from fastapi.responses import JSONResponse
+    q = q.strip()
+    if len(q) < 2:
+        return JSONResponse([])
+
+    lq = q.lower()
+    names = _load_chat_names()
+    results: list[dict] = []
+
+    if not CHAT_LOG_DIR.exists():
+        return JSONResponse([])
+
+    log_files = sorted(
+        [f for f in CHAT_LOG_DIR.glob("*.jsonl") if HISTORY_DATE_RE.fullmatch(f.stem)],
+        reverse=True,  # newest first
+    )
+
+    for log_file in log_files:
+        date_str = log_file.stem
+        snippet = ""
+        match_count = 0
+        last_ai = ""
+        last_ts = None
+
+        try:
+            for raw_line in log_file.read_text(encoding="utf-8", errors="replace").splitlines():
+                raw_line = raw_line.strip()
+                if not raw_line:
+                    continue
+                try:
+                    rec = json.loads(raw_line)
+                except Exception:
+                    continue
+                if rec.get("type") != "message":
+                    if rec.get("ai"):
+                        last_ai = rec["ai"]
+                    continue
+                content: str = rec.get("content", "")
+                if rec.get("ai"):
+                    last_ai = rec["ai"]
+                if rec.get("ts"):
+                    last_ts = rec["ts"]
+                idx = content.lower().find(lq)
+                if idx != -1:
+                    match_count += 1
+                    if not snippet:
+                        # Build a short excerpt around the first match
+                        start = max(0, idx - 60)
+                        end   = min(len(content), idx + len(q) + 60)
+                        excerpt = content[start:end].replace("\n", " ").strip()
+                        if start > 0:
+                            excerpt = "…" + excerpt
+                        if end < len(content):
+                            excerpt = excerpt + "…"
+                        snippet = excerpt
+        except Exception:
+            continue
+
+        if match_count > 0:
+            results.append({
+                "date": date_str,
+                "name": names.get(date_str, ""),
+                "snippet": snippet,
+                "match_count": match_count,
+                "ai": last_ai,
+                "ts": last_ts,
+            })
+            if len(results) >= 20:
+                break
+
+    return JSONResponse(results)
 
 
 @app.get("/history/{date}")
@@ -1239,6 +1419,43 @@ def _load_chat_names() -> dict:
         except Exception:
             pass
     return {}
+
+
+def _get_session_display_name(date_str: str) -> str:
+    """Return the best human-readable name for a session date.
+
+    Priority:
+      1. Custom name / auto-saved folder name from chat_names.json
+      2. Folder name extracted from the first CWD record in the log file
+      3. The raw date string as a last resort
+    """
+    names = _load_chat_names()
+    if names.get(date_str):
+        return names[date_str]
+
+    # Fall back: peek at the first CWD record in the log file
+    log_file = CHAT_LOG_DIR / f"{date_str}.jsonl"
+    if log_file.exists():
+        try:
+            with log_file.open("r", encoding="utf-8", errors="replace") as fh:
+                head = fh.read(2048)
+            for raw in head.splitlines():
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    rec = json.loads(raw)
+                except Exception:
+                    continue
+                if rec.get("type") == "cwd" and rec.get("path"):
+                    folder = pathlib.Path(rec["path"]).name or ""
+                    if folder and folder not in (".", "~", "/"):
+                        return folder
+                    break
+        except Exception:
+            pass
+
+    return date_str  # last resort
 
 
 def _save_chat_name(date: str, name: str) -> None:
@@ -1980,26 +2197,70 @@ async def tg_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
         return
 
-    # ── add <cron5> <ai> <prompt> ─────────────────────────────────────────────
+    # ── add <schedule> <ai> <prompt> ─────────────────────────────────────────
+    # Supports natural language:  /schedule add daily at 9am claude Review git diff
+    # Or classic cron:            /schedule add 0 9 * * * claude Review git diff
     if sub == "add":
         tokens = rest.split()
-        if len(tokens) < 7:
+        if len(tokens) < 3:
             await update.message.reply_text(
-                "Usage: /schedule add <cron 5 fields> <ai> <prompt>\n"
-                "Example: /schedule add 0 9 * * * claude Review git diff today\n"
+                "Usage: /schedule add <when> <ai> <prompt>\n\n"
+                "Natural language examples:\n"
+                "  /schedule add daily at 9am claude Review git diff\n"
+                "  /schedule add every monday at 5pm claude Weekly report\n"
+                "  /schedule add weekdays at 8am shell backup.sh\n"
+                "  /schedule add monthly on the 1st at 9am claude Monthly summary\n\n"
+                "Classic cron (5 fields):\n"
+                "  /schedule add 0 9 * * * claude Review git diff\n\n"
                 "AI options: claude  shell  (or any integration key)"
             )
             return
-        cron_expr = " ".join(tokens[:5])
-        ai_raw    = tokens[5]
-        prompt    = " ".join(tokens[6:])
-        ai_key    = ai_raw if ai_raw in ("claude", *_integrations) else None
 
-        if _next_cron_run(cron_expr) is None:
+        # Find the position of the AI key in the token list
+        known_ais = {"claude", "shell", *_integrations.keys()}
+        ai_pos = None
+        for i, tok in enumerate(tokens):
+            if tok.lower() in known_ais:
+                ai_pos = i
+                break
+
+        if ai_pos is None or ai_pos == 0:
+            await update.message.reply_text(
+                "❌ Couldn't find an AI target (claude / shell). "
+                "Example: /schedule add daily at 9am *claude* Review git diff",
+                parse_mode="Markdown",
+            )
+            return
+
+        ai_key   = tokens[ai_pos].lower() if tokens[ai_pos].lower() in known_ais else None
+        prompt   = " ".join(tokens[ai_pos + 1:]).strip()
+        if not prompt:
+            await update.message.reply_text("❌ Please include a prompt after the AI target.")
+            return
+
+        sched_text = " ".join(tokens[:ai_pos])
+
+        # Try natural language first
+        cron_expr = _natural_to_cron(sched_text)
+
+        # Fall back to raw cron (if exactly 5 tokens were given as schedule)
+        if cron_expr is None and ai_pos == 5:
+            cron_expr = sched_text  # tokens[:5] joined by spaces
+
+        if cron_expr is None or _next_cron_run(cron_expr) is None:
             if not _CRONITER_OK:
                 await update.message.reply_text("❌ croniter not installed — run: pip install croniter")
             else:
-                await update.message.reply_text(f"❌ Invalid cron: `{cron_expr}`", parse_mode="Markdown")
+                await update.message.reply_text(
+                    f"❌ Couldn't parse schedule: `{sched_text}`\n\n"
+                    "Try phrases like:\n"
+                    "• *daily at 9am*\n"
+                    "• *every monday at 5pm*\n"
+                    "• *weekdays at 8am*\n"
+                    "• *monthly on the 1st at 9am*\n"
+                    "Or use 5-field cron: `0 9 * * *`",
+                    parse_mode="Markdown",
+                )
             return
 
         task = _make_sched_task(cron_expr, ai_key, prompt)
@@ -2647,45 +2908,38 @@ async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = data.split(":", 1)[1] if ":" in data else data
 
     if action == "history":
-        messages: list[dict] = []
-        for delta in range(7):
-            d = (datetime.now() - timedelta(days=delta)).strftime("%Y-%m-%d")
-            log_file = CHAT_LOG_DIR / f"{d}.jsonl"
-            if not log_file.exists():
-                continue
-            day_msgs = []
-            for line in log_file.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    m = json.loads(line)
-                    if m.get("role") in ("user", "assistant"):
-                        day_msgs.append(m)
-                except Exception:
-                    pass
-            messages = day_msgs + messages
-            if len(messages) >= 5:
-                break
-        messages = messages[-5:]
-        if not messages:
-            await query.answer("No history found.", show_alert=True)
+        # Show past chat sessions as tappable buttons (name only, no conversation shown)
+        if not CHAT_LOG_DIR.exists():
+            await query.answer("No chat history yet.", show_alert=True)
             return
-        lines_out = []
-        for m in messages:
-            role = "You" if m["role"] == "user" else (m.get("ai") or "AI").title()
-            ts = m.get("timestamp", "")[:16].replace("T", " ")
-            preview = m.get("content", "")[:120]
-            if len(m.get("content", "")) > 120:
-                preview += "…"
-            lines_out.append(f"[{ts}] {role}:\n{preview}")
-        history_text = "\n\n".join(lines_out)
+        log_files = sorted(
+            [f for f in CHAT_LOG_DIR.glob("*.jsonl") if HISTORY_DATE_RE.fullmatch(f.stem)],
+            reverse=True,
+        )[:20]  # up to 20 sessions
+        if not log_files:
+            await query.answer("No chat history yet.", show_alert=True)
+            return
+        rows: list = []
+        for f in log_files:
+            date_str = f.stem
+            display = _get_session_display_name(date_str)
+            rows.append([InlineKeyboardButton(display, callback_data=f"action:resume_date:{date_str}")])
+        rows.append([InlineKeyboardButton("← Back", callback_data="ms:list")])
         if query.message:
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=history_text[:3800],
-                reply_markup=_sessions_keyboard(),
+            await query.edit_message_text(
+                "💬 *Past Chats* — tap a session to resume it:",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(rows),
             )
+
+    elif action.startswith("resume_date:"):
+        # Resume a specific past session by date
+        date_str = action[len("resume_date:"):]
+        if HISTORY_DATE_RE.fullmatch(date_str) and query.message:
+            await query.edit_message_text("⏳ Resuming session…")
+            await _perform_resume(query.message, date_str=date_str)
+        else:
+            await query.answer("Invalid session.", show_alert=True)
 
     elif action == "browse":
         if query.message:
@@ -2752,9 +3006,21 @@ html,body{height:100%;background:var(--bg);color:var(--text);
   font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;margin-bottom:2px}
 .sb-hcard-meta{font-size:10px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.sb-hcard-snippet{
+  font-size:11px;color:var(--muted);margin:3px 0 1px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden;line-height:1.4}
+.sb-hl{background:rgba(245,158,11,.35);color:var(--text);border-radius:2px;padding:0 1px}
+.sb-match-count{margin-left:auto;font-size:9px;color:var(--claude);font-weight:600}
 .sb-hcard-ai{
   font-size:9px;padding:1px 5px;border-radius:3px;font-weight:500;
   background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);color:var(--muted)}
+.sb-rename-btn{
+  opacity:0;background:none;border:none;cursor:pointer;padding:2px 4px;
+  border-radius:4px;font-size:11px;color:var(--muted);transition:opacity .15s,background .12s;
+  flex-shrink:0;line-height:1}
+.sb-hcard:hover .sb-rename-btn{opacity:1}
+.sb-rename-btn:hover{background:var(--surface2);color:var(--text)}
 .sb-sched-item{padding:9px 14px;border-bottom:1px solid var(--border);font-size:12px}
 .sb-sched-top{display:flex;align-items:center;gap:6px;margin-bottom:3px}
 .sb-sched-name{font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2776,6 +3042,15 @@ html,body{height:100%;background:var(--bg);color:var(--text);
 .sb-add-form button.sb-add-btn{
   margin-top:8px;padding:5px 14px;background:var(--claude);color:#000;border:none;
   border-radius:5px;cursor:pointer;font-weight:600;font-size:12px;font-family:inherit;float:right}
+.sched-picker{display:flex;flex-direction:column;gap:5px;margin-top:6px}
+.sched-picker select{
+  width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);
+  border-radius:5px;padding:5px 8px;font-size:12px;outline:none;font-family:inherit;box-sizing:border-box}
+.sched-picker input{
+  background:var(--surface2);color:var(--text);border:1px solid var(--border);
+  border-radius:5px;padding:5px 8px;font-size:12px;outline:none;font-family:inherit;box-sizing:border-box}
+.sched-time-row{display:flex;gap:4px;align-items:center}
+.sched-time-row select{flex:1;margin-top:0}
 
 /* ── Center Panel ── */
 #center-panel{flex:1;display:flex;flex-direction:column;min-width:0;
@@ -3178,7 +3453,45 @@ header{
     <div id="sb-sched-list"><div class="sb-empty">Loading…</div></div>
     <details class="sb-add-form">
       <summary>+ Add scheduled task</summary>
-      <input id="sb-sched-cron" placeholder="Cron  e.g. 0 9 * * *">
+      <div class="sched-picker">
+        <select id="sb-sched-freq" onchange="sbSchedFreqChange()">
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+          <option value="custom">Custom (cron)</option>
+        </select>
+        <div id="sb-sched-weekday-row" style="display:none">
+          <select id="sb-sched-weekday">
+            <option value="1">Monday</option>
+            <option value="2">Tuesday</option>
+            <option value="3">Wednesday</option>
+            <option value="4">Thursday</option>
+            <option value="5">Friday</option>
+            <option value="6">Saturday</option>
+            <option value="0">Sunday</option>
+          </select>
+        </div>
+        <div id="sb-sched-monthday-row" style="display:none">
+          <select id="sb-sched-monthday"></select>
+        </div>
+        <div id="sb-sched-time-row" class="sched-time-row">
+          <select id="sb-sched-hour"></select>
+          <span style="color:var(--muted);font-size:12px;align-self:center">:</span>
+          <select id="sb-sched-min">
+            <option value="0">00</option>
+            <option value="15">15</option>
+            <option value="30">30</option>
+            <option value="45">45</option>
+          </select>
+          <select id="sb-sched-ampm">
+            <option value="am">AM</option>
+            <option value="pm">PM</option>
+          </select>
+        </div>
+        <div id="sb-sched-custom-row" style="display:none">
+          <input id="sb-sched-cron" placeholder="e.g. 0 9 * * *" style="width:100%">
+        </div>
+      </div>
       <select id="sb-sched-ai">
         <option value="claude">Claude Code</option>
         <option value="">Shell</option>
@@ -3222,7 +3535,45 @@ header{
         + Add scheduled task
       </summary>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
-        <input id="sched-cron"   placeholder="Cron expression  e.g.  0 9 * * *" style="width:100%">
+        <div class="sched-picker">
+          <select id="sched-freq" onchange="schedFreqChange()">
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="custom">Custom (cron)</option>
+          </select>
+          <div id="sched-weekday-row" style="display:none">
+            <select id="sched-weekday">
+              <option value="1">Monday</option>
+              <option value="2">Tuesday</option>
+              <option value="3">Wednesday</option>
+              <option value="4">Thursday</option>
+              <option value="5">Friday</option>
+              <option value="6">Saturday</option>
+              <option value="0">Sunday</option>
+            </select>
+          </div>
+          <div id="sched-monthday-row" style="display:none">
+            <select id="sched-monthday"></select>
+          </div>
+          <div id="sched-time-row" class="sched-time-row">
+            <select id="sched-hour"></select>
+            <span style="color:var(--muted);font-size:12px;align-self:center">:</span>
+            <select id="sched-min">
+              <option value="0">00</option>
+              <option value="15">15</option>
+              <option value="30">30</option>
+              <option value="45">45</option>
+            </select>
+            <select id="sched-ampm">
+              <option value="am">AM</option>
+              <option value="pm">PM</option>
+            </select>
+          </div>
+          <div id="sched-custom-row" style="display:none">
+            <input id="sched-cron" placeholder="e.g. 0 9 * * *" style="width:100%">
+          </div>
+        </div>
         <select id="sched-ai" style="width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px">
           <option value="claude">Claude Code</option>
           <option value="">Shell</option>
@@ -3406,6 +3757,7 @@ function connect(){
     try { cmd('schedule_list'); } catch(e){ console.warn('schedule_list err', e); }
     try { loadSbHistory(); } catch(e){ console.warn('loadSbHistory err', e); }
     try { _sbSchedPopulateAi(); } catch(e){ console.warn('_sbSchedPopulateAi err', e); }
+    try { _initSchedPicker(''); _initSchedPicker('sb-'); } catch(e){ console.warn('initSchedPicker err', e); }
   };
   ws.onclose = (ev) => { console.warn('[TaskForge] WS closed', ev.code, ev.reason); document.getElementById('conn').className = ''; setTimeout(connect, 2500); };
   ws.onerror = (ev) => { console.error('[TaskForge] WS error', ev); };
@@ -3735,13 +4087,60 @@ function renderSchedules(tasks){
   }).join('');
 }
 
+// ── Shared cron builder from friendly picker ──────────────────────────────────
+function _buildCronFromPicker(pfx){
+  // pfx = '' for modal, 'sb-' for sidebar
+  const freq = document.getElementById(pfx+'sched-freq').value;
+  if(freq === 'custom'){
+    const raw = document.getElementById(pfx+'sched-cron');
+    return raw ? raw.value.trim() : '';
+  }
+  let hour = parseInt(document.getElementById(pfx+'sched-hour').value, 10);
+  const min  = parseInt(document.getElementById(pfx+'sched-min').value, 10);
+  const ampm = document.getElementById(pfx+'sched-ampm').value;
+  if(ampm === 'pm' && hour !== 12) hour += 12;
+  if(ampm === 'am' && hour === 12) hour = 0;
+  if(freq === 'daily')   return `${min} ${hour} * * *`;
+  if(freq === 'weekly')  return `${min} ${hour} * * ${document.getElementById(pfx+'sched-weekday').value}`;
+  if(freq === 'monthly') return `${min} ${hour} ${document.getElementById(pfx+'sched-monthday').value} * *`;
+  return '';
+}
+function _schedFreqToggle(pfx){
+  const freq = document.getElementById(pfx+'sched-freq').value;
+  document.getElementById(pfx+'sched-weekday-row').style.display  = freq==='weekly'  ? '' : 'none';
+  document.getElementById(pfx+'sched-monthday-row').style.display = freq==='monthly' ? '' : 'none';
+  document.getElementById(pfx+'sched-time-row').style.display     = freq==='custom'  ? 'none' : '';
+  document.getElementById(pfx+'sched-custom-row').style.display   = freq==='custom'  ? '' : 'none';
+}
+function schedFreqChange()   { _schedFreqToggle(''); }
+function sbSchedFreqChange() { _schedFreqToggle('sb-'); }
+function _initSchedPicker(pfx){
+  // Populate hours 1–12
+  const hSel = document.getElementById(pfx+'sched-hour');
+  if(hSel && !hSel.options.length){
+    for(let h=1;h<=12;h++){
+      const o = document.createElement('option'); o.value=h; o.textContent=h; hSel.appendChild(o);
+    }
+    hSel.value = 9; // default 9
+  }
+  // Populate month days 1–28
+  const mSel = document.getElementById(pfx+'sched-monthday');
+  if(mSel && !mSel.options.length){
+    for(let d=1;d<=28;d++){
+      const o = document.createElement('option'); o.value=d;
+      o.textContent = d + (d===1?'st':d===2?'nd':d===3?'rd':'th');
+      mSel.appendChild(o);
+    }
+  }
+}
+
 function schedAdd(){
-  const cron   = document.getElementById('sched-cron').value.trim();
+  _initSchedPicker('');
+  const cron   = _buildCronFromPicker('');
   const ai     = document.getElementById('sched-ai').value;
   const prompt = document.getElementById('sched-prompt').value.trim();
-  if(!cron || !prompt){ alert('Cron expression and prompt are required.'); return; }
+  if(!cron || !prompt){ alert('Please fill in schedule and prompt.'); return; }
   cmd(`schedule_add:${cron}|${ai}|${prompt}`);
-  document.getElementById('sched-cron').value   = '';
   document.getElementById('sched-prompt').value = '';
   document.getElementById('sched-add-details').open = false;
 }
@@ -4068,10 +4467,11 @@ function renderSbHistory(sessions){
     const name = s.name || _fmtDate(s.date, s.ts);
     const ai = s.ai || '';
     const color = AI_COLOR[ai] || '';
-    return `<div class="sb-hcard" onclick="loadSession('${s.date}')">
+    return `<div class="sb-hcard" onclick="resumeSession('${s.date}')" title="Click to resume session">
       <div style="display:flex;align-items:center;gap:6px">
-        <div class="sb-hcard-name" style="flex:1">${escHtml(name)}</div>
+        <div class="sb-hcard-name" id="sb-hcard-name-${s.date}" style="flex:1">${escHtml(name)}</div>
         ${ai ? `<span class="sb-hcard-ai" style="${color ? 'border-color:' + color + ';color:' + color : ''}">${ai}</span>` : ''}
+        <button class="sb-rename-btn" title="Rename" onclick="sbStartRename(event,'${s.date}')">✏️</button>
       </div>
       <div class="sb-hcard-meta">
         <span>${_fmtDate(s.date, s.ts)}</span>
@@ -4080,14 +4480,102 @@ function renderSbHistory(sessions){
     </div>`;
   }).join('');
 }
+function sbStartRename(e, date){
+  e.stopPropagation();
+  const nameEl = document.getElementById('sb-hcard-name-' + date);
+  if(!nameEl) return;
+  const cur = nameEl.textContent;
+  nameEl.innerHTML = `<input class="sess-rename-input" value="${escHtml(cur)}"
+    onkeydown="sbFinishRename(event,'${date}')" onblur="sbFinishRename(event,'${date}',true)"
+    onclick="event.stopPropagation()">`;
+  const inp = nameEl.querySelector('input');
+  inp.focus(); inp.select();
+}
+async function sbFinishRename(e, date, blur){
+  if(!blur && e.key !== 'Enter' && e.key !== 'Escape') return;
+  const nameEl = document.getElementById('sb-hcard-name-' + date);
+  if(!nameEl) return;
+  const inp = nameEl.querySelector('input');
+  if(!inp) return;
+  const newName = (e.key === 'Escape') ? '' : inp.value.trim();
+  if(newName){
+    await fetch('/history/' + date + '/rename', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: newName})
+    });
+    // Update both sidebar and modal caches
+    const sb = _sbHistSessions.find(s => s.date === date);
+    if(sb) sb.name = newName;
+    const hm = _histSessions ? _histSessions.find(s => s.date === date) : null;
+    if(hm) hm.name = newName;
+  }
+  // Re-render name text
+  const s = _sbHistSessions.find(s => s.date === date);
+  nameEl.textContent = (s && s.name) ? s.name : date;
+}
+// ── Sidebar history search (full-text via API) ────────────────────────────────
+let _sbSearchTimer = null;
+let _sbSearchQ = '';
+
 function filterSidebarHistory(q){
-  const lq = q.toLowerCase().trim();
-  if(!lq){ renderSbHistory(_sbHistSessions); return; }
-  renderSbHistory(_sbHistSessions.filter(s =>
-    (s.name || s.date).toLowerCase().includes(lq) ||
-    (s.preview || '').toLowerCase().includes(lq) ||
-    (s.ai || '').toLowerCase().includes(lq)
-  ));
+  _sbSearchQ = q.trim();
+  clearTimeout(_sbSearchTimer);
+  const el = document.getElementById('sb-panel-history');
+
+  if(_sbSearchQ.length < 2){
+    // Fewer than 2 chars → restore full list immediately
+    renderSbHistory(_sbHistSessions);
+    return;
+  }
+
+  // Show a subtle loading state while debouncing
+  el.innerHTML = '<div class="sb-empty" style="opacity:.5">Searching…</div>';
+
+  _sbSearchTimer = setTimeout(async () => {
+    if(_sbSearchQ.length < 2){ renderSbHistory(_sbHistSessions); return; }
+    try {
+      const res  = await fetch('/history/search?q=' + encodeURIComponent(_sbSearchQ));
+      const hits = await res.json();
+      // Only apply if the query hasn't changed while we were fetching
+      if(_sbSearchQ !== q.trim()) return;
+      renderSbHistorySearch(hits, _sbSearchQ);
+    } catch(e){
+      el.innerHTML = '<div class="sb-empty">Search failed</div>';
+    }
+  }, 280);
+}
+
+function _highlightMatch(text, q){
+  if(!q || !text) return escHtml(text || '');
+  const idx = text.toLowerCase().indexOf(q.toLowerCase());
+  if(idx === -1) return escHtml(text);
+  return escHtml(text.slice(0, idx))
+    + '<mark class="sb-hl">' + escHtml(text.slice(idx, idx + q.length)) + '</mark>'
+    + escHtml(text.slice(idx + q.length));
+}
+
+function renderSbHistorySearch(hits, q){
+  const el = document.getElementById('sb-panel-history');
+  if(!hits.length){
+    el.innerHTML = '<div class="sb-empty">No sessions match <em>' + escHtml(q) + '</em></div>';
+    return;
+  }
+  el.innerHTML = hits.map(s => {
+    const name  = s.name || s.date;
+    const ai    = s.ai || '';
+    const color = AI_COLOR[ai] || '';
+    const count = s.match_count === 1 ? '1 match' : s.match_count + ' matches';
+    return `<div class="sb-hcard sb-hcard-search" onclick="resumeSession('${s.date}')" title="Click to resume session">
+      <div style="display:flex;align-items:center;gap:6px">
+        <div class="sb-hcard-name" id="sb-hcard-name-${s.date}" style="flex:1">${_highlightMatch(name, q)}</div>
+        ${ai ? `<span class="sb-hcard-ai" style="${color ? 'border-color:' + color + ';color:' + color : ''}">${ai}</span>` : ''}
+        <button class="sb-rename-btn" title="Rename" onclick="sbStartRename(event,'${s.date}')">✏️</button>
+      </div>
+      <div class="sb-hcard-snippet">${_highlightMatch(s.snippet, q)}</div>
+      <div class="sb-hcard-meta"><span>${s.date}</span><span class="sb-match-count">${count}</span></div>
+    </div>`;
+  }).join('');
 }
 
 // ── Left Sidebar: Scheduled Tasks ────────────────────────────────────────────
@@ -4118,12 +4606,12 @@ function updateSbScheduled(tasks){
   }).join('');
 }
 function sbSchedAdd(){
-  const cron   = document.getElementById('sb-sched-cron').value.trim();
+  _initSchedPicker('sb-');
+  const cron   = _buildCronFromPicker('sb-');
   const ai     = document.getElementById('sb-sched-ai').value;
   const prompt = document.getElementById('sb-sched-prompt').value.trim();
-  if(!cron || !prompt){ alert('Cron expression and prompt are required.'); return; }
+  if(!cron || !prompt){ alert('Please fill in schedule and prompt.'); return; }
   cmd(`schedule_add:${cron}|${ai}|${prompt}`);
-  document.getElementById('sb-sched-cron').value = '';
   document.getElementById('sb-sched-prompt').value = '';
 }
 
