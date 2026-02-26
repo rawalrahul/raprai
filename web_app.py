@@ -1,5 +1,5 @@
 """
-web_app.py — TaskForge: Web UI + Telegram Bot in one process.
+web_app.py — Helm HQ: Web UI + Telegram Bot in one process.
 
 Replaces the bare command-prompt window with a local chat UI at http://localhost:8000.
 The Telegram bot continues to work in parallel; both channels share the same state.
@@ -1097,7 +1097,11 @@ def _sched_tasks_payload() -> list[dict]:
 # FastAPI app + WebSocket
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="TaskForge")
+app = FastAPI(title="Helm HQ")
+
+# Serve logo.png (and any other static assets placed alongside web_app.py)
+_static_dir = pathlib.Path(__file__).parent
+app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -1908,7 +1912,7 @@ async def tg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Welcome message — show session list or prompt to create first session."""
     if _sessions:
         await update.message.reply_text(
-            "👋 *TaskForge* — Multi-Session Mode\n\n"
+            "👋 *Helm HQ* — Multi-Session Mode\n\n"
             "Tap a session to focus it, or create a new one.\n"
             f"Web UI: http://localhost:{WEB_PORT}",
             parse_mode="Markdown",
@@ -1916,7 +1920,7 @@ async def tg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         await update.message.reply_text(
-            "👋 *TaskForge* — Multi-Session Mode\n\n"
+            "👋 *Helm HQ* — Multi-Session Mode\n\n"
             "No sessions yet. Create your first session:\n"
             f"Web UI: http://localhost:{WEB_PORT}",
             parse_mode="Markdown",
@@ -1931,7 +1935,7 @@ async def tg_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if fs:
         ai_label = fs["emoji"] + " " + (fs["ai"] or "Shell")
         await update.message.reply_text(
-            f"*TaskForge — {fs['name']}*\n"
+            f"*Helm HQ — {fs['name']}*\n"
             f"AI: {ai_label}  ·  Status: {fs['status']}\n"
             f"📁 `{fs['cwd']}`",
             parse_mode="Markdown",
@@ -1939,7 +1943,7 @@ async def tg_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         await update.message.reply_text(
-            "*TaskForge — Sessions*\nNo session focused. Pick one:",
+            "*Helm HQ — Sessions*\nNo session focused. Pick one:",
             parse_mode="Markdown",
             reply_markup=_sessions_keyboard(),
         )
@@ -2961,7 +2965,7 @@ _HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>TaskForge</title>
+<title>Helm HQ</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -3159,10 +3163,25 @@ header{
 /* ── Messages ── */
 #messages{
   flex:1;overflow-y:auto;padding:22px 20px 8px;
-  display:flex;flex-direction:column;gap:16px;scroll-behavior:smooth}
+  display:flex;flex-direction:column;gap:16px;scroll-behavior:smooth;
+  position:relative}
 #messages::-webkit-scrollbar{width:4px}
 #messages::-webkit-scrollbar-track{background:transparent}
 #messages::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+/* Logo watermark — centered in the chat area */
+#chat-logo-bg{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  pointer-events:none;z-index:0;transition:opacity .4s ease}
+#chat-logo-bg img{
+  width:min(260px,55%);opacity:.9;
+  filter:drop-shadow(0 0 24px rgba(0,0,0,.08));
+  transition:width .4s ease, opacity .4s ease}
+/* Faint watermark once messages exist */
+#messages.has-messages #chat-logo-bg img{
+  width:min(140px,28%);opacity:.06}
+/* Make real message groups sit above the logo layer */
+#messages .grp, #messages #thinking{position:relative;z-index:1}
 
 .grp{display:flex;flex-direction:column;gap:4px;max-width:80%}
 .grp.user{align-self:flex-end;align-items:flex-end}
@@ -3509,7 +3528,7 @@ header{
 <div id="center-panel">
 
 <header>
-  <div class="logo">⚡ Task<em>Forge</em></div>
+  <div class="logo">⚓ Helm <em>HQ</em></div>
   <div class="header-right">
     <button class="sb-toggle" id="toggle-left" onclick="toggleLeft()" title="History & Scheduled">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
@@ -3609,6 +3628,9 @@ header{
 </div>
 
 <div id="messages">
+  <div id="chat-logo-bg" aria-hidden="true">
+    <img src="/static/logo.png" alt="">
+  </div>
   <div class="grp system">
     <div class="bubble">Connecting to server…</div>
   </div>
@@ -3749,18 +3771,18 @@ function escHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').r
 function connect(){
   const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
   const url = `${wsProto}://${location.host}/ws`;
-  console.log('[TaskForge] Connecting WS:', url);
+  console.log('[Helm HQ] Connecting WS:', url);
   ws = new WebSocket(url);
   ws.onopen = () => {
-    console.log('[TaskForge] WS connected');
+    console.log('[Helm HQ] WS connected');
     document.getElementById('conn').className = 'ok';
     try { cmd('schedule_list'); } catch(e){ console.warn('schedule_list err', e); }
     try { loadSbHistory(); } catch(e){ console.warn('loadSbHistory err', e); }
     try { _sbSchedPopulateAi(); } catch(e){ console.warn('_sbSchedPopulateAi err', e); }
     try { _initSchedPicker(''); _initSchedPicker('sb-'); } catch(e){ console.warn('initSchedPicker err', e); }
   };
-  ws.onclose = (ev) => { console.warn('[TaskForge] WS closed', ev.code, ev.reason); document.getElementById('conn').className = ''; setTimeout(connect, 2500); };
-  ws.onerror = (ev) => { console.error('[TaskForge] WS error', ev); };
+  ws.onclose = (ev) => { console.warn('[Helm HQ] WS closed', ev.code, ev.reason); document.getElementById('conn').className = ''; setTimeout(connect, 2500); };
+  ws.onerror = (ev) => { console.error('[Helm HQ] WS error', ev); };
   ws.onmessage = e => {
     const d = JSON.parse(e.data);
     if(d.type==='message'){ _liveHistory.push(d); if(!_viewingHistory) renderMsg(d); }
@@ -3979,6 +4001,24 @@ function _refreshThinkingUI(){
   }
 }
 
+// ── Logo watermark helpers ────────────────────────────────────────────────────
+function _clearMessages(){
+  // Remove all message groups but keep #chat-logo-bg intact
+  const wrap = document.getElementById('messages');
+  [...wrap.children].forEach(el => { if(el.id !== 'chat-logo-bg') el.remove(); });
+  wrap.classList.remove('has-messages');
+}
+function _updateLogoState(){
+  const wrap = document.getElementById('messages');
+  // Count real message groups (exclude the logo bg div itself)
+  const msgCount = wrap.querySelectorAll('.grp:not(.system), .grp.user, .grp.assistant').length;
+  // Also count system bubbles that aren't the connecting placeholder
+  const sysBubbles = [...wrap.querySelectorAll('.grp.system .bubble')]
+    .filter(b => b.textContent !== 'Connecting to server…');
+  const hasAny = msgCount > 0 || sysBubbles.length > 0;
+  wrap.classList.toggle('has-messages', hasAny);
+}
+
 // ── Messages ─────────────────────────────────────────────────────────────────
 function renderMsg(m){
   const wrap = document.getElementById('messages');
@@ -4014,6 +4054,7 @@ function renderMsg(m){
   bub.textContent = m.content;
   grp.appendChild(bub);
   wrap.appendChild(grp);
+  _updateLogoState();
   scroll();
 }
 function scroll(){ const m = document.getElementById('messages'); m.scrollTop = m.scrollHeight; }
@@ -4283,8 +4324,7 @@ async function loadSession(date){
   banner.className = 'on view';
   document.getElementById('hist-banner-icon').textContent = '📖';
   document.getElementById('hist-banner-date').textContent = 'Viewing: ' + name;
-  const wrap = document.getElementById('messages');
-  wrap.innerHTML = '';
+  _clearMessages();
   msgs.forEach(renderMsg);
   scroll();
 }
@@ -4293,8 +4333,7 @@ function returnToLive(){
   _viewingHistory = false;
   const banner = document.getElementById('hist-banner');
   banner.className = '';
-  const wrap = document.getElementById('messages');
-  wrap.innerHTML = '';
+  _clearMessages();
   _liveHistory.forEach(renderMsg);
   scroll();
 }
