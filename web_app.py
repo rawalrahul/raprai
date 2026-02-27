@@ -1,4 +1,4 @@
-"""
+﻿"""
 web_app.py — Helm HQ: Web UI + Telegram Bot in one process.
 
 Replaces the bare command-prompt window with a local chat UI at http://localhost:8000.
@@ -71,7 +71,7 @@ _CMD_EXT = ".cmd" if sys.platform == "win32" else ""
 # ---------------------------------------------------------------------------
 
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][AB012]|\x1b.")
-HISTORY_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+HISTORY_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$|^p_[a-f0-9]{12}$")
 
 
 def _clean_output(raw: str) -> str:
@@ -211,7 +211,7 @@ _focused_id: Optional[str] = None        # which session Telegram/Web are talkin
 _session_counter: int = 0               # incremented for each new session
 
 _pending_tg_context: Optional[str] = None   # injected into next Telegram message after /resume
-_tg_browse_state: dict = {}             # user_id → {"path": str, "dirs": list, "page": int}
+_tg_browse_state: dict = {}             # user_id -> {"path": str, "dirs": list, "page": int}
 _BROWSE_PAGE_SIZE = 8
 # For private bot DMs, chat_id == user_id, so pre-init from ALLOWED_USER_IDS.
 # This ensures web-initiated responses are forwarded to Telegram even before
@@ -220,6 +220,10 @@ _telegram_chat_id: Optional[int] = next(iter(ALLOWED_USER_IDS), None)
 _chat_history: list[dict] = []           # in-memory log for new WS clients joining mid-session
 _ws_clients: set[WebSocket] = set()
 _telegram_app: Optional[Application] = None  # set in main(), used to send Telegram messages from web
+_usage_period_start: float = time.time()
+_usage_period_seconds: int = max(3600, int(float(os.environ.get("USAGE_RESET_HOURS", "24")) * 3600))
+_usage_stats: dict[str, dict] = {}       # ai_key -> counters for current period
+_usage_exact: dict[str, dict] = {}       # ai_key -> exact-ish CLI parsed usage info
 
 # ---------------------------------------------------------------------------
 # AI integration plugin loader
@@ -263,8 +267,10 @@ def _load_integrations() -> None:
 # Session helpers
 # ---------------------------------------------------------------------------
 
-def _make_session(ai: Optional[str]) -> dict:
-    """Create, launch, and register a new session. Returns the session dict."""
+def _make_session(ai: Optional[str], cwd: Optional[str] = None) -> dict:
+    """Create, launch, and register a new session. Returns the session dict.
+    Automatically resumes history if a log exists for the given CWD.
+    """
     global _session_counter, _focused_id
     _session_counter += 1
     sid = f"s{_session_counter}"
@@ -275,21 +281,42 @@ def _make_session(ai: Optional[str]) -> dict:
         name  = f"{info['name']} #{_session_counter}"; emoji = info["emoji"]; color = info["color"]
     else:
         name  = f"Shell #{_session_counter}";   emoji = "🐚"; color = "#6b7280"; ai = None
+    
+    target_cwd = cwd or _DEFAULT_CWD
+    path_id = _path_to_id(target_cwd)
+    history = _get_history_messages(path_id)
+    
     t = TerminalSession()
     if ai is None:
-        # Shell sessions need cmd.exe immediately.
-        # AI sessions (claude / integrations) use _run_ai_popen instead — no cmd.exe needed.
-        # Launching Popen on the event-loop thread for AI sessions blocked new-session creation
-        # while another AI task was in flight; skipping it here makes creation instant.
         t.launch()
+    
+    claude_msgs = []
+    if ai == "claude":
+        # Pre-fill claude history with user messages for context awareness
+        claude_msgs = [m["content"] for m in history if m.get("role") == "user"]
+
     sess: dict = {
-        "id": sid, "ai": ai, "cwd": _DEFAULT_CWD, "status": "running",
-        "terminal": t, "claude_msgs": [], "name": name, "emoji": emoji,
+        "id": sid, "ai": ai, "cwd": target_cwd, "status": "running",
+        "terminal": t, "claude_msgs": claude_msgs, "name": name, "emoji": emoji,
         "color": color, "created": time.time(), "last_used": time.time(),
         "busy": False, "task_start": None,  # progress tracking
+        "session_started": time.time(), "total_task_seconds": 0.0, "task_count": 0,
+        "changes": {"new": [], "modified": [], "deleted": []},
         "proc": None,  # running Popen object (AI subprocess), killable
+        "history": history,  # loaded history
     }
     _sessions[sid] = sess
+    
+    # Broadcast the loaded history to the web client
+    if history:
+        async def _push_history():
+            await asyncio.sleep(0.5) # Wait for client to be ready
+            for msg in history:
+                # Add session info for UI
+                msg_with_sess = {**msg, "session_id": sid, "session_name": name, "session_emoji": emoji}
+                await _broadcast(msg_with_sess)
+        asyncio.create_task(_push_history())
+
     return sess
 
 
@@ -305,18 +332,202 @@ def _session_cwd() -> str:
 
 def _session_status_icon(sess: dict) -> str:
     if sess["status"] == "stopped":
-        return "🔴"
+        return "\U0001F534"
     if sess.get("busy"):
-        return "🟡"   # actively processing a task
-    return "🟢"       # idle (running but waiting for input)
+        return "\U0001F7E1"   # actively processing a task
+    return "\U0001F7E2"       # idle (running but waiting for input)
+
+
+def _usage_reset_if_needed() -> None:
+    global _usage_period_start, _usage_stats, _usage_exact
+    now = time.time()
+    if now - _usage_period_start >= _usage_period_seconds:
+        _usage_period_start = now
+        _usage_stats = {}
+        _usage_exact = {}
+
+
+def _usage_ai_label(ai_key: str) -> str:
+    if ai_key == "claude":
+        return "Claude"
+    if ai_key == "shell":
+        return "Shell"
+    info = _integrations.get(ai_key)
+    return info["name"] if info else ai_key.title()
+
+
+def _parse_rel_reset_seconds(text: str) -> Optional[int]:
+    if not text:
+        return None
+    m = re.search(r"(?:(\d+)\s*d)?\s*(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?", text.lower())
+    if not m:
+        return None
+    d = int(m.group(1) or 0)
+    h = int(m.group(2) or 0)
+    mm = int(m.group(3) or 0)
+    if d == h == mm == 0:
+        return None
+    return d * 86400 + h * 3600 + mm * 60
+
+
+def _parse_cli_usage_from_text(text: str, provider: str) -> Optional[dict]:
+    if not text:
+        return None
+    low = text.lower()
+    kw = ("usage", "quota", "limit", "remaining", "reset", "resets", "renews")
+    if provider == "claude":
+        kw = kw + ("cost", "/usage", "/cost")
+    elif provider == "gemini":
+        kw = kw + ("rate", "requests", "rpm", "rpd")
+    if not any(k in low for k in kw):
+        return None
+
+    pct_used: Optional[float] = None
+    for pm in re.finditer(r"(\d{1,3}(?:\.\d+)?)\s*%", text):
+        pct = float(pm.group(1))
+        if not (0.0 <= pct <= 100.0):
+            continue
+        window = low[max(0, pm.start() - 40):pm.end() + 40]
+        if any(k in window for k in kw):
+            pct_used = pct
+            break
+
+    reset_in_sec: Optional[int] = None
+    rm = re.search(r"(?:resets?|renews?)\s*(?:in|after|:)?\s*([0-9d hms]+)", low)
+    if rm:
+        reset_in_sec = _parse_rel_reset_seconds(rm.group(1).strip())
+
+    if pct_used is None and reset_in_sec is None:
+        return None
+    return {"pct_used": pct_used, "reset_in_sec": reset_in_sec}
+
+
+def _usage_cap_minutes(ai_key: str) -> Optional[int]:
+    raw = os.environ.get(f"USAGE_CAP_MIN_{ai_key.upper()}", "").strip()
+    if not raw:
+        raw = os.environ.get("USAGE_CAP_MIN_DEFAULT", "").strip()
+    if not raw:
+        # Practical default for UI percent bars (runtime estimate, not provider quota).
+        if ai_key in ("claude", "codex", "gemini"):
+            return 300
+        return None
+    try:
+        val = int(raw)
+        return val if val > 0 else None
+    except Exception:
+        return None
+
+
+def _record_usage_task(ai_key: Optional[str], elapsed_seconds: float,
+                       prompt: str = "", output: str = "") -> None:
+    _usage_reset_if_needed()
+    key = ai_key or "shell"
+    st = _usage_stats.setdefault(key, {
+        "tasks": 0, "seconds": 0.0, "chars_in": 0, "chars_out": 0, "last_used": 0.0,
+    })
+    st["tasks"] += 1
+    st["seconds"] += max(0.0, float(elapsed_seconds))
+    st["chars_in"] += len(prompt or "")
+    st["chars_out"] += len(output or "")
+    st["last_used"] = time.time()
+    if key in ("codex", "claude", "gemini"):
+        exact = _parse_cli_usage_from_text(output or "", key)
+        if exact:
+            _usage_exact[key] = {
+                "pct_used": exact.get("pct_used"),
+                "reset_in_sec": exact.get("reset_in_sec"),
+                "source": f"{key}_cli",
+                "updated_at": time.time(),
+            }
+
+
+def _fmt_reset_eta() -> str:
+    rem = max(0, int((_usage_period_start + _usage_period_seconds) - time.time()))
+    h, rem2 = divmod(rem, 3600)
+    m, _ = divmod(rem2, 60)
+    return f"{h}h {m}m"
+
+
+def _usage_summary_text() -> str:
+    _usage_reset_if_needed()
+    if not _usage_stats:
+        return "Usage (current period)\nNo usage recorded yet."
+
+    rows = sorted(_usage_stats.items(), key=lambda kv: kv[1].get("seconds", 0.0), reverse=True)
+    lines = [
+        "Usage (current period)",
+        f"Reset in: {_fmt_reset_eta()}",
+    ]
+
+    best_choice = None
+    best_remaining = -1.0
+
+    for key, st in rows:
+        mins_used = st["seconds"] / 60.0
+        tasks = int(st["tasks"])
+        est_tokens = int((st.get("chars_in", 0) + st.get("chars_out", 0)) / 4)
+        exact = _usage_exact.get(key) or {}
+        exact_pct = exact.get("pct_used")
+        exact_reset = exact.get("reset_in_sec")
+        cap = _usage_cap_minutes(key)
+        label = _usage_ai_label(key)
+        if exact_pct is not None:
+            rs = _fmt_reset_eta() if exact_reset is None else f"{max(0, int(exact_reset)) // 3600}h {(max(0, int(exact_reset)) % 3600) // 60}m"
+            lines.append(
+                f"- {label}: {float(exact_pct):.1f}% used (CLI) | resets in {rs} | {tasks} task(s) | ~{est_tokens} tok"
+            )
+        elif cap:
+            used_pct = min(100.0, (mins_used / cap) * 100.0)
+            rem = max(0.0, cap - mins_used)
+            lines.append(
+                f"- {label}: {mins_used:.1f}m / {cap}m ({used_pct:.1f}%) | left {rem:.1f}m | {tasks} task(s) | ~{est_tokens} tok"
+            )
+            if rem > best_remaining:
+                best_remaining = rem
+                best_choice = label
+        else:
+            lines.append(f"- {label}: {mins_used:.1f}m | {tasks} task(s) | ~{est_tokens} tok")
+
+    if best_choice:
+        lines.append(f"\nSuggested next AI: {best_choice} (most remaining quota)")
+    else:
+        lines.append("\nTip: set USAGE_CAP_MIN_<AI> in .env (e.g. USAGE_CAP_MIN_CLAUDE=300).")
+
+    lines.append("Note: CLI-derived values are preferred when detected; otherwise estimates are shown.")
+    return "\n".join(lines)
+
+
+def _usage_for_ai(ai_key: Optional[str]) -> dict:
+    _usage_reset_if_needed()
+    key = ai_key or "shell"
+    st = _usage_stats.get(key, {})
+    used_min = float(st.get("seconds", 0.0)) / 60.0
+    exact = _usage_exact.get(key) or {}
+    cap = _usage_cap_minutes(key)
+    pct = min(100.0, (used_min / cap) * 100.0) if cap else None
+    reset_in = max(0, int((_usage_period_start + _usage_period_seconds) - time.time()))
+    if exact.get("pct_used") is not None:
+        pct = float(exact["pct_used"])
+    if exact.get("reset_in_sec") is not None:
+        reset_in = max(0, int(exact["reset_in_sec"]))
+    return {
+        "used_min": used_min,
+        "cap_min": cap,
+        "pct": pct,
+        "reset_in_sec": reset_in,
+        "has_cap": cap is not None,
+        "source": exact.get("source") or "estimate",
+    }
 
 
 def _sessions_state_payload() -> list[dict]:
     """Serialisable list of all sessions (no terminal objects)."""
     return [
         {"id": s["id"], "name": s["name"], "ai": s["ai"], "cwd": s["cwd"],
+         "history_id": _path_to_id(s["cwd"]),
          "status": s["status"], "emoji": s["emoji"], "color": s["color"],
-         "busy": s.get("busy", False)}
+         "busy": s.get("busy", False), "task_start": s.get("task_start"),
+         "usage": _usage_for_ai(s.get("ai"))}
         for s in _sessions.values()
     ]
 
@@ -343,51 +554,87 @@ def _ts() -> str:
     return datetime.now().isoformat()
 
 
-def _is_valid_history_date(date: str) -> bool:
-    """Accept only YYYY-MM-DD date keys for history endpoints."""
-    return bool(HISTORY_DATE_RE.fullmatch(date))
+def _is_valid_history_id(hid: str) -> bool:
+    """Accept YYYY-MM-DD or p_[hash] keys for history endpoints."""
+    return bool(HISTORY_ID_RE.fullmatch(hid))
 
 
-def _save_message_to_log(msg: dict):
-    """Append a message to today's JSONL log file in CHAT_LOG_DIR."""
+def _get_history_messages(hid: str) -> list[dict]:
+    """Retrieve all messages from a log file by ID."""
+    log_file = CHAT_LOG_DIR / f"{hid}.jsonl"
+    if not log_file.exists():
+        return []
+    messages = []
+    try:
+        for line in log_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+                if rec.get("type") == "message":
+                    messages.append(rec)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return messages
+
+
+def _path_to_id(path: str) -> str:
+    """Generate a stable unique ID for a file path (normalized)."""
+    import hashlib
+    norm = str(pathlib.Path(path).expanduser().resolve()).lower().replace("\\", "/")
+    return "p_" + hashlib.md5(norm.encode("utf-8")).hexdigest()[:12]
+
+
+def _save_message_to_log(msg: dict, session_id: Optional[str] = None):
+    """Append a message to the path-based JSONL log file in CHAT_LOG_DIR."""
     try:
         CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
-        date_str = datetime.now().strftime("%Y-%m-%d")
-        log_file = CHAT_LOG_DIR / f"{date_str}.jsonl"
+        cwd = _DEFAULT_CWD
+        if session_id and session_id in _sessions:
+            cwd = _sessions[session_id].get("cwd") or _DEFAULT_CWD
+        
+        path_id = _path_to_id(cwd)
+        log_file = CHAT_LOG_DIR / f"{path_id}.jsonl"
         with log_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps(msg, ensure_ascii=False) + "\n")
     except Exception as e:
         logger.warning("Could not save message to log: %s", e)
 
 
-def _save_cwd_to_log(path: str):
-    """Persist the current working directory as a record in today's JSONL log.
+def _save_cwd_to_log(path: str, session_id: Optional[str] = None):
+    """Persist the current working directory as a record in the path-based JSONL log.
 
-    Also auto-names the session after the folder if no name has been set yet —
-    so "2026-02-26" becomes e.g. "my-project" in the history sidebar.
+    Also auto-names the session after the folder if no name has been set yet.
     """
     try:
         CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
-        date_str = datetime.now().strftime("%Y-%m-%d")
-        log_file = CHAT_LOG_DIR / f"{date_str}.jsonl"
+        path_id = _path_to_id(path)
+        log_file = CHAT_LOG_DIR / f"{path_id}.jsonl"
         with log_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps({"type": "cwd", "path": path, "timestamp": _ts()}, ensure_ascii=False) + "\n")
         # Auto-name the session from the folder name — only if no custom name yet
         existing = _load_chat_names()
-        if not existing.get(date_str):
+        if not existing.get(path_id):
             folder_name = pathlib.Path(path).name or path
             if folder_name and folder_name not in (".", "~", "/"):
-                _save_chat_name(date_str, folder_name)
+                _save_chat_name(path_id, folder_name)
     except Exception as e:
         logger.warning("Could not save CWD to log: %s", e)
 
 
-def _save_ai_to_log(model: Optional[str]):
-    """Persist the active AI model as a record in today's JSONL log."""
+def _save_ai_to_log(model: Optional[str], session_id: Optional[str] = None):
+    """Persist the active AI model as a record in the path-based JSONL log."""
     try:
         CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
-        date_str = datetime.now().strftime("%Y-%m-%d")
-        log_file = CHAT_LOG_DIR / f"{date_str}.jsonl"
+        cwd = _DEFAULT_CWD
+        if session_id and session_id in _sessions:
+            cwd = _sessions[session_id].get("cwd") or _DEFAULT_CWD
+            
+        path_id = _path_to_id(cwd)
+        log_file = CHAT_LOG_DIR / f"{path_id}.jsonl"
         with log_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps({"type": "ai", "model": model, "timestamp": _ts()}, ensure_ascii=False) + "\n")
     except Exception as e:
@@ -400,8 +647,9 @@ def _save_last_state():
         CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
         state_file = CHAT_LOG_DIR / "last_state.json"
         sessions_data = {}
+        volatile_keys = {"terminal", "session_started", "total_task_seconds", "task_count", "changes"}
         for sid, sess in _sessions.items():
-            sessions_data[sid] = {k: v for k, v in sess.items() if k != "terminal"}
+            sessions_data[sid] = {k: v for k, v in sess.items() if k not in volatile_keys}
         with state_file.open("w", encoding="utf-8") as f:
             json.dump(
                 {"sessions": sessions_data, "focused_id": _focused_id,
@@ -413,7 +661,8 @@ def _save_last_state():
 
 
 async def _push_message(role: str, content: str, ai: Optional[str] = None,
-                        source: str = "web", session_id: Optional[str] = None):
+                        source: str = "web", session_id: Optional[str] = None,
+                        log: bool = True):
     """Record a chat message and broadcast it to all WS clients."""
     sess = _sessions.get(session_id) if session_id else None
     msg = {
@@ -426,7 +675,8 @@ async def _push_message(role: str, content: str, ai: Optional[str] = None,
     _chat_history.append(msg)
     if len(_chat_history) > 200:
         del _chat_history[:-200]
-    _save_message_to_log(msg)
+    if log:
+        _save_message_to_log(msg, session_id=session_id)
     await _broadcast(msg)
 
 
@@ -544,9 +794,10 @@ async def _process_message(text: str, source: str = "web",
         await _push_message("system", msg, source=source)
         return msg
 
-    sess["last_used"] = time.time()
+    task_started_at = time.time()
+    sess["last_used"] = task_started_at
     sess["busy"]       = True
-    sess["task_start"] = time.time()
+    sess["task_start"] = task_started_at
     await _push_state()  # immediately reflect 🟡 busy status on web UI and Telegram
 
     ai       = sess["ai"]
@@ -567,7 +818,7 @@ async def _process_message(text: str, source: str = "web",
             after  = await asyncio.to_thread(_snapshot_dir, cwd)
             await _push_thinking(False, session_id=sid)
             await _push_message("assistant", output, ai="claude", source=source, session_id=sid)
-            await _handle_diff(before, after, source, cwd)
+            await _handle_diff(before, after, source, cwd, session_id=sid)
 
         elif ai in _integrations:
             await _push_thinking(True, ai, session_id=sid)
@@ -577,7 +828,7 @@ async def _process_message(text: str, source: str = "web",
             after  = await asyncio.to_thread(_snapshot_dir, cwd)
             await _push_thinking(False, session_id=sid)
             await _push_message("assistant", output, ai=ai, source=source, session_id=sid)
-            await _handle_diff(before, after, source, cwd)
+            await _handle_diff(before, after, source, cwd, session_id=sid)
 
         else:
             # Shell mode
@@ -591,10 +842,15 @@ async def _process_message(text: str, source: str = "web",
                 after  = await asyncio.to_thread(_snapshot_dir, cwd)
                 output = output or "(no output)"
                 await _push_message("assistant", output, ai="shell", source=source, session_id=sid)
-                await _handle_diff(before, after, source, cwd)
+                await _handle_diff(before, after, source, cwd, session_id=sid)
 
     finally:
-        elapsed            = time.time() - sess["task_start"]
+        started = sess.get("task_start") if sess else None
+        elapsed = time.time() - (started if started is not None else task_started_at)
+        if sess:
+            sess["total_task_seconds"] = float(sess.get("total_task_seconds") or 0.0) + max(0.0, elapsed)
+            sess["task_count"] = int(sess.get("task_count") or 0) + 1
+        _record_usage_task(ai, elapsed, prompt=text, output=output)
         sess["busy"]       = False
         sess["task_start"] = None
         await _push_state()  # flip session back to 🟢 idle
@@ -610,6 +866,31 @@ async def _forward_to_telegram(text: str):
             await _telegram_app.bot.send_message(chat_id=_telegram_chat_id, text=text)
         except Exception as e:
             logger.warning("Telegram forward failed: %s", e)
+
+
+async def _tg_update_focus():
+    """Notify Telegram that the focused session has changed.
+    Sends a message with the new focus status and the appropriate session keyboard.
+    """
+    if not (_telegram_app and _telegram_chat_id):
+        return
+    sess = _focused_session()
+    if sess:
+        msg = f"✨ *{sess['name']}*\n📂 `{sess['cwd']}`"
+        markup = _session_controls_keyboard()
+    else:
+        msg = "No session focused."
+        markup = _sessions_keyboard()
+    
+    try:
+        await _telegram_app.bot.send_message(
+            chat_id=_telegram_chat_id,
+            text=msg,
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
+    except Exception as e:
+        logger.warning("Telegram focus update failed: %s", e)
 
 
 async def _tg_progress_notify(sess: dict, output: str, elapsed: float, source: str) -> None:
@@ -644,9 +925,9 @@ async def _tg_progress_notify(sess: dict, output: str, elapsed: float, source: s
     # Truncate output preview to one readable line
     preview = " ".join(output.strip().splitlines()[:3])
     if len(preview) > 300:
-        preview = preview[:297] + "…"
+        preview = preview[:297] + "..."
 
-    lines = [f"✅ {sess['emoji']} *{sess['name']}* — {elapsed_str}"]
+    lines = [f"✨ *{sess['name']}* — {elapsed_str}"]
     if preview:
         lines.append(preview)
 
@@ -683,12 +964,13 @@ async def _change_cwd(new_path: str, source: str = "web",
     new_cwd = str(path)
     if sess:
         sess["cwd"] = new_cwd
-    _save_cwd_to_log(new_cwd)
+    _save_cwd_to_log(new_cwd, session_id=sid)
     _save_last_state()
     logger.info("Working directory changed to: %s", new_cwd)
     await _push_state()
-    await _push_message("system", f"📁 Working directory → {new_cwd}", source=source,
-                        session_id=sid)
+    # If no session focused, don't pollute default log with the announcement
+    await _push_message("system", f"📂 Working directory -> {new_cwd}", source=source,
+                        session_id=sid, log=(sid is not None))
     return True
 
 
@@ -765,6 +1047,89 @@ def _diff_snapshots(before: dict, after: dict) -> dict:
     }
 
 
+def _fmt_duration_short(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m}m {s}s"
+    if m:
+        return f"{m}m {s}s"
+    return f"{s}s"
+
+
+def _display_change_path(filepath: str, cwd: str) -> str:
+    """Return a stable, user-friendly path label for change summaries."""
+    try:
+        p = pathlib.Path(filepath).resolve()
+        base = pathlib.Path(cwd).resolve()
+        return p.relative_to(base).as_posix()
+    except Exception:
+        try:
+            return pathlib.Path(filepath).name
+        except Exception:
+            return str(filepath)
+
+
+def _merge_session_changes(sess: dict, diff: dict, cwd: str) -> None:
+    """Accumulate per-task file changes into in-memory session summary buckets."""
+    buckets = sess.setdefault("changes", {"new": [], "modified": [], "deleted": []})
+    for key in ("new", "modified", "deleted"):
+        cur = buckets.setdefault(key, [])
+        seen = set(cur)
+        for fp in diff.get(key, []):
+            name = _display_change_path(fp, cwd)
+            if name in seen:
+                continue
+            cur.append(name)
+            seen.add(name)
+
+
+async def _emit_session_end_summary(sess: dict, ended_as: str, source: str) -> None:
+    """Send end-of-session summary to chat + Telegram (without persisting metadata)."""
+    now = time.time()
+    started = float(sess.get("session_started") or sess.get("created") or now)
+    total_session = max(0.0, now - started)
+    total_task = float(sess.get("total_task_seconds") or 0.0)
+    if sess.get("busy") and sess.get("task_start"):
+        total_task += max(0.0, now - float(sess["task_start"]))
+    task_count = int(sess.get("task_count") or 0)
+
+    changes = sess.get("changes") or {}
+    new_files = changes.get("new", [])
+    mod_files = changes.get("modified", [])
+    del_files = changes.get("deleted", [])
+
+    lines = [
+        f"\U0001F4CA Session {ended_as}: {sess['name']}",
+        f"\u23F1 Session duration: {_fmt_duration_short(total_session)}",
+        f"\U0001F9E0 Task time: {_fmt_duration_short(total_task)} across {task_count} task(s)",
+        f"\U0001F4C1 Changes: +{len(new_files)}  ~{len(mod_files)}  -{len(del_files)}",
+    ]
+
+    def _add_block(title: str, items: list[str], icon: str):
+        if not items:
+            return
+        lines.append(f"{icon} {title}:")
+        for p in items[:8]:
+            lines.append(f"  - {p}")
+        if len(items) > 8:
+            lines.append(f"  - ... and {len(items) - 8} more")
+
+    _add_block("Created", new_files, "\u2705")
+    _add_block("Modified", mod_files, "\u270F\uFE0F")
+    _add_block("Deleted", del_files, "\U0001F5D1\uFE0F")
+
+    summary = "\n".join(lines)
+    await _push_message("system", summary, source=source, session_id=sess.get("id"))
+
+    if _telegram_app and _telegram_chat_id:
+        try:
+            await _telegram_app.bot.send_message(chat_id=_telegram_chat_id, text=summary)
+        except Exception as e:
+            logger.warning("Session summary Telegram notify failed: %s", e)
+
+
 def _git_diff_stat(cwd: str) -> Optional[str]:
     """Run `git diff --stat` in cwd. Returns None if not a git repo or no diff."""
     try:
@@ -815,7 +1180,7 @@ async def _send_file_to_telegram(filepath: str, source: str = "web"):
     local_url = f"http://localhost:{WEB_PORT}/files/{rel_posix}"
     # Show a compact display name (include one parent dir if in a subdir)
     display   = str(pathlib.Path(rel_posix))
-    caption   = f"📎 {display}\n🔗 {local_url}"
+    caption   = f"📌 {display}\n🔗 {local_url}"
 
     try:
         with open(filepath, "rb") as fh:
@@ -833,11 +1198,14 @@ async def _send_file_to_telegram(filepath: str, source: str = "web"):
         logger.warning("Could not send %s to Telegram: %s", path.name, e)
 
 
-async def _handle_diff(before: dict, after: dict, source: str, cwd: str):
-    """Diff snapshots → notify web chat + Telegram about new, modified, deleted files."""
+async def _handle_diff(before: dict, after: dict, source: str, cwd: str,
+                       session_id: Optional[str] = None):
+    """Diff snapshots -> notify web chat + Telegram about new, modified, deleted files."""
     diff = _diff_snapshots(before, after)
+    if session_id and session_id in _sessions:
+        _merge_session_changes(_sessions[session_id], diff, cwd)
 
-    # ── New files ─────────────────────────────────────────────────────────────
+    # --- New files ------------------------------------------------------------------------------------------
     for filepath in diff["new"]:
         path = pathlib.Path(filepath)
         ext  = path.suffix.lower()
@@ -850,12 +1218,13 @@ async def _handle_diff(before: dict, after: dict, source: str, cwd: str):
             size_kb = 0
         await _push_message(
             "system",
-            f"📎 New file: {path.name} ({size_kb} KB)  →  {local_url}",
+            f"📌 New file: {path.name} ({size_kb} KB)  ->  {local_url}",
             source=source,
+            session_id=session_id
         )
         await _send_file_to_telegram(filepath, source)
 
-    # ── Modified files ────────────────────────────────────────────────────────
+    # --- Modified files ------------------------------------------------------------------------------------
     if diff["modified"]:
         # Prefer git diff --stat (shows insertions/deletions per file)
         git_stat = await asyncio.to_thread(_git_diff_stat, cwd) if _git_is_repo(cwd) else None
@@ -868,16 +1237,16 @@ async def _handle_diff(before: dict, after: dict, source: str, cwd: str):
                 old_sz, _ = before[fp]
                 new_sz, _ = after[fp]
                 delta     = new_sz - old_sz
-                lines.append(f"  ✏️ {p.name}  ({delta:+,} B)")
+                lines.append(f"  📝 {p.name}  ({delta:+,} B)")
             if len(diff["modified"]) > 12:
-                lines.append(f"  … and {len(diff['modified']) - 12} more")
+                lines.append(f"  ... and {len(diff['modified']) - 12} more")
             summary = "\n".join(lines)
 
-        await _push_message("system", summary, source=source)
+        await _push_message("system", summary, source=source, session_id=session_id)
 
         if _telegram_app and _telegram_chat_id:
             tg_text = git_stat or "\n".join(
-                f"✏️ {pathlib.Path(fp).name}" for fp in diff["modified"][:10]
+                f"📝 {pathlib.Path(fp).name}" for fp in diff["modified"][:10]
             )
             try:
                 await _telegram_app.bot.send_message(
@@ -888,12 +1257,12 @@ async def _handle_diff(before: dict, after: dict, source: str, cwd: str):
             except Exception as e:
                 logger.warning("Diff Telegram notify failed: %s", e)
 
-    # ── Deleted files ─────────────────────────────────────────────────────────
+    # --- Deleted files ------------------------------------------------------------------------------------
     if diff["deleted"]:
         names = ", ".join(pathlib.Path(fp).name for fp in diff["deleted"][:6])
         if len(diff["deleted"]) > 6:
             names += f" +{len(diff['deleted']) - 6} more"
-        await _push_message("system", f"🗑️ Deleted: {names}", source=source)
+        await _push_message("system", f"🗑️ Deleted: {names}", source=source, session_id=session_id)
 
 
 # Keep old name as alias so any external callers don't break
@@ -920,16 +1289,16 @@ def _natural_to_cron(text: str) -> Optional[str]:
 
     Examples
     --------
-    "daily at 9am"               → "0 9 * * *"
-    "every monday at 9am"        → "0 9 * * 1"
-    "weekly on friday at 5pm"    → "0 17 * * 5"
-    "monthly on the 1st at 8am"  → "0 8 1 * *"
-    "every weekday at 6:30pm"    → "30 18 * * 1-5"
+    "daily at 9am"               -> "0 9 * * *"
+    "every monday at 9am"        -> "0 9 * * 1"
+    "weekly on friday at 5pm"    -> "0 17 * * 5"
+    "monthly on the 1st at 8am"  -> "0 8 1 * *"
+    "every weekday at 6:30pm"    -> "30 18 * * 1-5"
     """
     import re as _re
     t = text.strip().lower()
 
-    # ── parse time ────────────────────────────────────────────────────────────
+    # --- parse time ------------------------------------------------------------------------------------------
     _time_re = _re.compile(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)?')
     m = _time_re.search(t)
     if not m:
@@ -942,7 +1311,7 @@ def _natural_to_cron(text: str) -> Optional[str]:
     if ampm == "am" and hour == 12:
         hour = 0
 
-    # ── named days ────────────────────────────────────────────────────────────
+    # --- named days ------------------------------------------------------------------------------------------
     _days = {
         "monday":0, "mon":0, "tuesday":1, "tue":1,
         "wednesday":2, "wed":2, "thursday":3, "thu":3,
@@ -961,11 +1330,11 @@ def _natural_to_cron(text: str) -> Optional[str]:
         if day_name in t:
             return f"{minute} {hour} * * {day_num}"
 
-    # ── daily ─────────────────────────────────────────────────────────────────
+    # --- daily ------------------------------------------------------------------------------------------------
     if any(x in t for x in ("every day", "daily", "each day", "everyday")):
         return f"{minute} {hour} * * *"
 
-    # ── monthly (with optional day-of-month) ──────────────────────────────────
+    # --- monthly (with optional day-of-month) ---------------------------------------------------
     if any(x in t for x in ("monthly", "every month", "each month", "once a month")):
         dom_m = _re.search(r"(\d{1,2})(?:st|nd|rd|th)?", t)
         dom = int(dom_m.group(1)) if dom_m else 1
@@ -1033,12 +1402,10 @@ async def _run_scheduled_task(task: dict) -> None:
     """Execute one scheduled task in a temporary session and report via Telegram."""
     logger.info("Running scheduled task %s: %s", task["id"], task["name"])
 
-    sess = _make_session(task["ai"])
-    if task.get("cwd"):
-        sess["cwd"] = task["cwd"]
+    sess = _make_session(task["ai"], cwd=task.get("cwd"))
 
     # Announce start
-    announce = f"⏰ *{task['name']}* starting…"
+    announce = f"⏰ *{task['name']}* starting..."
     await _push_message("system", announce, source="schedule", session_id=sess["id"])
     if _telegram_app and _telegram_chat_id:
         try:
@@ -1181,7 +1548,7 @@ async def list_integrations_endpoint():
     ])
 
 
-# ── History cache — serves instantly, refreshes in background ─────────────────
+# --- History cache — serves instantly, refreshes in background ------------------------
 _hist_cache: list = []       # cached session metadata list
 _hist_cache_ts: float = 0.0  # last refresh timestamp
 
@@ -1192,7 +1559,7 @@ def _scan_log_fast(log_file: pathlib.Path) -> dict:
     The head scan finds the initial CWD (used as a default session name for old
     sessions that pre-date the auto-naming feature).
     """
-    date_str = log_file.stem
+    hid = log_file.stem
     try:
         size = log_file.stat().st_size
         mtime = log_file.stat().st_mtime
@@ -1247,13 +1614,13 @@ def _scan_log_fast(log_file: pathlib.Path) -> dict:
                 if rec.get("ts"):
                     last_ts = rec["ts"]
         return {
-            "date": date_str, "count": count_tail if size <= 4096 else max(1, size // 200),
+            "date": hid, "count": count_tail if size <= 4096 else max(1, size // 200),
             "name": "", "preview": preview, "ai": last_ai,
             "ts": last_ts, "mtime": mtime,
             "default_name": first_cwd,  # folder name fallback for old sessions
         }
     except Exception:
-        return {"date": date_str, "count": 0, "name": "", "preview": "", "ai": "", "ts": None, "mtime": 0,
+        return {"date": hid, "count": 0, "name": "", "preview": "", "ai": "", "ts": None, "mtime": 0,
                 "default_name": ""}
 
 
@@ -1264,7 +1631,11 @@ def _rebuild_hist_cache_sync() -> list:
         _hist_cache = []
         _hist_cache_ts = time.time()
         return _hist_cache
-    log_files = list(CHAT_LOG_DIR.glob("*.jsonl"))
+    
+    # First, migrate any old date-based logs to path-based logs
+    _migrate_history_to_paths()
+    
+    log_files = [f for f in CHAT_LOG_DIR.glob("*.jsonl") if HISTORY_ID_RE.fullmatch(f.stem)]
     sessions = [_scan_log_fast(f) for f in log_files]
     sessions.sort(key=lambda s: s.get("mtime", 0), reverse=True)
     names = _load_chat_names()
@@ -1278,10 +1649,60 @@ def _rebuild_hist_cache_sync() -> list:
     return sessions
 
 
+def _migrate_history_to_paths():
+    """Find old date-based JSONL files and append them to their respective path-based logs."""
+    try:
+        date_re = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+        old_logs = [f for f in CHAT_LOG_DIR.glob("*.jsonl") if date_re.fullmatch(f.stem)]
+        if not old_logs:
+            return
+
+        logger.info("Migrating %d old chat logs to path-based storage...", len(old_logs))
+        names = _load_chat_names()
+        
+        for f in old_logs:
+            date_str = f.stem
+            try:
+                content = f.read_text(encoding="utf-8", errors="replace")
+                first_cwd = ""
+                for line in content.splitlines():
+                    try:
+                        rec = json.loads(line)
+                        if rec.get("type") == "cwd" and rec.get("path"):
+                            first_cwd = rec["path"]
+                            break
+                    except: continue
+                
+                if first_cwd:
+                    pid = _path_to_id(first_cwd)
+                    target = CHAT_LOG_DIR / f"{pid}.jsonl"
+                    # Append content
+                    with target.open("a", encoding="utf-8") as out:
+                        out.write(content)
+                    # Migrate name if custom
+                    if date_str in names and pid not in names:
+                        _save_chat_name(pid, names[date_str])
+                
+                # Delete old file after migration
+                f.unlink()
+                _save_chat_name(date_str, "")
+            except Exception as e:
+                logger.warning("Failed to migrate log %s: %s", f.name, e)
+    except Exception as e:
+        logger.warning("History migration error: %s", e)
+
+
 @app.get("/history")
-async def history_list():
-    """Return cached session list instantly. NEVER blocks — triggers background refresh."""
+async def history_list(force: bool = False):
+    """Return history session list.
+
+    Default behavior serves cache instantly and refreshes in background.
+    Pass ?force=1 to rebuild synchronously for immediate freshness.
+    """
     from fastapi.responses import JSONResponse
+    if force:
+        sessions = await asyncio.get_event_loop().run_in_executor(None, _rebuild_hist_cache_sync)
+        return JSONResponse(sessions)
     age = time.time() - _hist_cache_ts
     if age > 15 or not _hist_cache_ts:
         # Trigger background refresh (non-blocking)
@@ -1309,7 +1730,7 @@ async def history_search(q: str = ""):
         return JSONResponse([])
 
     log_files = sorted(
-        [f for f in CHAT_LOG_DIR.glob("*.jsonl") if HISTORY_DATE_RE.fullmatch(f.stem)],
+        [f for f in CHAT_LOG_DIR.glob("*.jsonl") if HISTORY_ID_RE.fullmatch(f.stem)],
         reverse=True,  # newest first
     )
 
@@ -1347,9 +1768,9 @@ async def history_search(q: str = ""):
                         end   = min(len(content), idx + len(q) + 60)
                         excerpt = content[start:end].replace("\n", " ").strip()
                         if start > 0:
-                            excerpt = "…" + excerpt
+                            excerpt = "..." + excerpt
                         if end < len(content):
-                            excerpt = excerpt + "…"
+                            excerpt = excerpt + "..."
                         snippet = excerpt
         except Exception:
             continue
@@ -1371,10 +1792,10 @@ async def history_search(q: str = ""):
 
 @app.get("/history/{date}")
 async def history_get(date: str):
-    """Return all messages for a given date (YYYY-MM-DD)."""
+    """Return all messages for a given date or path ID."""
     from fastapi.responses import JSONResponse
-    if not _is_valid_history_date(date):
-        return JSONResponse({"error": "Invalid date format. Use YYYY-MM-DD."}, status_code=400)
+    if not _is_valid_history_id(date):
+        return JSONResponse({"error": "Invalid ID format."}, status_code=400)
     log_file = CHAT_LOG_DIR / f"{date}.jsonl"
     if not log_file.exists():
         return JSONResponse({"error": "Not found"}, status_code=404)
@@ -1395,13 +1816,55 @@ async def history_get(date: str):
     return JSONResponse({"messages": messages, "cwd": last_cwd})
 
 
+@app.get("/history/{date}/resume")
+async def history_resume(date: str):
+    """Return context prefix for resuming a session."""
+    from fastapi.responses import JSONResponse
+    if not _is_valid_history_id(date):
+        return JSONResponse({"error": "Invalid ID format."}, status_code=400)
+    
+    log_file = CHAT_LOG_DIR / f"{date}.jsonl"
+    if not log_file.exists():
+        return JSONResponse({"error": "Not found"}, status_code=404)
+        
+    messages = []
+    try:
+        for line in log_file.read_text(encoding="utf-8").splitlines():
+            try:
+                rec = json.loads(line)
+                if rec.get("role") in ("user", "assistant"):
+                    messages.append(rec)
+            except: continue
+    except: pass
+    
+    if not messages:
+        return JSONResponse({"context": ""})
+        
+    turns = messages[-10:]
+    lines_ctx = []
+    for m in turns:
+        role = "User" if m["role"] == "user" else (m.get("ai") or "AI").title()
+        body = (m.get("content") or "")[:300]
+        if len(m.get("content", "")) > 300:
+            body += "..."
+        lines_ctx.append(f"{role}: {body}")
+
+    label = _load_chat_names().get(date) or date
+    context_prefix = (
+        f"[Previous conversation — {label}]\n"
+        + "\n".join(lines_ctx)
+        + "\n[End context]\n\n"
+    )
+    return JSONResponse({"context": context_prefix})
+
+
 @app.delete("/history/{date}")
 async def history_delete(date: str):
-    """Delete the log file for a given date."""
+    """Delete the log file for a given ID."""
     global _hist_cache_ts
     from fastapi.responses import JSONResponse
-    if not _is_valid_history_date(date):
-        return JSONResponse({"error": "Invalid date format. Use YYYY-MM-DD."}, status_code=400)
+    if not _is_valid_history_id(date):
+        return JSONResponse({"error": "Invalid ID format."}, status_code=400)
     log_file = CHAT_LOG_DIR / f"{date}.jsonl"
     if not log_file.exists():
         return JSONResponse({"error": "Not found"}, status_code=404)
@@ -1415,7 +1878,7 @@ async def history_delete(date: str):
 
 
 def _load_chat_names() -> dict:
-    """Load the chat_names.json sidecar file, returning a date→name mapping."""
+    """Load the chat_names.json sidecar file, returning a date->name mapping."""
     names_file = CHAT_LOG_DIR / "chat_names.json"
     if names_file.exists():
         try:
@@ -1478,11 +1941,11 @@ def _save_chat_name(date: str, name: str) -> None:
 @app.post("/history/{date}/rename")
 @app.patch("/history/{date}/name")
 async def history_rename(date: str, request: Request):
-    """Set or clear a custom display name for a chat session date."""
+    """Set or clear a custom display name for a chat session ID."""
     global _hist_cache_ts
     from fastapi.responses import JSONResponse
-    if not _is_valid_history_date(date):
-        return JSONResponse({"error": "Invalid date format. Use YYYY-MM-DD."}, status_code=400)
+    if not _is_valid_history_id(date):
+        return JSONResponse({"error": "Invalid ID format."}, status_code=400)
     try:
         body = await request.json()
         name = (body.get("name") or "").strip()
@@ -1594,47 +2057,59 @@ async def _handle_web_command(command: str, ws: WebSocket):
     """Handle control commands sent from the web UI (multi-session aware)."""
     global _focused_id
 
-    # ── new_session:{ai} — create and focus a new session ────────────────────
+    # --- new_session:{ai}[|cwd] — create and focus a new session ---
     if command.startswith("new_session:"):
-        ai_key = command.split(":", 1)[1].strip() or None
+        payload = command.split(":", 1)[1].strip()
+        ai_key = None
+        target_cwd = _session_cwd()
+        
+        if "|" in payload:
+            ai_key, target_cwd = payload.split("|", 1)
+        else:
+            ai_key = payload
+            
         if ai_key == "shell":
             ai_key = None
-        sess = _make_session(ai_key)
+            
+        sess = _make_session(ai_key, cwd=target_cwd)
         _focused_id = sess["id"]
         await _push_state()
         label = sess["emoji"] + " " + sess["name"]
         await _push_message("system", f"Session created: {label}", source="web",
                             session_id=sess["id"])
+        await _tg_update_focus()
         return
 
-    # ── focus:{sid} — switch focused session ─────────────────────────────────
+    # --- focus:{sid} — switch focused session ---
     if command.startswith("focus:"):
         sid = command.split(":", 1)[1]
         if sid in _sessions:
             _focused_id = sid
             await _push_state()
+            await _tg_update_focus()
         return
 
-    # ── stop_session — stop the focused session ───────────────────────────────
+    # --- stop_session — stop the focused session ---
     if command == "stop_session":
         sess = _focused_session()
         if sess:
             _kill_session_proc(sess)          # kill AI subprocess immediately
             sess["terminal"].stop()
+            await _emit_session_end_summary(sess, ended_as="stopped", source="web")
             sess["status"] = "stopped"
             sess["busy"]      = False
             sess["task_start"] = None
             await _push_thinking(False, session_id=sess["id"])  # clear spinner NOW
             await _push_state()
-            await _push_message("system", f"Session stopped: {sess['name']}", source="web",
-                                session_id=sess["id"])
         return
 
-    # ── delete_session — remove focused session entirely ─────────────────────
+    # --- delete_session — remove focused session entirely ---
     if command == "delete_session":
         sess = _focused_session()
         if sess:
+            _kill_session_proc(sess)
             sess["terminal"].stop()
+            await _emit_session_end_summary(sess, ended_as="deleted", source="web")
             sid = sess["id"]
             del _sessions[sid]
             # focus the most-recently-used remaining session, or None
@@ -1643,7 +2118,7 @@ async def _handle_web_command(command: str, ws: WebSocket):
             await _push_state()
         return
 
-    # ── switch_ai:{ai} — change AI of focused session ────────────────────────
+    # --- switch_ai:{ai} — change AI of focused session ---
     if command.startswith("switch_ai:"):
         sess = _focused_session()
         if sess:
@@ -1668,7 +2143,7 @@ async def _handle_web_command(command: str, ws: WebSocket):
                 session_id=sess["id"])
         return
 
-    # ── interrupt — send Ctrl+C to focused session ────────────────────────────
+    # --- interrupt — send Ctrl+C to focused session ---
     if command == "interrupt":
         sess = _focused_session()
         if sess:
@@ -1691,7 +2166,7 @@ async def _handle_web_command(command: str, ws: WebSocket):
                 await _push_message("system", str(e), source="web")
         return
 
-    # ── clear — clear Claude context for focused session ─────────────────────
+    # --- clear — clear Claude context for focused session ---
     if command == "clear":
         sess = _focused_session()
         if sess:
@@ -1700,7 +2175,7 @@ async def _handle_web_command(command: str, ws: WebSocket):
                                 session_id=sess["id"])
         return
 
-    # ── schedule_list — return scheduled tasks to web UI ─────────────────────
+    # --- schedule_list — return scheduled tasks to web UI ---
     if command == "schedule_list":
         await ws.send_text(json.dumps({
             "type":  "schedule_list",
@@ -1708,13 +2183,17 @@ async def _handle_web_command(command: str, ws: WebSocket):
         }))
         return
 
-    # ── schedule_add:<cron>|<ai>|<prompt> ────────────────────────────────────
+    # --- schedule_add:<cron>|<ai>|<cwd>|<prompt> ---
     if command.startswith("schedule_add:"):
-        parts = command[len("schedule_add:"):].split("|", 2)
-        if len(parts) < 3:
+        parts = command[len("schedule_add:"):].split("|", 3)
+        if len(parts) < 4:
             await _push_message("system", "❌ Invalid schedule_add format.", source="web")
             return
-        cron_expr, ai_key, prompt = parts[0].strip(), parts[1].strip() or None, parts[2].strip()
+        cron_expr = parts[0].strip()
+        ai_key    = parts[1].strip() or None
+        task_cwd  = parts[2].strip() or _session_cwd()
+        prompt    = parts[3].strip()
+
         if not prompt:
             await _push_message("system", "❌ Prompt cannot be empty.", source="web")
             return
@@ -1725,8 +2204,9 @@ async def _handle_web_command(command: str, ws: WebSocket):
             return
         if ai_key not in ("claude", None, "", *_integrations):
             ai_key = None
+
         task = _make_sched_task(cron_expr, ai_key or None, prompt,
-                                cwd=_session_cwd())
+                                cwd=task_cwd)
         _scheduled_tasks[task["id"]] = task
         _save_scheduled_tasks()
         nr = datetime.fromtimestamp(task["next_run"]).strftime("%Y-%m-%d %H:%M") \
@@ -1738,7 +2218,7 @@ async def _handle_web_command(command: str, ws: WebSocket):
         await ws.send_text(json.dumps({"type": "schedule_list", "tasks": _sched_tasks_payload()}))
         return
 
-    # ── schedule_delete:<id> ──────────────────────────────────────────────────
+    # --- schedule_delete:<id> ---
     if command.startswith("schedule_delete:"):
         tid = command[len("schedule_delete:"):].strip()
         if tid in _scheduled_tasks:
@@ -1749,7 +2229,7 @@ async def _handle_web_command(command: str, ws: WebSocket):
         await ws.send_text(json.dumps({"type": "schedule_list", "tasks": _sched_tasks_payload()}))
         return
 
-    # ── schedule_toggle:<id> ──────────────────────────────────────────────────
+    # --- schedule_toggle:<id> ---
     if command.startswith("schedule_toggle:"):
         tid = command[len("schedule_toggle:"):].strip()
         if tid in _scheduled_tasks:
@@ -1761,11 +2241,13 @@ async def _handle_web_command(command: str, ws: WebSocket):
         await ws.send_text(json.dumps({"type": "schedule_list", "tasks": _sched_tasks_payload()}))
         return
 
-    # ── schedule_run:<id> — manual trigger ────────────────────────────────────
+    # --- schedule_run:<id> — manual trigger ---
     if command.startswith("schedule_run:"):
         tid = command[len("schedule_run:"):].strip()
         if tid in _scheduled_tasks:
-            asyncio.create_task(_run_scheduled_task(_scheduled_tasks[tid]))
+            task = _scheduled_tasks[tid]
+            await _push_message("system", f"▶️ Running *{task['name']}* now...", source="web")
+            asyncio.create_task(_run_scheduled_task(task))
         return
 
 
@@ -1853,12 +2335,13 @@ def _sessions_keyboard() -> InlineKeyboardMarkup:
     for sess in sorted(_sessions.values(), key=lambda s: s["last_used"], reverse=True):
         icon = _session_status_icon(sess)
         cwd_short = pathlib.Path(sess["cwd"]).name or sess["cwd"]
-        label = f"{icon} {sess['name']}  ·  {cwd_short}"
+        label = f"{icon} {sess['name']} · {cwd_short}"
         rows.append([InlineKeyboardButton(label, callback_data=f"ms:focus:{sess['id']}")])
     rows.append([InlineKeyboardButton("➕ New Session", callback_data="ms:new")])
+    rows.append([InlineKeyboardButton("📊 Usage", callback_data="ms:usage")])
     rows.append([
-        InlineKeyboardButton("💬 Past chats",    callback_data="action:history"),
-        InlineKeyboardButton("🔁 Resume old",    callback_data="action:resume"),
+        InlineKeyboardButton("💬 Past chats", callback_data="action:history"),
+        InlineKeyboardButton("🔄 Resume old", callback_data="action:resume"),
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -1867,15 +2350,18 @@ def _session_controls_keyboard() -> InlineKeyboardMarkup:
     """Controls for the currently-focused session."""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📋 All Sessions",  callback_data="ms:list"),
-            InlineKeyboardButton("📁 Change Dir",    callback_data="ms:browse"),
+            InlineKeyboardButton("📋 All Sessions", callback_data="ms:list"),
+            InlineKeyboardButton("📁 Change Dir", callback_data="ms:browse"),
         ],
         [
-            InlineKeyboardButton("🔀 Switch AI",     callback_data="ms:switch"),
-            InlineKeyboardButton("⏸ Cancel Task",    callback_data="ms:interrupt"),
+            InlineKeyboardButton("🔄 Switch AI", callback_data="ms:switch"),
+            InlineKeyboardButton("⏸ Cancel Task", callback_data="ms:interrupt"),
         ],
         [
-            InlineKeyboardButton("🗑 Delete Session", callback_data="ms:delete"),
+            InlineKeyboardButton("📊 Usage", callback_data="ms:usage"),
+        ],
+        [
+            InlineKeyboardButton("🗑️ Delete Session", callback_data="ms:delete"),
         ],
     ])
 
@@ -1937,7 +2423,7 @@ async def tg_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"*Helm HQ — {fs['name']}*\n"
             f"AI: {ai_label}  ·  Status: {fs['status']}\n"
-            f"📁 `{fs['cwd']}`",
+            f"📂 `{fs['cwd']}`",
             parse_mode="Markdown",
             reply_markup=_session_controls_keyboard(),
         )
@@ -1953,7 +2439,7 @@ async def tg_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def tg_launch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Create a new shell session (quick shortcut)."""
     global _focused_id
-    sess = _make_session(None)  # None = shell
+    sess = _make_session(None, cwd=_session_cwd())  # None = shell
     _focused_id = sess["id"]
     output = await asyncio.to_thread(sess["terminal"].drain, IDLE_TIMEOUT, 10.0, 5.0)
     await _push_state()
@@ -1972,7 +2458,7 @@ async def tg_launch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def tg_claude(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Create or focus a Claude Code session."""
     global _focused_id
-    sess = _make_session("claude")
+    sess = _make_session("claude", cwd=_session_cwd())
     _focused_id = sess["id"]
     await _push_state()
     await _push_message("system", f"{sess['name']} created (via Telegram).", source="telegram",
@@ -1991,7 +2477,7 @@ async def tg_codex(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "codex" not in _integrations:
         await update.message.reply_text("Codex integration not loaded.")
         return
-    sess = _make_session("codex")
+    sess = _make_session("codex", cwd=_session_cwd())
     _focused_id = sess["id"]
     await _push_state()
     await update.message.reply_text(
@@ -2008,7 +2494,7 @@ async def tg_gemini(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "gemini" not in _integrations:
         await update.message.reply_text("Gemini integration not loaded.")
         return
-    sess = _make_session("gemini")
+    sess = _make_session("gemini", cwd=_session_cwd())
     _focused_id = sess["id"]
     await _push_state()
     await update.message.reply_text(
@@ -2038,9 +2524,11 @@ async def tg_stop_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @authorized_only
 async def tg_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sess = _focused_session()
+    sid = sess["id"] if sess else None
     if sess:
         sess["claude_msgs"] = []
-    await _push_message("system", "Claude history cleared (via Telegram).", source="telegram")
+    await _push_message("system", "Claude history cleared (via Telegram).",
+                        source="telegram", session_id=sid)
     await update.message.reply_text("Conversation history cleared.")
 
 
@@ -2071,10 +2559,10 @@ async def tg_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for sess in sorted(_sessions.values(), key=lambda s: s["last_used"], reverse=True):
         icon = _session_status_icon(sess)
         focused = " ← focused" if sess["id"] == _focused_id else ""
-        lines.append(f"{icon} *{sess['name']}* [{sess['ai'] or 'shell'}]{focused}\n"
-                     f"  📁 {sess['cwd']}")
+        lines.append(f"✨ *{sess['name']}* [{sess['ai'] or 'shell'}]{focused}\n"
+                     f"  📂 {sess['cwd']}")
     timeout_label = "unlimited" if CLAUDE_TIMEOUT == 0 else f"{int(CLAUDE_TIMEOUT)}s"
-    lines.append(f"\n⏱ Timeout: {timeout_label}")
+    lines.append(f"\n⌛ Timeout: {timeout_label}")
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown",
                                     reply_markup=_sessions_keyboard())
 
@@ -2115,13 +2603,12 @@ async def tg_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     _kill_session_proc(sess)          # kill AI subprocess immediately
     sess["terminal"].stop()
+    await _emit_session_end_summary(sess, ended_as="stopped", source="telegram")
     sess["status"]    = "stopped"
     sess["busy"]      = False
     sess["task_start"] = None
     await _push_thinking(False, session_id=sess["id"])  # clear spinner on web NOW
     await _push_state()
-    await _push_message("system", f"{sess['name']} stopped (via Telegram).", source="telegram",
-                        session_id=sess["id"])
     await update.message.reply_text(
         f"🛑 {sess['name']} stopped.\nSessions:",
         reply_markup=_sessions_keyboard(),
@@ -2135,13 +2622,13 @@ async def tg_cwd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sess = _focused_session()
     if not arg:
         cwd = sess["cwd"] if sess else _DEFAULT_CWD
-        await update.message.reply_text(f"📁 Current directory:\n{cwd}")
+        await update.message.reply_text(f"📂 Current directory:\n{cwd}")
         return
     ok = await _change_cwd(arg, source="telegram")
     if ok:
         sess = _focused_session()
         cwd = sess["cwd"] if sess else _DEFAULT_CWD
-        await update.message.reply_text(f"📁 Working directory changed to:\n{cwd}")
+        await update.message.reply_text(f"📂 Working directory changed to:\n{cwd}")
 
 
 @authorized_only
@@ -2152,7 +2639,7 @@ async def tg_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not arg:
         limit_str = "unlimited (AI tool controls its own timeout)" if CLAUDE_TIMEOUT == 0 else f"{int(CLAUDE_TIMEOUT)}s"
         await update.message.reply_text(
-            f"⏱ Current AI timeout: {limit_str}\n"
+            f"⌛ Current AI timeout: {limit_str}\n"
             f"Use /timeout <seconds> to set a hard cap, or /timeout 0 for unlimited."
         )
         return
@@ -2167,21 +2654,24 @@ async def tg_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
         CLAUDE_TIMEOUT = value
         _update_env("CLAUDE_TIMEOUT", str(int(value)))
         label = "unlimited" if value == 0 else f"{int(value)}s"
-        await _push_message("system", f"⏱ AI timeout set to {label}", source="telegram")
-        await update.message.reply_text(f"⏱ Timeout updated to {label} (saved to .env)")
+        fs = _focused_session()
+        sid = fs["id"] if fs else None
+        await _push_message("system", f"⌛ AI timeout set to {label}",
+                            source="telegram", session_id=sid)
+        await update.message.reply_text(f"⌛ Timeout updated to {label} (saved to .env)")
     except ValueError:
         await update.message.reply_text("❌ Invalid value. Use seconds (e.g. /timeout 1800) or 0 for unlimited.")
 
 
 @authorized_only
 async def tg_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/schedule [list | add <cron5> <ai> <prompt> | delete <id> | on <id> | off <id>]"""
+    """/schedule [list | add <when> <ai> <prompt> | delete <id> | on <id> | off <id>]"""
     text  = (update.message.text or "").strip()
     parts = text.split(None, 2)
     sub   = parts[1].strip().lower() if len(parts) > 1 else "list"
     rest  = parts[2].strip() if len(parts) > 2 else ""
 
-    # ── list ─────────────────────────────────────────────────────────────────
+    # --- list ------------------------------------------------------------------------------------------------
     if sub in ("list", "ls", "") or not sub:
         if not _scheduled_tasks:
             await update.message.reply_text(
@@ -2201,9 +2691,8 @@ async def tg_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
         return
 
-    # ── add <schedule> <ai> <prompt> ─────────────────────────────────────────
+    # --- add <schedule> <ai> <prompt> ------------------------------------------------------------
     # Supports natural language:  /schedule add daily at 9am claude Review git diff
-    # Or classic cron:            /schedule add 0 9 * * * claude Review git diff
     if sub == "add":
         tokens = rest.split()
         if len(tokens) < 3:
@@ -2214,8 +2703,6 @@ async def tg_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "  /schedule add every monday at 5pm claude Weekly report\n"
                 "  /schedule add weekdays at 8am shell backup.sh\n"
                 "  /schedule add monthly on the 1st at 9am claude Monthly summary\n\n"
-                "Classic cron (5 fields):\n"
-                "  /schedule add 0 9 * * * claude Review git diff\n\n"
                 "AI options: claude  shell  (or any integration key)"
             )
             return
@@ -2247,10 +2734,6 @@ async def tg_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Try natural language first
         cron_expr = _natural_to_cron(sched_text)
 
-        # Fall back to raw cron (if exactly 5 tokens were given as schedule)
-        if cron_expr is None and ai_pos == 5:
-            cron_expr = sched_text  # tokens[:5] joined by spaces
-
         if cron_expr is None or _next_cron_run(cron_expr) is None:
             if not _CRONITER_OK:
                 await update.message.reply_text("❌ croniter not installed — run: pip install croniter")
@@ -2261,8 +2744,7 @@ async def tg_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "• *daily at 9am*\n"
                     "• *every monday at 5pm*\n"
                     "• *weekdays at 8am*\n"
-                    "• *monthly on the 1st at 9am*\n"
-                    "Or use 5-field cron: `0 9 * * *`",
+                    "• *monthly on the 1st at 9am*",
                     parse_mode="Markdown",
                 )
             return
@@ -2279,7 +2761,7 @@ async def tg_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ── delete <id> ───────────────────────────────────────────────────────────
+    # --- delete <id> ---------------------------------------------------------------------------------------
     if sub in ("delete", "del", "rm", "remove"):
         tid = rest.strip()
         if tid in _scheduled_tasks:
@@ -2291,7 +2773,7 @@ async def tg_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ Task not found: `{tid}`", parse_mode="Markdown")
         return
 
-    # ── on / off <id> ─────────────────────────────────────────────────────────
+    # --- on / off <id> ------------------------------------------------------------------------------------
     if sub in ("on", "off", "enable", "disable"):
         tid     = rest.strip()
         enable  = sub in ("on", "enable")
@@ -2307,12 +2789,12 @@ async def tg_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ Task not found: `{tid}`", parse_mode="Markdown")
         return
 
-    # ── run <id> (manual trigger) ─────────────────────────────────────────────
+    # --- run <id> (manual trigger) ------------------------------------------------------------------
     if sub in ("run", "trigger", "now"):
         tid = rest.strip()
         if tid in _scheduled_tasks:
             task = _scheduled_tasks[tid]
-            await update.message.reply_text(f"▶️ Running *{task['name']}* now…", parse_mode="Markdown")
+            await update.message.reply_text(f"â–¶ï¸ Running *{task['name']}* now...", parse_mode="Markdown")
             asyncio.create_task(_run_scheduled_task(task))
         else:
             await update.message.reply_text(f"❌ Task not found: `{tid}`", parse_mode="Markdown")
@@ -2321,7 +2803,7 @@ async def tg_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Subcommands:\n"
         "  /schedule list\n"
-        "  /schedule add <cron5> <ai> <prompt>\n"
+        "  /schedule add <when> <ai> <prompt>\n"
         "  /schedule delete <id>\n"
         "  /schedule on <id>  /  off <id>\n"
         "  /schedule run <id>   ← manual trigger"
@@ -2370,7 +2852,7 @@ async def tg_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ts = m.get("timestamp", "")[:16].replace("T", " ")
         preview = m.get("content", "")[:200]
         if len(m.get("content", "")) > 200:
-            preview += "…"
+            preview += "..."
         lines_out.append(f"[{ts}] {role}:\n{preview}")
 
     await _tg_send_chunks(update, "\n\n".join(lines_out))
@@ -2404,7 +2886,7 @@ async def _show_browse(target, user_id: int, path: str, edit: bool = False, page
     if str(p) != str(p.parent):
         keyboard.append([InlineKeyboardButton("⬆ Parent directory", callback_data="browse_up")])
     for i, d in enumerate(page_dirs):
-        keyboard.append([InlineKeyboardButton(f"📁 {d}", callback_data=f"browse_d:{start + i}")])
+        keyboard.append([InlineKeyboardButton(f"📂 {d}", callback_data=f"browse_d:{start + i}")])
     nav_row: list[InlineKeyboardButton] = []
     if page > 0:
         nav_row.append(InlineKeyboardButton("◀ Prev", callback_data=f"browse_p:{page - 1}"))
@@ -2417,7 +2899,7 @@ async def _show_browse(target, user_id: int, path: str, edit: bool = False, page
         InlineKeyboardButton("❌ Cancel", callback_data="browse_cancel"),
     ])
 
-    text = f"📂 `{str(p)}`\n_{total} subfolder(s)_"
+    text = f"📁 `{str(p)}`\n_{total} subfolder(s)_"
     if total_pages > 1:
         text += f" — page {page + 1}/{total_pages}"
     markup = InlineKeyboardMarkup(keyboard)
@@ -2506,7 +2988,7 @@ async def _perform_resume(message, date_str: str = "") -> None:
     """
     global _focused_id, _pending_tg_context
 
-    # ── Resolve which log file to load ────────────────────────────────────────
+    # --- Resolve which log file to load ------------------------------------------------------------
     if date_str:
         log_file = CHAT_LOG_DIR / f"{date_str}.jsonl"
         if not log_file.exists():
@@ -2523,7 +3005,7 @@ async def _perform_resume(message, date_str: str = "") -> None:
         log_file = logs[0]
         date_str = log_file.stem
 
-    # ── Read the log — collect messages, last CWD, last AI ───────────────────
+    # --- Read the log — collect messages, last CWD, last AI ---------------------------
     messages: list[dict] = []
     last_cwd: Optional[str] = None
     last_ai:  Optional[str] = None
@@ -2546,7 +3028,7 @@ async def _perform_resume(message, date_str: str = "") -> None:
         await message.reply_text(f"No conversation messages found in session {date_str}.")
         return
 
-    # ── Fallback: load CWD/AI from last_state.json if log pre-dates records ──
+    # --- Fallback: load CWD/AI from last_state.json if log pre-dates records ---
     if not last_cwd or not last_ai:
         try:
             state_file = CHAT_LOG_DIR / "last_state.json"
@@ -2569,14 +3051,14 @@ async def _perform_resume(message, date_str: str = "") -> None:
         except Exception:
             pass
 
-    # ── Build context string from last 10 exchanges ───────────────────────────
+    # --- Build context string from last 10 exchanges ---------------------------------------
     turns = messages[-10:]
     lines_ctx = []
     for m in turns:
         role = "User" if m["role"] == "user" else (m.get("ai") or "AI").title()
         body = (m.get("content") or "")[:300]
         if len(m.get("content", "")) > 300:
-            body += "…"
+            body += "..."
         lines_ctx.append(f"{role}: {body}")
 
     label = _load_chat_names().get(date_str) or date_str
@@ -2586,10 +3068,10 @@ async def _perform_resume(message, date_str: str = "") -> None:
         + "\n[End context]\n\n"
     )
 
-    # ── Create a new session for the resumed work ─────────────────────────────
+    # --- Create a new session for the resumed work ------------------------------------------
     valid_ai = last_ai and (last_ai == "claude" or last_ai in _integrations)
     ai_to_use = last_ai if valid_ai else None
-    sess = _make_session(ai_to_use)
+    sess = _make_session(ai_to_use, cwd=last_cwd)
     _focused_id = sess["id"]
 
     # Restore CWD inside the new session
@@ -2597,7 +3079,7 @@ async def _perform_resume(message, date_str: str = "") -> None:
     if last_cwd:
         cwd_ok = await _change_cwd(last_cwd, source="telegram", session_id=sess["id"])
         cwd_note = (
-            f"\n📁 Directory restored: `{last_cwd}`"
+            f"\n📂 Directory restored: `{last_cwd}`"
             if cwd_ok
             else f"\n⚠️ Could not restore directory: `{last_cwd}`"
         )
@@ -2651,7 +3133,7 @@ async def tg_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip()
     low = text.lower()
 
-    # ── Natural language shortcuts ──────────────────────────────────────────
+    # --- Natural language shortcuts ---------------------------------------------------------------
     if low in ("menu", "help", "options", "?"):
         await tg_menu.__wrapped__(update, context)
         return
@@ -2686,11 +3168,11 @@ async def tg_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if any(low.startswith(p) for p in (f"new {_n}", f"start {_n}", f"use {_n}",
                                             f"switch to {_n}")):
             if _ikey in _integrations:
-                sess = _make_session(_ikey)
+                sess = _make_session(_ikey, cwd=_session_cwd())
                 _focused_id = sess["id"]
                 await _push_state()
                 await update.message.reply_text(
-                    f"{_iinfo['emoji']} *{sess['name']}* created.\nJust type your task.",
+                    f"✨ *{sess['name']}* created.\nJust type your task.",
                     parse_mode="Markdown",
                     reply_markup=_session_controls_keyboard(),
                 )
@@ -2699,7 +3181,7 @@ async def tg_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await tg_launch.__wrapped__(update, context)
         return
 
-    # ── No focused session → show session list / new session picker ──────────
+    # --- No focused session -> show session list / new session picker ---------------
     if not _focused_id or _focused_id not in _sessions:
         if _sessions:
             await update.message.reply_text(
@@ -2716,21 +3198,21 @@ async def tg_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sess = _sessions.get(_focused_id)
     if sess and sess["status"] == "stopped":
         await update.message.reply_text(
-            f"⏹ *{sess['name']}* is stopped. Resume it or switch session:",
+            f"✨ *{sess['name']}* is stopped. Resume it or switch session:",
             parse_mode="Markdown",
             reply_markup=_sessions_keyboard(),
         )
         return
 
-    # ── Focused session is active → forward message ──────────────────────────
+    # --- Focused session is active -> forward message ---------------------------------------
     if _pending_tg_context:
         text = _pending_tg_context + text
         _pending_tg_context = None
-        await update.message.reply_text("📎 Context injected. Thinking…")
+        await update.message.reply_text("📌 Context injected. Thinking...")
     else:
         fs = _focused_session()
         label = f"{fs['emoji']} {fs['name']}" if fs else "session"
-        await update.message.reply_text(f"Thinking… [{label}]")
+        await update.message.reply_text(f"Thinking... [{label}]")
 
     # Fire-and-forget: run the AI task in the background so the Telegram
     # handler returns immediately and new updates (button clicks, commands,
@@ -2769,7 +3251,7 @@ async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data  # e.g. "ms:focus:s1", "ms:new_ai:claude:", "action:history"
 
-    # ── ms: multi-session actions ─────────────────────────────────────────────
+    # --- ms: multi-session actions ------------------------------------------------------------------
     if data.startswith("ms:"):
         parts = data.split(":")  # ["ms", verb, arg1?, arg2?]
         verb  = parts[1] if len(parts) > 1 else ""
@@ -2778,6 +3260,13 @@ async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             txt  = "📋 *Sessions* — tap to focus:" if _sessions else "No sessions yet."
             await query.edit_message_text(txt, parse_mode="Markdown",
                                           reply_markup=_sessions_keyboard())
+
+        elif verb == "usage":
+            fs = _focused_session()
+            await query.edit_message_text(
+                _usage_summary_text(),
+                reply_markup=_session_controls_keyboard() if fs else _sessions_keyboard(),
+            )
 
         elif verb == "new":
             await query.edit_message_text("Choose AI for new session:",
@@ -2812,10 +3301,10 @@ async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 _focused_id = resume_sid
             else:
                 # Create brand-new session
-                sess = _make_session(ai_key)
+                sess = _make_session(ai_key, cwd=_session_cwd())
                 _focused_id = sess["id"]
             await _push_state()
-            label = f"{sess['emoji']} *{sess['name']}*"
+            label = f"✨ *{sess['name']}*"
             await _push_message("system", f"Session ready: {sess['name']} (via Telegram).",
                                 source="telegram", session_id=sess["id"])
             await query.edit_message_text(
@@ -2830,17 +3319,18 @@ async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 sess = _sessions[sid]
                 if sess["status"] == "stopped":
                     await query.edit_message_text(
-                        f"⏹ *{sess['name']}* is stopped. Resume as:",
+                        f"✨ *{sess['name']}* is stopped. Resume as:",
                         parse_mode="Markdown",
                         reply_markup=_new_session_keyboard(resume_sid=sid),
                     )
                 else:
                     _focused_id = sid
+                    await _push_state()
                     fs = _sessions[sid]
                     ai_lbl = fs["emoji"] + " " + (fs["ai"] or "Shell")
                     await query.edit_message_text(
                         f"✅ *{fs['name']}* focused\n"
-                        f"AI: {ai_lbl}  ·  📁 {pathlib.Path(fs['cwd']).name or fs['cwd']}\n\n"
+                        f"AI: {ai_lbl} · 📁 {pathlib.Path(fs['cwd']).name or fs['cwd']}\n\n"
                         f"Type your message to send to this session:",
                         parse_mode="Markdown",
                         reply_markup=_session_controls_keyboard(),
@@ -2851,13 +3341,15 @@ async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif verb == "stop":
             sess = _focused_session()
             if sess:
+                _kill_session_proc(sess)
                 sess["terminal"].stop()
+                await _emit_session_end_summary(sess, ended_as="stopped", source="telegram")
                 sess["status"] = "stopped"
+                sess["busy"] = False
+                sess["task_start"] = None
                 await _push_state()
-                await _push_message("system", f"{sess['name']} stopped (via Telegram).",
-                                    source="telegram", session_id=sess["id"])
                 await query.edit_message_text(
-                    f"⏹ *{sess['name']}* stopped. Sessions:",
+                    f"✨ *{sess['name']}* stopped. Sessions:",
                     parse_mode="Markdown",
                     reply_markup=_sessions_keyboard(),
                 )
@@ -2867,7 +3359,9 @@ async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif verb == "delete":
             sess = _focused_session()
             if sess:
+                _kill_session_proc(sess)
                 sess["terminal"].stop()
+                await _emit_session_end_summary(sess, ended_as="deleted", source="telegram")
                 sid = sess["id"]
                 name = sess["name"]
                 del _sessions[sid]
@@ -2875,7 +3369,7 @@ async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                    default=None) if _sessions else None)
                 await _push_state()
                 await query.edit_message_text(
-                    f"🗑 *{name}* deleted. Sessions:",
+                    f"\U0001F5D1 *{name}* deleted. Sessions:",
                     parse_mode="Markdown",
                     reply_markup=_sessions_keyboard(),
                 )
@@ -2883,7 +3377,7 @@ async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text("No focused session.", reply_markup=_sessions_keyboard())
 
         elif verb == "switch":
-            await query.edit_message_text("Switch AI for this session — pick one:",
+            await query.edit_message_text("Switch AI for this session - pick one:",
                                           reply_markup=_new_session_keyboard(
                                               resume_sid=_focused_id or ""))
 
@@ -2908,7 +3402,7 @@ async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return  # end of ms: handling
 
-    # ── action: legacy / shared actions ──────────────────────────────────────
+    # --- action: legacy / shared actions ---------------------------------------------------------
     action = data.split(":", 1)[1] if ":" in data else data
 
     if action == "history":
@@ -2940,7 +3434,7 @@ async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Resume a specific past session by date
         date_str = action[len("resume_date:"):]
         if HISTORY_DATE_RE.fullmatch(date_str) and query.message:
-            await query.edit_message_text("⏳ Resuming session…")
+            await query.edit_message_text("⌛ Resuming session...")
             await _perform_resume(query.message, date_str=date_str)
         else:
             await query.answer("Invalid session.", show_alert=True)
@@ -2952,7 +3446,7 @@ async def action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif action == "resume":
         if query.message:
-            await query.edit_message_text("⏳ Loading last session…")
+            await query.edit_message_text("⌛ Loading last session...")
             await _perform_resume(query.message, date_str="")
 
 
@@ -2978,7 +3472,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.5}
 #app{height:100vh;display:flex;flex-direction:row;overflow:hidden}
 
-/* ── Left Sidebar ── */
+/* --- Left Sidebar --- */
 #left-sidebar{
   width:260px;flex-shrink:0;display:flex;flex-direction:column;
   background:var(--bg);border-right:1px solid var(--border);overflow:hidden}
@@ -3006,10 +3500,26 @@ html,body{height:100%;background:var(--bg);color:var(--text);
 .sb-hcard{
   padding:9px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s}
 .sb-hcard:hover{background:var(--surface2)}
+.sb-hcard.active{
+  background:rgba(245,158,11,.12);
+  box-shadow:inset 2px 0 0 var(--claude)}
 .sb-hcard-name{
   font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;margin-bottom:2px}
+.sb-hcard.active .sb-hcard-name{color:#ffd08a}
 .sb-hcard-meta{font-size:10px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.sb-active-pill{
+  margin-left:auto;
+  font-size:9px;
+  padding:1px 6px;
+  border-radius:999px;
+  border:1px solid rgba(245,158,11,.55);
+  color:#ffd08a;
+  background:rgba(245,158,11,.16);
+  font-weight:600;
+  letter-spacing:.02em;
+  text-transform:uppercase;
+}
 .sb-hcard-snippet{
   font-size:11px;color:var(--muted);margin:3px 0 1px;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
@@ -3025,6 +3535,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);
   flex-shrink:0;line-height:1}
 .sb-hcard:hover .sb-rename-btn{opacity:1}
 .sb-rename-btn:hover{background:var(--surface2);color:var(--text)}
+.sb-del-btn{
+  opacity:0;background:none;border:none;cursor:pointer;padding:2px 4px;
+  border-radius:4px;font-size:12px;color:var(--muted);transition:opacity .15s,background .12s,color .12s;
+  flex-shrink:0;line-height:1}
+.sb-hcard:hover .sb-del-btn{opacity:1}
+.sb-del-btn:hover{background:rgba(239,68,68,.12);color:#f87171}
 .sb-sched-item{padding:9px 14px;border-bottom:1px solid var(--border);font-size:12px}
 .sb-sched-top{display:flex;align-items:center;gap:6px;margin-bottom:3px}
 .sb-sched-name{font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -3056,11 +3572,11 @@ html,body{height:100%;background:var(--bg);color:var(--text);
 .sched-time-row{display:flex;gap:4px;align-items:center}
 .sched-time-row select{flex:1;margin-top:0}
 
-/* ── Center Panel ── */
+/* --- Center Panel --- */
 #center-panel{flex:1;display:flex;flex-direction:column;min-width:0;
   border-right:1px solid var(--border)}
 
-/* ── Right Sidebar ── */
+/* --- Right Sidebar --- */
 #right-sidebar{
   width:280px;flex-shrink:0;display:flex;flex-direction:column;
   background:var(--bg);overflow:hidden}
@@ -3089,6 +3605,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);
 .rs-meta{font-size:10px;color:var(--muted);display:flex;align-items:center;gap:6px}
 .rs-ai-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
 .rs-timer{font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:10px}
+.rs-usage{margin-top:6px}
+.rs-usage-line{display:flex;align-items:center;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:3px}
+.rs-usage-bar{height:5px;background:var(--surface);border:1px solid var(--border);border-radius:999px;overflow:hidden}
+.rs-usage-fill{height:100%;background:linear-gradient(90deg,var(--gemini),var(--claude));transition:width .2s ease}
 .rs-actions{display:none;gap:4px;flex-shrink:0;margin-top:2px}
 .rs-item:hover .rs-actions{display:flex}
 .rs-act{
@@ -3103,7 +3623,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);
   transition:all .15s;text-align:center}
 .rs-new-btn:hover{border-color:#3a3a3a;color:var(--text);background:var(--surface)}
 
-/* ── Mobile sidebar toggles ── */
+/* --- Mobile sidebar toggles --- */
 .sb-toggle{
   background:none;border:none;color:var(--dim);cursor:pointer;padding:5px;
   border-radius:6px;display:none;align-items:center;transition:color .15s;line-height:1}
@@ -3120,7 +3640,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);
   .sb-overlay.open{display:block}
 }
 
-/* ── Header ── */
+/* --- Header --- */
 header{
   padding:13px 20px;border-bottom:1px solid var(--border);
   display:flex;align-items:center;justify-content:space-between;
@@ -3138,7 +3658,7 @@ header{
   flex-shrink:0;transition:background .3s}
 #conn.ok{background:var(--codex)}
 
-/* ── Dir bar ── */
+/* --- Dir bar --- */
 .dir-bar{
   padding:6px 20px;border-bottom:1px solid var(--border);
   display:flex;align-items:center;gap:8px;background:var(--bg);
@@ -3160,7 +3680,7 @@ header{
   transition:color .15s}
 .dir-browse-btn:hover{color:var(--text)}
 
-/* ── Messages ── */
+/* --- Messages --- */
 #messages{
   flex:1;overflow-y:auto;padding:22px 20px 8px;
   display:flex;flex-direction:column;gap:16px;scroll-behavior:smooth;
@@ -3203,7 +3723,7 @@ header{
   background:transparent;color:var(--muted);font-size:11.5px;text-align:center;
   border:1px solid var(--border);border-radius:20px;padding:4px 14px}
 
-/* ── Thinking ── */
+/* --- Thinking --- */
 #thinking{
   display:none;align-items:center;gap:8px;color:var(--muted);
   font-size:12px;padding:6px 4px;flex-shrink:0;margin:0 20px}
@@ -3215,7 +3735,7 @@ header{
 .dots span:nth-child(3){animation-delay:.4s}
 @keyframes blink{0%,100%{opacity:.25;transform:scale(.8)}50%{opacity:1;transform:scale(1)}}
 
-/* ── Input bar ── */
+/* --- Input bar --- */
 .input-bar{
   padding:12px 16px;border-top:1px solid var(--border);
   display:flex;gap:8px;background:var(--surface);align-items:flex-end;
@@ -3294,7 +3814,7 @@ header{
 #send:hover{opacity:.85}
 #send:disabled{opacity:.35;cursor:not-allowed}
 
-/* ── History viewing/resume banner ── */
+/* --- History viewing/resume banner --- */
 /* History viewing / resume banner — sits between dir-bar and messages */
 #hist-banner{
   display:none;align-items:center;gap:10px;flex-shrink:0;
@@ -3311,7 +3831,7 @@ header{
   background:transparent;border:1px solid currentColor;color:inherit}
 .hist-live-btn:hover{opacity:.75}
 
-/* ── Schedule modal rows ── */
+/* --- Schedule modal rows --- */
 .sched-row{
   padding:10px 16px;border-bottom:1px solid var(--border);font-size:13px}
 .sched-row:last-child{border-bottom:none}
@@ -3335,7 +3855,7 @@ header{
   background:var(--surface2);color:var(--text);border:1px solid var(--border);
   border-radius:6px;padding:6px 9px;font-size:13px;outline:none}
 #sched-modal input:focus,#sched-modal textarea:focus{border-color:var(--accent,#f59e0b)}
-/* ── Shared modal chrome ── */
+/* --- Shared modal chrome --- */
 .modal-overlay{
   display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);
   z-index:100;align-items:center;justify-content:center;backdrop-filter:blur(2px)}
@@ -3359,7 +3879,7 @@ header{
   line-height:1.7;display:flex;flex-direction:column;align-items:center;gap:8px}
 .modal-empty svg{opacity:.3;margin-bottom:4px}
 
-/* ── History search bar ── */
+/* --- History search bar --- */
 .hist-search{
   padding:10px 14px;border-bottom:1px solid var(--border);flex-shrink:0;
   background:var(--surface)}
@@ -3369,7 +3889,7 @@ header{
   outline:none;box-sizing:border-box;transition:border-color .15s}
 .hist-search input:focus{border-color:#3a3a3a}
 
-/* ── History session cards ── */
+/* --- History session cards --- */
 .hcard{
   display:flex;align-items:stretch;cursor:pointer;
   border-bottom:1px solid var(--border);transition:background .12s;
@@ -3417,13 +3937,13 @@ header{
   border-color:rgba(34,197,94,.4);color:var(--codex)}
 .hact.resume:hover{background:rgba(34,197,94,.08);border-color:var(--codex)}
 
-/* ── Rename inline input ── */
+/* --- Rename inline input --- */
 .sess-rename-input{
   font-size:13px;font-weight:600;background:var(--bg);border:1px solid var(--codex);
   border-radius:5px;padding:2px 7px;color:var(--text);font-family:inherit;
   width:100%;box-sizing:border-box;outline:none}
 
-/* ── Browse modal ── */
+/* --- Browse modal --- */
 .browse-box{width:min(480px,94vw)}
 .browse-crumb{
   padding:8px 18px;font-size:11px;color:var(--dim);
@@ -3455,11 +3975,11 @@ header{
 <body>
 <div id="app">
 
-<!-- ── Left Sidebar ── -->
+<!-- --- Left Sidebar --- -->
 <div id="left-sidebar">
   <div class="sb-search">
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-    <input id="sb-search-inp" placeholder="Search sessions…" oninput="filterSidebarHistory(this.value)" autocomplete="off">
+    <input id="sb-search-inp" placeholder="Search sessions..." oninput="filterSidebarHistory(this.value)" autocomplete="off">
   </div>
   <div class="sb-tabs">
     <button class="sb-tab active" onclick="switchSbTab('history',this)">History</button>
@@ -3469,29 +3989,29 @@ header{
     <div class="sb-empty">No saved sessions yet</div>
   </div>
   <div class="sb-panel" id="sb-panel-scheduled">
-    <div id="sb-sched-list"><div class="sb-empty">Loading…</div></div>
+    <div id="sb-sched-list"><div class="sb-empty">Loading...</div></div>
     <details class="sb-add-form">
       <summary>+ Add scheduled task</summary>
       <div class="sched-picker">
         <select id="sb-sched-freq" onchange="sbSchedFreqChange()">
           <option value="daily">Daily</option>
-          <option value="weekly">Weekly</option>
+          <option value="weekly">Weekly / Multiple Days</option>
           <option value="monthly">Monthly</option>
-          <option value="custom">Custom (cron)</option>
         </select>
-        <div id="sb-sched-weekday-row" style="display:none">
-          <select id="sb-sched-weekday">
-            <option value="1">Monday</option>
-            <option value="2">Tuesday</option>
-            <option value="3">Wednesday</option>
-            <option value="4">Thursday</option>
-            <option value="5">Friday</option>
-            <option value="6">Saturday</option>
-            <option value="0">Sunday</option>
-          </select>
+        <div id="sb-sched-weekday-row" style="display:none;margin-top:4px">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Run on these days:</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px">
+            <label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" name="sb-sched-wd" value="1"> Mon</label>
+            <label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" name="sb-sched-wd" value="2"> Tue</label>
+            <label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" name="sb-sched-wd" value="3"> Wed</label>
+            <label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" name="sb-sched-wd" value="4"> Thu</label>
+            <label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" name="sb-sched-wd" value="5"> Fri</label>
+            <label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" name="sb-sched-wd" value="6"> Sat</label>
+            <label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" name="sb-sched-wd" value="0"> Sun</label>
+          </div>
         </div>
         <div id="sb-sched-monthday-row" style="display:none">
-          <select id="sb-sched-monthday"></select>
+          <select id="sb-sched-monthday" style="width:100%"></select>
         </div>
         <div id="sb-sched-time-row" class="sched-time-row">
           <select id="sb-sched-hour"></select>
@@ -3507,28 +4027,29 @@ header{
             <option value="pm">PM</option>
           </select>
         </div>
-        <div id="sb-sched-custom-row" style="display:none">
-          <input id="sb-sched-cron" placeholder="e.g. 0 9 * * *" style="width:100%">
-        </div>
+      </div>
+      <div style="display:flex;gap:4px">
+        <input id="sb-sched-cwd" placeholder="Folder path..." style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 6px;font-size:11px">
+        <button onclick="openBrowse('sb-sched-cwd')" title="Browse folders" style="padding:4px 6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:11px">📂</button>
       </div>
       <select id="sb-sched-ai">
         <option value="claude">Claude Code</option>
         <option value="">Shell</option>
       </select>
-      <textarea id="sb-sched-prompt" rows="2" placeholder="Prompt to run…"></textarea>
+      <textarea id="sb-sched-prompt" rows="2" placeholder="Prompt to run..."></textarea>
       <button class="sb-add-btn" onclick="sbSchedAdd()">Schedule</button>
     </details>
   </div>
 </div>
 
-<!-- ── Sidebar overlay (mobile) ── -->
+<!-- --- Sidebar overlay (mobile) --- -->
 <div class="sb-overlay" id="sb-overlay" onclick="closeSidebars()"></div>
 
-<!-- ── Center Panel ── -->
+<!-- --- Center Panel --- -->
 <div id="center-panel">
 
 <header>
-  <div class="logo">⚓ Helm <em>HQ</em></div>
+  <div class="logo">&#9875; Helm <em>HQ</em></div>
   <div class="header-right">
     <button class="sb-toggle" id="toggle-left" onclick="toggleLeft()" title="History & Scheduled">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
@@ -3541,12 +4062,12 @@ header{
   </div>
 </header>
 
-<!-- ── Schedules modal ────────────────────────────────────────────────────── -->
+<!-- --- Schedules modal --------------------------------------------------------------------------------- -->
 <div id="sched-modal" class="modal-overlay" onclick="if(event.target===this)closeSchedules()" style="display:none">
   <div class="modal-box" style="max-width:600px">
     <div class="modal-header">
       <span>⏰ Scheduled Tasks</span>
-      <button class="modal-close" onclick="closeSchedules()">✕</button>
+      <button class="modal-close" onclick="closeSchedules()">✖</button>
     </div>
     <div id="sched-list" style="max-height:320px;overflow-y:auto;margin-bottom:12px"></div>
     <details id="sched-add-details" style="margin-top:8px">
@@ -3557,23 +4078,23 @@ header{
         <div class="sched-picker">
           <select id="sched-freq" onchange="schedFreqChange()">
             <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
+            <option value="weekly">Weekly / Multiple Days</option>
             <option value="monthly">Monthly</option>
-            <option value="custom">Custom (cron)</option>
           </select>
-          <div id="sched-weekday-row" style="display:none">
-            <select id="sched-weekday">
-              <option value="1">Monday</option>
-              <option value="2">Tuesday</option>
-              <option value="3">Wednesday</option>
-              <option value="4">Thursday</option>
-              <option value="5">Friday</option>
-              <option value="6">Saturday</option>
-              <option value="0">Sunday</option>
-            </select>
+          <div id="sched-weekday-row" style="display:none;margin-top:4px">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Run on these days:</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+              <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="sched-wd" value="1"> Mon</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="sched-wd" value="2"> Tue</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="sched-wd" value="3"> Wed</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="sched-wd" value="4"> Thu</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="sched-wd" value="5"> Fri</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="sched-wd" value="6"> Sat</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="sched-wd" value="0"> Sun</label>
+            </div>
           </div>
           <div id="sched-monthday-row" style="display:none">
-            <select id="sched-monthday"></select>
+            <select id="sched-monthday" style="width:100%"></select>
           </div>
           <div id="sched-time-row" class="sched-time-row">
             <select id="sched-hour"></select>
@@ -3589,9 +4110,10 @@ header{
               <option value="pm">PM</option>
             </select>
           </div>
-          <div id="sched-custom-row" style="display:none">
-            <input id="sched-cron" placeholder="e.g. 0 9 * * *" style="width:100%">
-          </div>
+        </div>
+        <div style="display:flex;gap:4px">
+          <input id="sched-cwd" placeholder="Folder path (optional; defaults to current folder)" style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px">
+          <button onclick="openBrowse('sched-cwd')" title="Browse folders" style="padding:6px 10px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;cursor:pointer">📂</button>
         </div>
         <select id="sched-ai" style="width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px">
           <option value="claude">Claude Code</option>
@@ -3612,7 +4134,7 @@ header{
   </span>
   <span id="session-badge" class="session-badge" title="Focused session"></span>
   <span id="cwd-display" title="Click to change directory" onclick="startCwdEdit()">—</span>
-  <input id="cwd-input" placeholder="Enter full path and press Enter…"
+  <input id="cwd-input" placeholder="Enter full path and press Enter..."
          onkeydown="cwdKey(event)" onblur="cancelCwdEdit()">
   <button class="dir-browse-btn" onclick="openBrowse()" title="Browse folders">
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -3632,12 +4154,12 @@ header{
     <img src="/static/logo.png" alt="">
   </div>
   <div class="grp system">
-    <div class="bubble">Connecting to server…</div>
+    <div class="bubble">Connecting to server...</div>
   </div>
 </div>
 <div id="thinking">
   <div class="dots"><span></span><span></span><span></span></div>
-  <span id="thlabel">Thinking…</span>
+  <span id="thlabel">Thinking...</span>
 </div>
 
 <div class="input-bar">
@@ -3658,17 +4180,17 @@ header{
     <div class="ai-menu-section">New Session</div>
     <button class="ai-menu-item" onclick="cmd('new_session:claude');closeAiMenu()">
       <span class="menu-dot claude"></span>New: Claude Code</button>
-    <!-- integration "New: …" buttons inserted here by loadIntegrations() -->
+    <!-- integration "New: ..." buttons inserted here by loadIntegrations() -->
     <button class="ai-menu-item" id="shell-mode-btn" onclick="cmd('new_session:');closeAiMenu()">
       <span class="menu-dot shell"></span>New: Shell</button>
     <div class="ai-menu-divider"></div>
     <div class="ai-menu-section">Focused Session</div>
     <button class="ai-menu-item" onclick="cmd('interrupt');closeAiMenu()">⏸ Cancel Task</button>
-    <button class="ai-menu-item" onclick="if(confirm('Delete this session?'))cmd('delete_session');closeAiMenu()">🗑 Delete Session</button>
+    <button class="ai-menu-item" onclick="if(confirm('Delete this session?'))cmd('delete_session');closeAiMenu()">🗑️ Delete Session</button>
     <button class="ai-menu-item" onclick="cmd('clear');closeAiMenu()">↺ Clear Chat</button>
   </div>
 
-  <textarea id="inp" placeholder="Type a message…  (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
+  <textarea id="inp" placeholder="Type a message...  (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
   <button id="send" onclick="send()">Send</button>
 </div>
 
@@ -3677,10 +4199,10 @@ header{
   <div class="modal-box" style="width:min(540px,94vw)">
     <div class="modal-header">
       <span class="modal-title">Session History</span>
-      <button class="modal-close" onclick="closeHistory()">✕</button>
+      <button class="modal-close" onclick="closeHistory()">✖</button>
     </div>
     <div class="hist-search">
-      <input id="hist-search-inp" placeholder="Search sessions…" oninput="filterHistory(this.value)" autocomplete="off">
+      <input id="hist-search-inp" placeholder="Search sessions..." oninput="filterHistory(this.value)" autocomplete="off">
     </div>
     <div class="modal-body" id="hist-list"></div>
   </div>
@@ -3691,7 +4213,7 @@ header{
   <div class="modal-box browse-box">
     <div class="modal-header">
       <span class="modal-title">Browse Directory</span>
-      <button class="modal-close" onclick="closeBrowseModal()">✕</button>
+      <button class="modal-close" onclick="closeBrowseModal()">✖</button>
     </div>
     <div id="browse-crumb" class="browse-crumb"></div>
     <div class="modal-body" id="browse-list"></div>
@@ -3704,7 +4226,7 @@ header{
 
 </div><!-- /center-panel -->
 
-<!-- ── Right Sidebar: Session Dashboard ── -->
+<!-- --- Right Sidebar: Session Dashboard --- -->
 <div id="right-sidebar">
   <div class="rs-header">
     <span>Active Sessions</span>
@@ -3725,6 +4247,7 @@ let _sessNames = {};
 let _sessions = [], _focusedId = null, _focusedAi = null;
 // Sidebar state
 let _sbHistSessions = [], _sbSchedTasks = [], _sessionTimers = {}, _integrationKeys = {};
+let _activeHistoryId = null, _viewedHistoryId = null;
 const AI_COLOR = {claude:'var(--claude)',gemini:'var(--gemini)',codex:'var(--codex)',shell:'var(--shell)'};
 
 // Load integrations from server and inject menu items + CSS vars dynamically
@@ -3740,7 +4263,7 @@ async function loadIntegrations(){
     for(const {key, name, emoji, color} of integrations){
       // Register CSS variable
       root.style.setProperty('--'+key, color);
-      // Parse hex → r,g,b for rgba()
+      // Parse hex -> r,g,b for rgba()
       const r = parseInt(color.slice(1,3),16);
       const g = parseInt(color.slice(3,5),16);
       const b = parseInt(color.slice(5,7),16);
@@ -3752,7 +4275,7 @@ async function loadIntegrations(){
       AI_LABEL[key] = name;
       _integrationKeys[key] = name;
       AI_COLOR[key] = 'var(--' + key + ')';
-      // Inject "New Session: …" button before Shell mode
+      // Inject "New Session: ..." button before Shell mode
       const btn = document.createElement('button');
       btn.className = 'ai-menu-item';
       btn.dataset.newAi = key;
@@ -3785,7 +4308,12 @@ function connect(){
   ws.onerror = (ev) => { console.error('[Helm HQ] WS error', ev); };
   ws.onmessage = e => {
     const d = JSON.parse(e.data);
-    if(d.type==='message'){ _liveHistory.push(d); if(!_viewingHistory) renderMsg(d); }
+    if(d.type==='message'){ 
+      _liveHistory.push(d); 
+      if(!_viewingHistory && (!d.session_id || d.session_id === _focusedId)){
+        renderMsg(d);
+      }
+    }
     else if(d.type==='state') applyState(d);
     else if(d.type==='thinking') setThinking(d.active, d.ai, d.session_id);
     else if(d.type==='cwd') applyCwd(d.path);
@@ -3794,16 +4322,27 @@ function connect(){
 }
 
 function applyState(s){
-  // Clear "Connecting to server…" placeholder once we get real state
+  // Clear "Connecting to server..." placeholder once we get real state
   const _ph = document.querySelector('#messages .grp.system .bubble');
-  if(_ph && _ph.textContent === 'Connecting to server…') _ph.closest('.grp').remove();
+  if(_ph && _ph.textContent === 'Connecting to server...') _ph.closest('.grp').remove();
   // Multi-session state format: { sessions, focused_id, focused_ai, focused_cwd, focused_status }
   // Also support legacy format: { active_ai, cwd }
   if(s.sessions !== undefined){
+    const oldFocusedId = _focusedId;
     _sessions = s.sessions || [];
     _focusedId = s.focused_id || null;
     _focusedAi = s.focused_ai || null;
     activeAi = _focusedAi;
+    
+    // Re-render center panel if focus changed and not viewing history
+    if(!_viewingHistory && oldFocusedId !== _focusedId){
+      _clearMessages();
+      _liveHistory.forEach(m => {
+        if(!m.session_id || m.session_id === _focusedId) renderMsg(m);
+      });
+      scroll();
+    }
+    
     // Update sessions list in the dropdown
     const sessContainer = document.getElementById('ai-menu-sessions');
     if(sessContainer){
@@ -3814,7 +4353,7 @@ function applyState(s){
           const isFocused = sess.id === _focusedId;
           const icon = sess.status === 'stopped' ? '🔴' : sess.busy ? '🟡' : '🟢';
           const busyTag = sess.busy
-            ? `<span class="sess-busy-dot" title="Working…"></span>`
+            ? `<span class="sess-busy-dot" title="Working..."></span>`
             : '';
           const folder = sess.cwd ? sess.cwd.split(/[/\\]/).pop() || sess.cwd : '';
           return `<button class="ai-menu-item${isFocused ? ' session-focused' : ''}${sess.busy ? ' session-busy' : ''}"
@@ -3856,6 +4395,21 @@ function applyState(s){
     _refreshThinkingUI();
     // Update right sidebar session dashboard
     updateRightSidebar(_sessions, _focusedId);
+    const focusedHistoryId = focusedSess && focusedSess.history_id ? focusedSess.history_id : null;
+    _activeHistoryId = _viewingHistory ? _viewedHistoryId : focusedHistoryId;
+    
+    if(_sbSearchQ.length >= 2) renderSbHistorySearch(_sbSearchHits, _sbSearchQ);
+    else if(_sbHistSessions.length) renderSbHistory(_sbHistSessions);
+    // Keep left sidebar history in sync when sessions/folders change.
+    const newHistSig = (_sessions || [])
+      .map(sess => `${sess.id}:${sess.cwd || ''}`)
+      .sort()
+      .join('|');
+    if(newHistSig !== _sbStateSig){
+      _sbStateSig = newHistSig;
+      if(_sbHistLoading) _sbPendingForceRefresh = true;
+      else loadSbHistory(true);
+    }
   } else {
     // Legacy format
     activeAi = s.active_ai;
@@ -3874,7 +4428,7 @@ function applyCwd(path){
   el.title = 'Working directory: ' + path + '\nClick to change';
 }
 
-// ── AI Menu ──────────────────────────────────────────────────────────────────
+// --- AI Menu ---------------------------------------------------------------------------------------------------
 function toggleAiMenu(e){
   e.stopPropagation();
   const menu = document.getElementById('ai-menu');
@@ -3896,7 +4450,7 @@ document.addEventListener('click', e => {
   }
 });
 
-// ── Dir bar ──────────────────────────────────────────────────────────────────
+// --- Dir bar ---------------------------------------------------------------------------------------------------
 function startCwdEdit(){
   const display = document.getElementById('cwd-display');
   const input   = document.getElementById('cwd-input');
@@ -3921,9 +4475,10 @@ function cwdKey(e){
   if(e.key === 'Escape') { cancelCwdEdit(); }
 }
 
-// ── Browse directory modal ────────────────────────────────────────────────────
-let _browsePath = '';
-async function openBrowse(){
+// --- Browse directory modal ------------------------------------------------------------------------------
+let _browsePath = '', _browseTarget = 'cwd'; // 'cwd' or 'sched-cwd' or 'sb-sched-cwd'
+async function openBrowse(target){
+  _browseTarget = target || 'cwd';
   // Try the native Windows folder-picker first (only works on the server machine)
   try {
     const res = await fetch('/browse/native');
@@ -3931,14 +4486,19 @@ async function openBrowse(){
       const data = await res.json();
       if(data.path){
         // User picked a folder — apply it directly, no modal needed
-        applyCwdEdit(data.path);
+        if(_browseTarget === 'cwd') applyCwdEdit(data.path);
+        else document.getElementById(_browseTarget).value = data.path;
         return;
       }
     }
   } catch(e){ /* ignore — fall through to modal */ }
 
   // Fall back to the in-browser folder browser modal
-  _browsePath = document.getElementById('cwd-display').textContent;
+  if(_browseTarget === 'cwd'){
+    _browsePath = document.getElementById('cwd-display').textContent;
+  } else {
+    _browsePath = document.getElementById(_browseTarget).value || _session_cwd();
+  }
   if(_browsePath === '—') _browsePath = '';
   await loadBrowse(_browsePath);
   document.getElementById('browse-modal').classList.add('open');
@@ -3962,16 +4522,25 @@ async function loadBrowse(path){
   const sep = data.path.includes('\\') ? '\\' : '/';
   data.dirs.forEach(d => {
     const full = data.path.replace(/[/\\]+$/, '') + sep + d;
-    html += `<div class="browse-item" onclick="loadBrowse('${esc(full)}')">📁 ${escHtml(d)}</div>`;
+    html += `<div class="browse-item" onclick="loadBrowse('${esc(full)}')">📂 ${escHtml(d)}</div>`;
   });
   document.getElementById('browse-list').innerHTML = html;
 }
-function selectBrowsePath(){ if(_browsePath) applyCwdEdit(_browsePath); closeBrowseModal(); }
+function selectBrowsePath(){
+  if(_browsePath){
+    if(_browseTarget === 'cwd') applyCwdEdit(_browsePath);
+    else {
+      const el = document.getElementById(_browseTarget);
+      if(el) el.value = _browsePath;
+    }
+  }
+  closeBrowseModal();
+}
 function closeBrowseModal(){ document.getElementById('browse-modal').classList.remove('open'); }
 function closeBrowse(e){ if(e.target.id === 'browse-modal') closeBrowseModal(); }
 function esc(s){ return s.replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 
-// ── Thinking (per-session) ────────────────────────────────────────────────────
+// --- Thinking (per-session) ------------------------------------------------------------------------------
 // Track which sessions are currently "thinking" so we can show/hide the
 // indicator correctly when sessions run in parallel or the user switches focus.
 const _thinkingState = {};   // { session_id: { active: bool, ai: string } }
@@ -3994,14 +4563,14 @@ function _refreshThinkingUI(){
     const k     = focused.ai || _focusedAi || activeAi || '';
     const sess  = _sessions.find(s => s.id === _focusedId);
     const label = sess ? (sess.emoji + ' ' + sess.name) : (AI_LABEL[k] || 'AI');
-    document.getElementById('thlabel').textContent = label + '…';
+    document.getElementById('thlabel').textContent = label + '...';
     scroll();
   } else {
     el.className = '';
   }
 }
 
-// ── Logo watermark helpers ────────────────────────────────────────────────────
+// --- Logo watermark helpers ------------------------------------------------------------------------------
 function _clearMessages(){
   // Remove all message groups but keep #chat-logo-bg intact
   const wrap = document.getElementById('messages');
@@ -4014,16 +4583,16 @@ function _updateLogoState(){
   const msgCount = wrap.querySelectorAll('.grp:not(.system), .grp.user, .grp.assistant').length;
   // Also count system bubbles that aren't the connecting placeholder
   const sysBubbles = [...wrap.querySelectorAll('.grp.system .bubble')]
-    .filter(b => b.textContent !== 'Connecting to server…');
+    .filter(b => b.textContent !== 'Connecting to server...');
   const hasAny = msgCount > 0 || sysBubbles.length > 0;
   wrap.classList.toggle('has-messages', hasAny);
 }
 
-// ── Messages ─────────────────────────────────────────────────────────────────
+// --- Messages ------------------------------------------------------------------------------------------------
 function renderMsg(m){
   const wrap = document.getElementById('messages');
   const placeholder = wrap.querySelector('.grp.system .bubble');
-  if(placeholder && placeholder.textContent === 'Connecting to server…'){
+  if(placeholder && placeholder.textContent === 'Connecting to server...'){
     placeholder.closest('.grp').remove();
   }
   const grp = document.createElement('div');
@@ -4059,7 +4628,7 @@ function renderMsg(m){
 }
 function scroll(){ const m = document.getElementById('messages'); m.scrollTop = m.scrollHeight; }
 
-// ── Send ─────────────────────────────────────────────────────────────────────
+// --- Send ------------------------------------------------------------------------------------------------------
 function send(){
   const inp = document.getElementById('inp');
   const txt = inp.value.trim();
@@ -4068,14 +4637,22 @@ function send(){
   if(_pendingContext){
     content = _pendingContext + txt;
     _pendingContext = '';
-    returnToLive();   // clear the resume banner
   }
+  if(_viewingHistory) returnToLive();
   ws.send(JSON.stringify({type:'message', content:content}));
   inp.value = '';
   inp.style.height = 'auto';
 }
 function cmd(c){
   if(!ws || ws.readyState !== 1) return;
+  // If creating a new session while viewing history, pass the CWD
+  if(c.startsWith('new_session:')){
+    const cwd = document.getElementById('cwd-display').textContent;
+    if(cwd && cwd !== '—'){
+        c += '|' + cwd;
+    }
+    if(_viewingHistory) returnToLive();
+  }
   ws.send(JSON.stringify({type:'command', command:c}));
 }
 const inp = document.getElementById('inp');
@@ -4087,8 +4664,8 @@ inp.addEventListener('keydown', e => {
   if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }
 });
 
-// ── History modal ─────────────────────────────────────────────────────────────
-// ── Schedules modal ──────────────────────────────────────────────────────────
+// --- History modal ------------------------------------------------------------------------------------------
+// --- Schedules modal ---------------------------------------------------------------------------------------
 let _schedTasks = [];
 
 function openSchedules(){
@@ -4117,32 +4694,32 @@ function renderSchedules(tasks){
         <code style="margin-left:6px;font-size:11px">${escHtml(t.cron)}</code>
         <span class="sched-ai-badge ${ai}">${ai}</span>
       </div>
-      <div class="sched-prompt">${escHtml(t.prompt.length>80 ? t.prompt.slice(0,80)+'…' : t.prompt)}</div>
+      <div class="sched-prompt">${escHtml(t.prompt.length>80 ? t.prompt.slice(0,80)+'...' : t.prompt)}</div>
       <div class="sched-times">Next: ${escHtml(t.next_run_fmt)} &nbsp;·&nbsp; Last: ${escHtml(t.last_run_fmt)} &nbsp;·&nbsp; Runs: ${t.run_count||0}</div>
       <div class="sched-actions">
-        <button onclick="cmd('schedule_run:${t.id}')" title="Run now">▶</button>
-        <button onclick="cmd('schedule_toggle:${t.id}')" title="${t.enabled?'Pause':'Enable'}">${t.enabled?'⏸':'▶️'}</button>
-        <button onclick="if(confirm('Delete ${escHtml(t.name)}?'))cmd('schedule_delete:${t.id}')" title="Delete" style="color:#f87171">🗑</button>
+        <button onclick="cmd('schedule_run:${t.id}')" title="Run now">â–¶</button>
+        <button onclick="cmd('schedule_toggle:${t.id}')" title="${t.enabled?'Pause':'Enable'}">${t.enabled?'⏸':'â–¶ï¸'}</button>
+        <button onclick="if(confirm('Delete ${escHtml(t.name)}?'))cmd('schedule_delete:${t.id}')" title="Delete" style="color:#f87171">🗑️</button>
       </div>
     </div>`;
   }).join('');
 }
 
-// ── Shared cron builder from friendly picker ──────────────────────────────────
+// --- Shared schedule builder from friendly picker ---------------------------------------------------
 function _buildCronFromPicker(pfx){
   // pfx = '' for modal, 'sb-' for sidebar
   const freq = document.getElementById(pfx+'sched-freq').value;
-  if(freq === 'custom'){
-    const raw = document.getElementById(pfx+'sched-cron');
-    return raw ? raw.value.trim() : '';
-  }
   let hour = parseInt(document.getElementById(pfx+'sched-hour').value, 10);
   const min  = parseInt(document.getElementById(pfx+'sched-min').value, 10);
   const ampm = document.getElementById(pfx+'sched-ampm').value;
   if(ampm === 'pm' && hour !== 12) hour += 12;
   if(ampm === 'am' && hour === 12) hour = 0;
   if(freq === 'daily')   return `${min} ${hour} * * *`;
-  if(freq === 'weekly')  return `${min} ${hour} * * ${document.getElementById(pfx+'sched-weekday').value}`;
+  if(freq === 'weekly'){
+    const checks = document.querySelectorAll(`input[name="${pfx}sched-wd"]:checked`);
+    const days = [...checks].map(c => c.value).join(',');
+    return `${min} ${hour} * * ${days || '*'}`;
+  }
   if(freq === 'monthly') return `${min} ${hour} ${document.getElementById(pfx+'sched-monthday').value} * *`;
   return '';
 }
@@ -4150,13 +4727,12 @@ function _schedFreqToggle(pfx){
   const freq = document.getElementById(pfx+'sched-freq').value;
   document.getElementById(pfx+'sched-weekday-row').style.display  = freq==='weekly'  ? '' : 'none';
   document.getElementById(pfx+'sched-monthday-row').style.display = freq==='monthly' ? '' : 'none';
-  document.getElementById(pfx+'sched-time-row').style.display     = freq==='custom'  ? 'none' : '';
-  document.getElementById(pfx+'sched-custom-row').style.display   = freq==='custom'  ? '' : 'none';
+  document.getElementById(pfx+'sched-time-row').style.display     = '';
 }
 function schedFreqChange()   { _schedFreqToggle(''); }
 function sbSchedFreqChange() { _schedFreqToggle('sb-'); }
 function _initSchedPicker(pfx){
-  // Populate hours 1–12
+  // Populate hours 1-12
   const hSel = document.getElementById(pfx+'sched-hour');
   if(hSel && !hSel.options.length){
     for(let h=1;h<=12;h++){
@@ -4164,7 +4740,7 @@ function _initSchedPicker(pfx){
     }
     hSel.value = 9; // default 9
   }
-  // Populate month days 1–28
+  // Populate month days 1-28
   const mSel = document.getElementById(pfx+'sched-monthday');
   if(mSel && !mSel.options.length){
     for(let d=1;d<=28;d++){
@@ -4177,12 +4753,18 @@ function _initSchedPicker(pfx){
 
 function schedAdd(){
   _initSchedPicker('');
+  const freq   = document.getElementById('sched-freq').value;
   const cron   = _buildCronFromPicker('');
   const ai     = document.getElementById('sched-ai').value;
   const prompt = document.getElementById('sched-prompt').value.trim();
+  const cwd    = document.getElementById('sched-cwd').value.trim();
   if(!cron || !prompt){ alert('Please fill in schedule and prompt.'); return; }
-  cmd(`schedule_add:${cron}|${ai}|${prompt}`);
+  if(freq === 'weekly' && !document.querySelector('input[name="sched-wd"]:checked')){
+    alert('Please select at least one day of the week.'); return;
+  }
+  cmd(`schedule_add:${cron}|${ai}|${cwd}|${prompt}`);
   document.getElementById('sched-prompt').value = '';
+  document.getElementById('sched-cwd').value = '';
   document.getElementById('sched-add-details').open = false;
 }
 
@@ -4199,7 +4781,7 @@ function _schedPopulateAiSelect(){
   });
 }
 
-// ── History modal ─────────────────────────────────────────────────────────────
+// --- History modal ------------------------------------------------------------------------------------------
 let _histSessions = [];   // full session list loaded from /history
 // AI_COLOR already declared above — reuse it for session cards
 const AI_DISPLAY = {claude:'Claude Code', gemini:'Gemini', codex:'Codex', shell:'Shell'};
@@ -4207,14 +4789,16 @@ const AI_DISPLAY = {claude:'Claude Code', gemini:'Gemini', codex:'Codex', shell:
 function _fmtDate(dateStr, ts){
   // dateStr = YYYY-MM-DD; ts = unix timestamp of last message (optional)
   try {
+    if(!ts && (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr))) return dateStr || "";
     const d = ts ? new Date(ts * 1000) : new Date(dateStr + 'T12:00:00');
+    if(isNaN(d.getTime())) return dateStr || "";
     const now = new Date();
     const diffDays = Math.floor((now - d) / 86400000);
     if(diffDays === 0) return 'Today';
     if(diffDays === 1) return 'Yesterday';
     if(diffDays < 7)  return d.toLocaleDateString(undefined,{weekday:'long'});
     return d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
-  } catch(e){ return dateStr; }
+  } catch(e){ return dateStr || ""; }
 }
 
 function _renderHistoryList(sessions){
@@ -4247,7 +4831,7 @@ function _renderHistoryList(sessions){
         <div class="hcard-meta">${escHtml(subline)}</div>
         ${preview}
       </div>
-      <button class="hcard-del" title="Delete session" onclick="delSession(event,'${s.date}')">✕</button>
+      <button class="hcard-del" title="Delete session" onclick="delSession(event,'${s.date}')">✖</button>
     </div>
     <div class="hcard-actions" id="hcard-act-${s.date}">
       <button class="hact primary" onclick="loadSession('${s.date}')">
@@ -4318,7 +4902,10 @@ async function loadSession(date){
   const res = await fetch('/history/' + date);
   const data = await res.json();
   const msgs = data.messages || data;
+  if(data.cwd) applyCwd(data.cwd);
   _viewingHistory = true;
+  _viewedHistoryId = date;
+  _activeHistoryId = date;
   const name = _sessNames[date] || _fmtDate(date);
   const banner = document.getElementById('hist-banner');
   banner.className = 'on view';
@@ -4326,15 +4913,26 @@ async function loadSession(date){
   document.getElementById('hist-banner-date').textContent = 'Viewing: ' + name;
   _clearMessages();
   msgs.forEach(renderMsg);
+  if(_sbSearchQ.length >= 2) renderSbHistorySearch(_sbSearchHits, _sbSearchQ);
+  else renderSbHistory(_sbHistSessions);
   scroll();
 }
 
 function returnToLive(){
   _viewingHistory = false;
+  _viewedHistoryId = null;
+  const focusedSess = (_sessions || []).find(s => s.id === _focusedId);
+  if(focusedSess && focusedSess.cwd) applyCwd(focusedSess.cwd);
+  else if(_DEFAULT_CWD) applyCwd(_DEFAULT_CWD);
+  _activeHistoryId = focusedSess && focusedSess.history_id ? focusedSess.history_id : null;
   const banner = document.getElementById('hist-banner');
   banner.className = '';
   _clearMessages();
-  _liveHistory.forEach(renderMsg);
+  _liveHistory.forEach(m => {
+    if(!m.session_id || m.session_id === _focusedId) renderMsg(m);
+  });
+  if(_sbSearchQ.length >= 2) renderSbHistorySearch(_sbSearchHits, _sbSearchQ);
+  else renderSbHistory(_sbHistSessions);
   scroll();
 }
 
@@ -4343,11 +4941,18 @@ async function resumeSession(date){
   const res = await fetch('/history/' + date + '/resume');
   const data = await res.json();
   _pendingContext = data.context || '';
+  _viewingHistory = false;
+  _viewedHistoryId = null;
+  const focusedSess = (_sessions || []).find(s => s.id === _focusedId);
+  if(focusedSess && focusedSess.cwd) applyCwd(focusedSess.cwd);
+  _activeHistoryId = focusedSess && focusedSess.history_id ? focusedSess.history_id : null;
   const name = _sessNames[date] || _fmtDate(date);
   const banner = document.getElementById('hist-banner');
   banner.className = 'on resume';
   document.getElementById('hist-banner-icon').textContent = '▶';
   document.getElementById('hist-banner-date').textContent = 'Context from: ' + name + ' — type your message to continue';
+  if(_sbSearchQ.length >= 2) renderSbHistorySearch(_sbSearchHits, _sbSearchQ);
+  else renderSbHistory(_sbHistSessions);
   document.getElementById('inp').focus();
 }
 
@@ -4395,7 +5000,7 @@ async function finishRename(e, date, blur){
   }
 }
 
-// ── Right Sidebar: Session Dashboard ──────────────────────────────────────────
+// --- Right Sidebar: Session Dashboard ---------------------------------------------------------------
 function _fmtElapsed(ts){
   if(!ts) return '';
   const sec = Math.floor((Date.now() - ts) / 1000);
@@ -4403,6 +5008,12 @@ function _fmtElapsed(ts){
   const m = Math.floor(sec / 60);
   if(m < 60) return m + 'm ' + (sec % 60) + 's';
   return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+}
+function _fmtResetIn(sec){
+  const s = Math.max(0, Math.floor(sec || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return `${h}h ${m}m`;
 }
 function updateRightSidebar(sessions, focusedId){
   const el = document.getElementById('rs-list');
@@ -4424,6 +5035,14 @@ function updateRightSidebar(sessions, focusedId){
     const color = AI_COLOR[aiKey] || 'var(--shell)';
     const folder = sess.cwd ? sess.cwd.split(/[/\\]/).pop() || '' : '';
     const timer = sess.busy && sess.task_start ? _fmtElapsed(sess.task_start) : '';
+    const u = sess.usage || {};
+    const pct = u.pct == null ? null : Math.max(0, Math.min(100, Number(u.pct)));
+    const usageText = pct == null
+      ? `${(u.used_min || 0).toFixed(1)}m used`
+      : `${pct.toFixed(1)}% used`;
+    const usageSrc = (u.source || '').endsWith('_cli') ? 'CLI' : 'EST';
+    const resetText = _fmtResetIn(u.reset_in_sec || 0);
+    const fillWidth = pct == null ? '0%' : `${pct}%`;
     return `<div class="rs-item${f ? ' focused' : ''}" data-sid="${sess.id}" onclick="cmd('focus:${sess.id}')">
       <div class="rs-dot ${dot}"></div>
       <div class="rs-info">
@@ -4434,10 +5053,17 @@ function updateRightSidebar(sessions, focusedId){
           ${timer ? `<span class="rs-timer">${timer}</span>` : ''}
           ${folder ? `<span style="opacity:.5">${escHtml(folder)}</span>` : ''}
         </div>
+        <div class="rs-usage">
+          <div class="rs-usage-line">
+            <span>${usageText}</span>
+            <span>${usageSrc} · reset ${resetText}</span>
+          </div>
+          <div class="rs-usage-bar"><div class="rs-usage-fill" style="width:${fillWidth}"></div></div>
+        </div>
       </div>
       <div class="rs-actions">
         <button class="rs-act" onclick="event.stopPropagation();cmd('interrupt')" title="Cancel running task">⏸</button>
-        <button class="rs-act" onclick="event.stopPropagation();if(confirm('Delete this session?'))cmd('delete_session')" title="Delete session">🗑</button>
+        <button class="rs-act" onclick="event.stopPropagation();if(confirm('Delete this session?'))cmd('delete_session')" title="Delete session">🗑️</button>
       </div>
     </div>`;
   }).join('');
@@ -4458,7 +5084,7 @@ function updateRightSidebar(sessions, focusedId){
   });
 }
 
-// ── Left Sidebar: Tab Switching ──────────────────────────────────────────────
+// --- Left Sidebar: Tab Switching ---------------------------------------------------------------------
 function switchSbTab(tab, btn){
   document.querySelectorAll('.sb-tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.sb-panel').forEach(p => p.classList.remove('active'));
@@ -4468,24 +5094,30 @@ function switchSbTab(tab, btn){
   if(tab === 'scheduled') cmd('schedule_list');
 }
 
-// ── Left Sidebar: History ────────────────────────────────────────────────────
-let _sbHistLoading = false;
-function loadSbHistory(){
+// --- Left Sidebar: History ------------------------------------------------------------------------------
+let _sbHistLoading = false, _sbPendingForceRefresh = false, _sbStateSig = '';
+function loadSbHistory(force){
+  const mustForce = !!force;
   if(_sbHistLoading) return;
   const el = document.getElementById('sb-panel-history');
   if(!_sbHistSessions.length){
-    el.innerHTML = '<div class="sb-empty" style="opacity:.5">Loading…</div>';
+    el.innerHTML = '<div class="sb-empty" style="opacity:.5">Loading...</div>';
   }
   _sbHistLoading = true;
-  fetch('/history').then(r => r.json()).then(sessions => {
+  fetch('/history' + (mustForce ? '?force=1' : '')).then(r => r.json()).then(sessions => {
     _sbHistLoading = false;
+    if(_sbPendingForceRefresh && !mustForce){
+      _sbPendingForceRefresh = false;
+      loadSbHistory(true);
+      return;
+    }
     if(sessions.length){
       _sbHistSessions = sessions;
       renderSbHistory(sessions);
     } else if(!_sbHistSessions.length){
       // Cache might still be warming — retry once after 2s
       setTimeout(() => {
-        fetch('/history').then(r => r.json()).then(s2 => {
+        fetch('/history' + (mustForce ? '?force=1' : '')).then(r => r.json()).then(s2 => {
           _sbHistSessions = s2;
           renderSbHistory(s2);
         }).catch(() => {});
@@ -4503,17 +5135,21 @@ function renderSbHistory(sessions){
     return;
   }
   el.innerHTML = sessions.map(s => {
-    const name = s.name || _fmtDate(s.date, s.ts);
+    const dateDisp = _fmtDate(s.date, s.ts);
+    const name = s.name || dateDisp || s.date;
     const ai = s.ai || '';
     const color = AI_COLOR[ai] || '';
-    return `<div class="sb-hcard" onclick="resumeSession('${s.date}')" title="Click to resume session">
+    const isActive = s.date === _activeHistoryId && _activeHistoryId !== null;
+    return `<div class="sb-hcard${isActive ? ' active' : ''}" onclick="loadSession('${s.date}')" title="Click to view session">
       <div style="display:flex;align-items:center;gap:6px">
         <div class="sb-hcard-name" id="sb-hcard-name-${s.date}" style="flex:1">${escHtml(name)}</div>
+        ${isActive ? '<span class="sb-active-pill">Active</span>' : ''}
         ${ai ? `<span class="sb-hcard-ai" style="${color ? 'border-color:' + color + ';color:' + color : ''}">${ai}</span>` : ''}
-        <button class="sb-rename-btn" title="Rename" onclick="sbStartRename(event,'${s.date}')">✏️</button>
+        <button class="sb-rename-btn" title="Rename" onclick="sbStartRename(event,'${s.date}')">&#9998;</button>
+        <button class="sb-del-btn" title="Delete" onclick="sbDeleteSession(event,'${s.date}')">&#10005;</button>
       </div>
       <div class="sb-hcard-meta">
-        <span>${_fmtDate(s.date, s.ts)}</span>
+        <span>${dateDisp}</span>
         <span>${s.count || 0} msg${(s.count||0) !== 1 ? 's' : ''}</span>
       </div>
     </div>`;
@@ -4553,9 +5189,27 @@ async function sbFinishRename(e, date, blur){
   const s = _sbHistSessions.find(s => s.date === date);
   nameEl.textContent = (s && s.name) ? s.name : date;
 }
-// ── Sidebar history search (full-text via API) ────────────────────────────────
+// --- Sidebar history search (full-text via API) ------------------------------------------------
+async function sbDeleteSession(e, date){
+  e.stopPropagation();
+  const label = _sessNames[date] || (_sbHistSessions.find(s => s.date === date)?.name) || date;
+  if(!confirm('Delete session "' + label + '"? This cannot be undone.')) return;
+  await fetch('/history/' + date, {method: 'DELETE'});
+  _sbHistSessions = _sbHistSessions.filter(s => s.date !== date);
+  _histSessions = (_histSessions || []).filter(s => s.date !== date);
+  delete _sessNames[date];
+  _sbSearchHits = (_sbSearchHits || []).filter(s => s.date !== date);
+  if(_activeHistoryId === date){
+    _activeHistoryId = null;
+    _viewedHistoryId = null;
+  }
+  if(_sbSearchQ.length >= 2) renderSbHistorySearch(_sbSearchHits, _sbSearchQ);
+  else renderSbHistory(_sbHistSessions);
+  loadSbHistory(true);
+}
 let _sbSearchTimer = null;
 let _sbSearchQ = '';
+let _sbSearchHits = [];
 
 function filterSidebarHistory(q){
   _sbSearchQ = q.trim();
@@ -4563,13 +5217,14 @@ function filterSidebarHistory(q){
   const el = document.getElementById('sb-panel-history');
 
   if(_sbSearchQ.length < 2){
-    // Fewer than 2 chars → restore full list immediately
+    // Fewer than 2 chars -> restore full list immediately
+    _sbSearchHits = [];
     renderSbHistory(_sbHistSessions);
     return;
   }
 
   // Show a subtle loading state while debouncing
-  el.innerHTML = '<div class="sb-empty" style="opacity:.5">Searching…</div>';
+  el.innerHTML = '<div class="sb-empty" style="opacity:.5">Searching...</div>';
 
   _sbSearchTimer = setTimeout(async () => {
     if(_sbSearchQ.length < 2){ renderSbHistory(_sbHistSessions); return; }
@@ -4578,6 +5233,7 @@ function filterSidebarHistory(q){
       const hits = await res.json();
       // Only apply if the query hasn't changed while we were fetching
       if(_sbSearchQ !== q.trim()) return;
+      _sbSearchHits = hits;
       renderSbHistorySearch(hits, _sbSearchQ);
     } catch(e){
       el.innerHTML = '<div class="sb-empty">Search failed</div>';
@@ -4605,11 +5261,14 @@ function renderSbHistorySearch(hits, q){
     const ai    = s.ai || '';
     const color = AI_COLOR[ai] || '';
     const count = s.match_count === 1 ? '1 match' : s.match_count + ' matches';
-    return `<div class="sb-hcard sb-hcard-search" onclick="resumeSession('${s.date}')" title="Click to resume session">
+    const isActive = s.date === _activeHistoryId;
+    return `<div class="sb-hcard sb-hcard-search${isActive ? ' active' : ''}" onclick="loadSession('${s.date}')" title="Click to view session">
       <div style="display:flex;align-items:center;gap:6px">
         <div class="sb-hcard-name" id="sb-hcard-name-${s.date}" style="flex:1">${_highlightMatch(name, q)}</div>
+        ${isActive ? '<span class="sb-active-pill">Active</span>' : ''}
         ${ai ? `<span class="sb-hcard-ai" style="${color ? 'border-color:' + color + ';color:' + color : ''}">${ai}</span>` : ''}
-        <button class="sb-rename-btn" title="Rename" onclick="sbStartRename(event,'${s.date}')">✏️</button>
+        <button class="sb-rename-btn" title="Rename" onclick="sbStartRename(event,'${s.date}')">&#9998;</button>
+        <button class="sb-del-btn" title="Delete" onclick="sbDeleteSession(event,'${s.date}')">&#10005;</button>
       </div>
       <div class="sb-hcard-snippet">${_highlightMatch(s.snippet, q)}</div>
       <div class="sb-hcard-meta"><span>${s.date}</span><span class="sb-match-count">${count}</span></div>
@@ -4617,7 +5276,7 @@ function renderSbHistorySearch(hits, q){
   }).join('');
 }
 
-// ── Left Sidebar: Scheduled Tasks ────────────────────────────────────────────
+// --- Left Sidebar: Scheduled Tasks ------------------------------------------------------------------
 function updateSbScheduled(tasks){
   const el = document.getElementById('sb-sched-list');
   if(!el) return;
@@ -4634,24 +5293,30 @@ function updateSbScheduled(tasks){
         <span class="sb-sched-name">${escHtml(t.name)}</span>
         <span class="sb-hcard-ai">${ai}</span>
       </div>
-      <div class="sb-sched-prompt">${escHtml(t.prompt.length > 60 ? t.prompt.slice(0,60) + '…' : t.prompt)}</div>
+      <div class="sb-sched-prompt">${escHtml(t.prompt.length > 60 ? t.prompt.slice(0,60) + '...' : t.prompt)}</div>
       <div class="sb-sched-meta"><code style="font-size:10px">${escHtml(t.cron)}</code> · Next: ${escHtml(t.next_run_fmt)}</div>
       <div class="sb-sched-btns">
-        <button onclick="cmd('schedule_run:${t.id}')" title="Run now">▶ Run</button>
-        <button onclick="cmd('schedule_toggle:${t.id}')">${t.enabled ? '⏸' : '▶'}</button>
-        <button onclick="if(confirm('Delete?'))cmd('schedule_delete:${t.id}')" style="color:#f87171">✕</button>
+        <button onclick="cmd('schedule_run:${t.id}')" title="Run now">â–¶ Run</button>
+        <button onclick="cmd('schedule_toggle:${t.id}')">${t.enabled ? '⏸' : 'â–¶'}</button>
+        <button onclick="if(confirm('Delete?'))cmd('schedule_delete:${t.id}')" style="color:#f87171">✖</button>
       </div>
     </div>`;
   }).join('');
 }
 function sbSchedAdd(){
   _initSchedPicker('sb-');
+  const freq   = document.getElementById('sb-sched-freq').value;
   const cron   = _buildCronFromPicker('sb-');
   const ai     = document.getElementById('sb-sched-ai').value;
   const prompt = document.getElementById('sb-sched-prompt').value.trim();
+  const cwd    = document.getElementById('sb-sched-cwd').value.trim();
   if(!cron || !prompt){ alert('Please fill in schedule and prompt.'); return; }
-  cmd(`schedule_add:${cron}|${ai}|${prompt}`);
+  if(freq === 'weekly' && !document.querySelector('input[name="sb-sched-wd"]:checked')){
+    alert('Please select at least one day of the week.'); return;
+  }
+  cmd(`schedule_add:${cron}|${ai}|${cwd}|${prompt}`);
   document.getElementById('sb-sched-prompt').value = '';
+  document.getElementById('sb-sched-cwd').value = '';
 }
 
 // Also populate sidebar AI dropdown with integrations
@@ -4666,7 +5331,7 @@ function _sbSchedPopulateAi(){
   });
 }
 
-// ── Mobile sidebar toggles ───────────────────────────────────────────────────
+// --- Mobile sidebar toggles ---------------------------------------------------------------------------
 function toggleLeft(){
   const el = document.getElementById('left-sidebar');
   const ov = document.getElementById('sb-overlay');
@@ -4687,7 +5352,7 @@ function closeSidebars(){
   document.getElementById('sb-overlay').classList.remove('open');
 }
 
-// ── Redirect old modal openers to sidebars (on desktop) / toggle (mobile) ────
+// --- Redirect old modal openers to sidebars (on desktop) / toggle (mobile) ------
 const _origOpenHistory = openHistory;
 openHistory = function(){
   if(window.innerWidth > 900){
@@ -4711,7 +5376,7 @@ openSchedules = function(){
   }
 };
 
-// ── Init ─────────────────────────────────────────────────────────────────────
+// --- Init ------------------------------------------------------------------------------------------------------
 connect();
 loadIntegrations();
 </script>
@@ -4797,7 +5462,7 @@ async def _main():
         async with _telegram_app:
             await _telegram_app.start()
             await _telegram_app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-            logger.info("Telegram bot started. Polling for updates…")
+            logger.info("Telegram bot started. Polling for updates...")
             await server.serve()           # blocks until Ctrl+C
             await _telegram_app.updater.stop()
             await _telegram_app.stop()
@@ -4815,3 +5480,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
