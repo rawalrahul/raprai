@@ -34,6 +34,25 @@ async def _main():
 
     # --- Build Telegram application ---
     if BOT_TOKEN:
+        from helm.config import ALLOWED_USER_IDS
+        if not ALLOWED_USER_IDS:
+            logger.error(
+                "\n"
+                "╔══════════════════════════════════════════════════════════╗\n"
+                "║  ⛔  SECURITY WARNING — Telegram bot will NOT start      ║\n"
+                "║                                                          ║\n"
+                "║  ALLOWED_USER_IDS is missing or empty in your .env.     ║\n"
+                "║  Without it, anyone who finds your bot can control it.  ║\n"
+                "║                                                          ║\n"
+                "║  Fix:                                                    ║\n"
+                "║  1. Open http://localhost:%d/setup in your browser      ║\n"
+                "║  2. Enter your Telegram user ID in the setup wizard     ║\n"
+                "║     (find it via @userinfobot on Telegram)              ║\n"
+                "║  3. Restart Helm HQ                                     ║\n"
+                "╚══════════════════════════════════════════════════════════╝",
+                WEB_PORT,
+            )
+    if BOT_TOKEN and ALLOWED_USER_IDS:
         from telegram import Update
         from telegram.ext import (
             Application, CallbackQueryHandler, CommandHandler,
@@ -81,9 +100,6 @@ async def _main():
         # Plain text + natural language
         tg.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, tg_text))
 
-        from helm.config import ALLOWED_USER_IDS
-        if not ALLOWED_USER_IDS:
-            logger.warning("ALLOWED_USER_IDS is empty — Telegram bot is open to anyone!")
 
     # --- Build uvicorn server ---
     config = uvicorn.Config(
