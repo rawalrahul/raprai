@@ -23,7 +23,8 @@ from helm.terminal import TerminalSession
 # Session creation & lookup
 # ---------------------------------------------------------------------------
 
-def make_session(ai: Optional[str], cwd: Optional[str] = None) -> dict:
+def make_session(ai: Optional[str], cwd: Optional[str] = None,
+                 model: Optional[str] = None) -> dict:
     """Create, launch, and register a new session. Returns the session dict.
     Automatically resumes history if a log exists for the given CWD.
     """
@@ -59,6 +60,8 @@ def make_session(ai: Optional[str], cwd: Optional[str] = None) -> dict:
         "changes": {"new": [], "modified": [], "deleted": []},
         "proc": None,
         "history": history,
+        # Per-session model override — None means use the integration's default
+        "model": model or None,
     }
     _st.sessions[sid] = sess
 
@@ -330,7 +333,8 @@ def sessions_state_payload() -> list[dict]:
          "history_id": path_to_id(s["cwd"]),
          "status": s["status"], "emoji": s["emoji"], "color": s["color"],
          "busy": s.get("busy", False), "task_start": s.get("task_start"),
-         "usage": usage_for_ai(s.get("ai"))}
+         "usage": usage_for_ai(s.get("ai")),
+         "model": s.get("model")}
         for s in _st.sessions.values()
     ]
 

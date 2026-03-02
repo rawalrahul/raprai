@@ -33,14 +33,20 @@ def _model() -> str:
 
 # ── Command builder ───────────────────────────────────────────────────────────
 
-def build_command(prompt: str) -> list[str]:
+def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
     """
     Run a single non-interactive Ollama query and return the output.
 
     `ollama run MODEL "prompt"` exits automatically after generating the response,
     which matches Helm HQ's one-shot subprocess model.
+
+    Args:
+        prompt: The user prompt to send to the model.
+        model:  Override the model for this call (e.g. "deepseek-r1:8b").
+                Falls back to OLLAMA_MODEL env var or the built-in default.
     """
-    return ["ollama", "run", _model(), "--nowordwrap", prompt]
+    chosen = (model or _model()).strip()
+    return ["ollama", "run", chosen, "--nowordwrap", prompt]
 
 # ── Metadata ──────────────────────────────────────────────────────────────────
 
