@@ -13,6 +13,7 @@ import uvicorn
 # Load environment variables first (helm/config.py does this via dotenv)
 from helm.config import BOT_TOKEN, WEB_HOST, WEB_PORT, logger
 from helm.integrations import load_integrations
+from helm.skills import scan_skills
 from helm.scheduler import load_scheduled_tasks, cron_runner
 from helm.history import rebuild_hist_cache_sync
 from helm.web_routes import app
@@ -23,6 +24,12 @@ import helm.state as _st
 async def _main():
     # Load AI integration plugins from integrations/ folder
     load_integrations()
+
+    # Scan for Claude skills and build the shared skill registry.
+    # All non-Claude AIs (Ollama, Gemini, Codex, custom CLIs) will
+    # automatically receive relevant skill instructions injected into
+    # their prompts at dispatch time.
+    scan_skills()
 
     # Warm history cache in background so first /history request is instant
     import concurrent.futures
