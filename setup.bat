@@ -1,4 +1,7 @@
 @echo off
+:: Always run from the folder that contains this script,
+:: regardless of where it was launched from (shortcut, cmd, Explorer, etc.)
+cd /d "%~dp0"
 chcp 65001 >nul
 setlocal enabledelayedexpansion
 
@@ -15,7 +18,7 @@ if errorlevel 1 (
 
 :: -- Install Python dependencies --
 echo Installing Python dependencies...
-echo   (python-telegram-bot, fastapi, uvicorn, python-dotenv, croniter, aiofiles)
+echo   (python-telegram-bot, fastapi, uvicorn, python-dotenv, python-multipart, croniter, aiofiles)
 python -m pip install --upgrade pip --quiet
 python -m pip install -r requirements.txt
 if errorlevel 1 (
@@ -39,18 +42,21 @@ if not exist .env (
 )
 echo.
 
-:: -- Check TELEGRAM_BOT_TOKEN --
-set "BOT_TOKEN="
-set "FRESH_SETUP=0"
-for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
-    if /i "%%A"=="TELEGRAM_BOT_TOKEN" set "BOT_TOKEN=%%B"
-)
+:: -----------------------------------------------------------------------
+:: Check TELEGRAM_BOT_TOKEN
+:: Python exits 0 if the key exists and is non-blank, 1 if missing/blank.
+:: This avoids temp files and set /p-from-file, which are unreliable on
+:: Windows when the file has no trailing newline.
+:: -----------------------------------------------------------------------
+set "NEED_TOKEN=0"
+python -c "from dotenv import dotenv_values; import sys; sys.exit(0 if dotenv_values('.env').get('TELEGRAM_BOT_TOKEN','').strip() else 1)"
+if errorlevel 1 set "NEED_TOKEN=1"
 
-if "!BOT_TOKEN!"=="" (
+if "!NEED_TOKEN!"=="1" (
     echo No TELEGRAM_BOT_TOKEN found in .env.
     echo.
     echo ================================================================
-    echo   STEP 1 of 2 -- Create a Telegram Bot
+    echo   STEP 1 -- Create a Telegram Bot
     echo ================================================================
     echo.
     echo   1. Open Telegram (phone or desktop)
@@ -67,30 +73,28 @@ if "!BOT_TOKEN!"=="" (
     echo   Copy the entire token string (everything after "Use this token").
     echo ================================================================
     echo.
-    set /p "BOT_TOKEN=  Paste your bot token here and press Enter: "
+    set /p "NEW_TOKEN=  Paste your bot token here and press Enter: "
     echo.
 
     :: Write token to .env using Python for safe handling of special chars
-    echo !BOT_TOKEN!| python -c "import sys,re; t=sys.stdin.read().strip(); f=open('.env','r'); c=f.read(); f.close(); c=re.sub(r'^TELEGRAM_BOT_TOKEN=.*','TELEGRAM_BOT_TOKEN='+t,c,flags=re.MULTILINE) if 'TELEGRAM_BOT_TOKEN=' in c else c.rstrip(chr(10))+chr(10)+'TELEGRAM_BOT_TOKEN='+t+chr(10); open('.env','w').write(c)"
+    echo !NEW_TOKEN!| python -c "import sys,re; t=sys.stdin.read().strip(); f=open('.env','r',encoding='utf-8'); c=f.read(); f.close(); c=re.sub(r'^TELEGRAM_BOT_TOKEN=.*','TELEGRAM_BOT_TOKEN='+t,c,flags=re.MULTILINE) if 'TELEGRAM_BOT_TOKEN=' in c else c.rstrip()+'\nTELEGRAM_BOT_TOKEN='+t+'\n'; open('.env','w',encoding='utf-8').write(c)"
 
     echo   Bot token saved to .env
     echo.
-    set "FRESH_SETUP=1"
 ) else (
     echo   TELEGRAM_BOT_TOKEN ... OK
 )
 
-:: -- Check ALLOWED_USER_IDS --
-set "USER_IDS="
-for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
-    if /i "%%A"=="ALLOWED_USER_IDS" set "USER_IDS=%%B"
-)
+:: -----------------------------------------------------------------------
+:: Check ALLOWED_USER_IDS  (independent of token check)
+:: -----------------------------------------------------------------------
+set "NEED_IDS=0"
+python -c "from dotenv import dotenv_values; import sys; sys.exit(0 if dotenv_values('.env').get('ALLOWED_USER_IDS','').strip() else 1)"
+if errorlevel 1 set "NEED_IDS=1"
 
-if "!USER_IDS!"=="" set "FRESH_SETUP=1"
-
-if "!FRESH_SETUP!"=="1" (
+if "!NEED_IDS!"=="1" (
     echo ================================================================
-    echo   STEP 2 of 2 -- Get your Telegram User ID
+    echo   STEP 2 -- Get your Telegram User ID
     echo ================================================================
     echo.
     echo   Your User ID tells the bot who is allowed to send it commands.
@@ -106,10 +110,10 @@ if "!FRESH_SETUP!"=="1" (
     echo        123456789,987654321
     echo ================================================================
     echo.
-    set /p "USER_IDS=  Paste your User ID and press Enter: "
+    set /p "NEW_IDS=  Paste your User ID and press Enter: "
     echo.
 
-    echo !USER_IDS!| python -c "import sys,re; t=sys.stdin.read().strip(); f=open('.env','r'); c=f.read(); f.close(); c=re.sub(r'^ALLOWED_USER_IDS=.*','ALLOWED_USER_IDS='+t,c,flags=re.MULTILINE) if 'ALLOWED_USER_IDS=' in c else c.rstrip(chr(10))+chr(10)+'ALLOWED_USER_IDS='+t+chr(10); open('.env','w').write(c)"
+    echo !NEW_IDS!| python -c "import sys,re; t=sys.stdin.read().strip(); f=open('.env','r',encoding='utf-8'); c=f.read(); f.close(); c=re.sub(r'^ALLOWED_USER_IDS=.*','ALLOWED_USER_IDS='+t,c,flags=re.MULTILINE) if 'ALLOWED_USER_IDS=' in c else c.rstrip()+'\nALLOWED_USER_IDS='+t+'\n'; open('.env','w',encoding='utf-8').write(c)"
 
     echo   User ID saved to .env
     echo.

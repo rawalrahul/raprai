@@ -11,5 +11,5 @@ def build_command(prompt: str) -> list[str]:
     _ext = ".cmd" if sys.platform == "win32" else ""
     return [f"gemini{_ext}", "-p", prompt, "--yolo"]
 
-ENV_VARS   = ["GEMINI_API_KEY"]
-SETUP_HINT = "Install: npm install -g @google/gemini-cli  |  Set GEMINI_API_KEY in .env"
+ENV_VARS   = []   # API key is optional — Gemini CLI handles auth internally
+SETUP_HINT = "Install: npm install -g @google/gemini-cli"

@@ -127,6 +127,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);
       <div class="step-dot" id="dot1"></div>
       <div class="step-dot" id="dot2"></div>
       <div class="step-dot" id="dot3"></div>
+      <div class="step-dot" id="dot4"></div>
     </div>
   </div>
 
@@ -220,17 +221,70 @@ html,body{height:100%;background:var(--bg);color:var(--text);
         </div>
       </div>
 
+      <div class="integ-card">
+        <div class="integ-header">
+          <span class="integ-emoji">🦙</span>
+          <span class="integ-name">Ollama <span style="font-size:10px;color:var(--ok);font-weight:700;margin-left:4px">OFFLINE</span></span>
+          <span class="integ-badge off" id="ollama-badge-2">checking...</span>
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px">
+          Run any AI model locally — no API key, no internet required after download.
+        </div>
+        <div id="ollama-models-row" style="display:none;margin-bottom:10px">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:5px">Active model (OLLAMA_MODEL):</div>
+          <select id="ollama-model-select" style="
+            width:100%;background:var(--surface2);border:1px solid var(--border);
+            border-radius:6px;padding:8px 10px;font-size:13px;color:var(--text);
+            outline:none;font-family:inherit">
+          </select>
+        </div>
+        <div id="ollama-install-hint" style="display:none">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Install Ollama:</div>
+          <div class="code-block">winget install Ollama.Ollama<button class="code-copy" onclick="copyCode(this)">copy</button></div>
+          <div style="font-size:12px;color:var(--muted);margin:8px 0 4px">Then pull a model:</div>
+          <div class="code-block">ollama pull qwen3:4b<button class="code-copy" onclick="copyCode(this)">copy</button></div>
+        </div>
+      </div>
+
       <div id="optional-msg"></div>
       <div class="btn-row">
         <button class="btn btn-secondary" onclick="goStep(1)">← Back</button>
         <button class="btn btn-secondary" onclick="checkOptionalIntegrations()">Re-check</button>
         <button class="btn btn-primary" onclick="saveOptional()">Save & Continue →</button>
-        <button class="btn-skip" onclick="goStep(3)">Skip for now</button>
+        <button class="btn-skip" onclick="goStep(3)">Skip for now →</button>
       </div>
     </div>
 
-    <!-- ─── STEP 3: Done ─── -->
+    <!-- ─── STEP 3: PIN Protection ─── -->
     <div class="step" id="step3">
+      <div class="step-title">Set a PIN 🔒</div>
+      <div class="step-desc">
+        Helm HQ is accessible from any browser that can reach your machine.
+        Set a PIN so only you can log in — it will be required every time the
+        app is opened in a new browser session.
+      </div>
+      <div id="pin-already-set" class="alert alert-ok" style="display:none">
+        ✓ A PIN is already configured. You can set a new one below to replace it.
+      </div>
+      <div id="pin-msg"></div>
+      <div class="field">
+        <label for="wiz-pin">New PIN (min 4 characters)</label>
+        <input id="wiz-pin" type="password" inputmode="numeric"
+               autocomplete="new-password" placeholder="Choose a PIN">
+      </div>
+      <div class="field">
+        <label for="wiz-pin2">Confirm PIN</label>
+        <input id="wiz-pin2" type="password" inputmode="numeric"
+               autocomplete="new-password" placeholder="Repeat PIN">
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="savePin()">Set PIN &amp; Continue</button>
+        <button class="btn-skip" onclick="goStep(4)">Skip for now</button>
+      </div>
+    </div>
+
+    <!-- ─── STEP 4: Done ─── -->
+    <div class="step" id="step4">
       <div class="step-title">You're all set! 🎉</div>
       <div class="step-desc">
         Here's a summary of what's configured. You can always update settings later by editing
@@ -250,7 +304,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);
 
 <script>
 let _geminiStatus = {};
-let _saved = {gemini: false, tg: false, claude: false, codex: false};
+let _saved = {gemini: false, tg: false, claude: false, codex: false, ollama: false};
 
 // ── Gemini check ──────────────────────────────────────────────
 async function checkGemini() {
@@ -267,11 +321,12 @@ async function checkGemini() {
     _geminiStatus = {ready: false, cli_installed: false, api_key_set: false};
   }
 
-  if (_geminiStatus.ready) {
+  if (_geminiStatus.cli_installed) {
+    // CLI present = ready; API key is optional (CLI handles its own auth)
     badge.className   = 'status-badge ok';
     badge.textContent = '✓ Gemini CLI ready';
     _saved.gemini = true;
-  } else if (!_geminiStatus.cli_installed) {
+  } else {
     badge.className   = 'status-badge err';
     badge.textContent = '✗ Gemini CLI not found';
     details.innerHTML = `
@@ -280,9 +335,6 @@ async function checkGemini() {
       </div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Run in your terminal:</div>
       <div class="code-block">npm install -g @google/gemini-cli<button class="code-copy" onclick="copyCode(this)">copy</button></div>`;
-  } else {
-    badge.className   = 'status-badge warn';
-    badge.textContent = '⚠ CLI ready — API key missing';
   }
   return _geminiStatus;
 }
@@ -302,14 +354,16 @@ async function saveGeminiAndContinue() {
   }
 
   const st = await checkGemini();
-  if (st.ready || (st.cli_installed && key)) {
+  if (st.cli_installed) {
+    // CLI installed = ready (API key is optional)
     _saved.gemini = true;
     goStep(1);
-  } else if (key && !st.cli_installed) {
+  } else if (key) {
+    // Key provided but no CLI yet
     msg.innerHTML = '<div class="alert alert-warn">⚠ API key saved, but Gemini CLI is not installed. You can install it later.</div>';
     setTimeout(() => goStep(1), 1200);
   } else {
-    msg.innerHTML = '<div class="alert alert-warn">⚠ Gemini not configured — you can skip this and use Claude or another AI instead.</div>';
+    msg.innerHTML = '<div class="alert alert-warn">⚠ Gemini CLI not found — you can skip this and use Claude or another AI instead.</div>';
     setTimeout(() => goStep(1), 1500);
   }
 }
@@ -317,9 +371,10 @@ async function saveGeminiAndContinue() {
 // ── Optional integrations check (step 2) ─────────────────────
 async function checkOptionalIntegrations() {
   try {
-    const [cr, ir] = await Promise.all([
+    const [cr, ir, ollamaR] = await Promise.all([
       fetch('/integrations/claude/status').then(r => r.json()),
       fetch('/integrations').then(r => r.json()),
+      fetch('/integrations/ollama/status').then(r => r.json()),
     ]);
     if (cr.ready) {
       const el = document.getElementById('claude-badge-2');
@@ -332,6 +387,33 @@ async function checkOptionalIntegrations() {
         if (el) { el.textContent = '✓ ready'; el.className = 'integ-badge ok'; }
         _saved.codex = true;
       }
+    }
+    // Ollama card
+    const badge   = document.getElementById('ollama-badge-2');
+    const modRow  = document.getElementById('ollama-models-row');
+    const instHint= document.getElementById('ollama-install-hint');
+    if (ollamaR.cli_installed && ollamaR.models && ollamaR.models.length) {
+      // Populate model selector
+      const sel = document.getElementById('ollama-model-select');
+      if (sel) {
+        sel.innerHTML = ollamaR.models.map(m =>
+          `<option value="${m}" ${m === ollamaR.current_model ? 'selected' : ''}>${m}</option>`
+        ).join('');
+      }
+      if (modRow)  modRow.style.display  = 'block';
+      if (instHint) instHint.style.display = 'none';
+      if (badge) {
+        if (ollamaR.ready) {
+          badge.textContent = '✓ ready'; badge.className = 'integ-badge ok';
+          _saved.ollama = true;
+        } else {
+          badge.textContent = '⚠ model not set'; badge.className = 'integ-badge warn';
+        }
+      }
+    } else {
+      if (badge)   { badge.textContent = '✗ not installed'; badge.className = 'integ-badge err'; }
+      if (modRow)  modRow.style.display  = 'none';
+      if (instHint) instHint.style.display = 'block';
     }
   } catch (e) {}
 }
@@ -365,12 +447,15 @@ async function saveTelegram() {
 }
 
 async function saveOptional() {
-  const codexKey = document.getElementById('codex-key').value.trim();
-  const msg      = document.getElementById('optional-msg');
-  msg.innerHTML  = '';
+  const codexKey   = document.getElementById('codex-key').value.trim();
+  const ollamaSel  = document.getElementById('ollama-model-select');
+  const ollamaModel = ollamaSel ? ollamaSel.value.trim() : '';
+  const msg        = document.getElementById('optional-msg');
+  msg.innerHTML    = '';
 
   const payload = {};
-  if (codexKey) { payload.OPENAI_API_KEY = codexKey; _saved.codex = true; }
+  if (codexKey)    { payload.OPENAI_API_KEY = codexKey;    _saved.codex  = true; }
+  if (ollamaModel) { payload.OLLAMA_MODEL   = ollamaModel; _saved.ollama = true; }
 
   if (Object.keys(payload).length) {
     try {
@@ -380,7 +465,7 @@ async function saveOptional() {
       msg.innerHTML = '<div class="alert alert-warn">⚠ Could not save — check file permissions.</div>';
     }
   }
-  setTimeout(() => goStep(3), Object.keys(payload).length ? 600 : 0);
+  setTimeout(() => goStep(3), Object.keys(payload).length ? 600 : 0);  // → PIN step
 }
 
 // ── Step navigation ───────────────────────────────────────────
@@ -390,15 +475,81 @@ function goStep(n) {
     d.className = 'step-dot' + (i < n ? ' done' : i === n ? ' active' : '');
   });
   if (n === 2) checkOptionalIntegrations();
-  if (n === 3) buildSummary();
+  if (n === 3) checkPinStatus();
+  if (n === 4) buildSummary();
 }
 
-function buildSummary() {
+// ── PIN step ──────────────────────────────────────────────────
+async function checkPinStatus() {
+  try {
+    const st = await fetch('/auth/status').then(r => r.json());
+    const el = document.getElementById('pin-already-set');
+    if (el) el.style.display = st.pin_set ? 'block' : 'none';
+  } catch(e) {}
+}
+
+async function savePin() {
+  const pin  = document.getElementById('wiz-pin').value;
+  const pin2 = document.getElementById('wiz-pin2').value;
+  const msg  = document.getElementById('pin-msg');
+  msg.innerHTML = '';
+
+  if (pin.length < 4) {
+    msg.innerHTML = '<div class="alert alert-warn">⚠ PIN must be at least 4 characters.</div>';
+    return;
+  }
+  if (pin !== pin2) {
+    msg.innerHTML = '<div class="alert alert-warn">⚠ PINs do not match.</div>';
+    return;
+  }
+  try {
+    const r = await fetch('/auth/set-pin', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({pin}),
+    });
+    const data = await r.json();
+    if (!r.ok || data.error) {
+      msg.innerHTML = `<div class="alert alert-warn">⚠ ${data.error || 'Failed to set PIN.'}</div>`;
+      return;
+    }
+    msg.innerHTML = '<div class="alert alert-ok">✓ PIN set successfully!</div>';
+    setTimeout(() => goStep(4), 800);
+  } catch(e) {
+    msg.innerHTML = '<div class="alert alert-warn">⚠ Network error — could not save PIN.</div>';
+  }
+}
+
+async function buildSummary() {
+  // Start with whatever was saved during this wizard session
+  let pinSet      = false;
+  let geminiReady = _saved.gemini;
+  let tgReady     = _saved.tg;
+  let claudeReady = _saved.claude;
+  let codexReady  = _saved.codex;
+  let ollamaReady = _saved.ollama;
+
+  // Merge with actual server-side config (catches pre-existing .env values)
+  try {
+    const [authSt, setupSt] = await Promise.all([
+      fetch('/auth/status').then(r => r.json()),
+      fetch('/setup/status').then(r => r.json()),
+    ]);
+    pinSet      = authSt.pin_set;
+    if (setupSt.has_bot_token) tgReady     = true;
+    if (setupSt.gemini_ready)  geminiReady = true;
+    if (setupSt.claude_ready)  claudeReady = true;
+    if (setupSt.codex_ready)   codexReady  = true;
+    if (setupSt.ollama_ready)  ollamaReady = true;
+  } catch(e) {}
+
   const items = [
-    {label: 'Google Gemini', ok: _saved.gemini, note: _saved.gemini ? 'Ready — primary AI'          : 'Not configured (optional)'},
-    {label: 'Telegram Bot',  ok: _saved.tg,     note: _saved.tg     ? 'Configured'                  : 'Not set up (optional)'},
-    {label: 'Claude',        ok: _saved.claude, note: _saved.claude ? 'Installed & authenticated'   : 'Not configured (optional)'},
-    {label: 'OpenAI Codex',  ok: _saved.codex,  note: _saved.codex  ? 'API key saved'               : 'Not configured (optional)'},
+    {label: 'PIN Protection', ok: pinSet,       note: pinSet       ? 'Enabled — login required'         : 'Not set (recommended)'},
+    {label: 'Google Gemini',  ok: geminiReady,  note: geminiReady  ? 'CLI ready'                        : 'Not configured (optional)'},
+    {label: 'Telegram Bot',   ok: tgReady,      note: tgReady      ? 'Configured'                       : 'Not set up (optional)'},
+    {label: 'Claude',         ok: claudeReady,  note: claudeReady  ? 'CLI installed & authenticated'    : 'Not configured (optional)'},
+    {label: 'OpenAI Codex',   ok: codexReady,   note: codexReady   ? 'CLI ready'                        : 'Not configured (optional)'},
+    {label: 'Ollama (local)', ok: ollamaReady,  note: ollamaReady  ? 'Model selected, offline AI ready' : 'Not configured (optional)'},
   ];
   document.getElementById('summary').innerHTML = items.map(i => `
     <div class="summary-item">
@@ -422,13 +573,20 @@ function copyCode(btn) {
 (async function init() {
   try {
     const st = await fetch('/setup/status').then(r => r.json());
+    // Pre-populate _saved with anything already in .env so the summary is accurate
+    if (st.has_bot_token)  _saved.tg     = true;
+    if (st.gemini_ready)   _saved.gemini = true;
+    if (st.claude_ready)   _saved.claude = true;
+    if (st.codex_ready)    _saved.codex  = true;
+    if (st.ollama_ready)   _saved.ollama = true;
+
     if (!st.env_exists || !st.has_bot_token) {
       // Fresh install or missing Telegram credentials — jump straight to Telegram step
       goStep(1);
       return;
     }
   } catch (e) { /* fallthrough */ }
-  // .env exists and has a bot token — start at Gemini as usual
+  // .env exists and has a bot token — start at Gemini check
   checkGemini();
 })();
 </script>

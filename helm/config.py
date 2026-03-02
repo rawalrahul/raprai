@@ -54,6 +54,14 @@ WEB_HOST     = os.environ.get("WEB_HOST", "127.0.0.1")
 CHAT_LOG_DIR = pathlib.Path(os.environ.get("CHAT_LOG_DIR", "chat_logs"))
 
 # ---------------------------------------------------------------------------
+# PIN auth (values populated by helm/auth.py after first setup)
+# PIN_SALT and PIN_HASH are written to .env by the setup wizard / /auth/set-pin
+# SESSION_DAYS controls how long a login cookie is valid
+# PIN_MAX_ATTEMPTS / PIN_LOCKOUT_SECS control brute-force protection
+# ---------------------------------------------------------------------------
+# (No constants needed here — auth.py reads these directly from os.environ)
+
+# ---------------------------------------------------------------------------
 # Usage tracking
 # ---------------------------------------------------------------------------
 
