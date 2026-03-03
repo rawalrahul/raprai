@@ -2,11 +2,13 @@
 helm/ai_runner/core.py — Core subprocess runner and message processor.
 
 Covers: run_ai_popen, kill_session_proc, and process_message (the main dispatcher).
+Includes Error Recovery & Resilience: auto-retry (3 attempts) and fallback AI switching.
 """
 
 import asyncio
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -21,6 +23,95 @@ from helm.skills import inject_skill_prefix, detect_skill, auto_create_skill_tem
 
 from .claude import build_claude_cmd
 from .helpers import tg_progress_notify
+
+
+# ---------------------------------------------------------------------------
+# Error Recovery & Resilience — constants and helpers
+# ---------------------------------------------------------------------------
+
+def _max_retries() -> int:
+    """Max retry attempts before switching AI (default 3, min 1, max 10)."""
+    return max(1, min(10, int(os.environ.get("AI_MAX_RETRIES", "3"))))
+
+def _auto_switch_enabled() -> bool:
+    """Whether to auto-switch AI on failure (default True)."""
+    return os.environ.get("AI_AUTO_SWITCH", "1").strip().lower() in ("1", "true", "yes")
+
+RETRY_DELAY = 2.0        # seconds between retries
+
+# Patterns in AI output that indicate a failure worth retrying
+_FAILURE_PATTERNS = re.compile(
+    r"(?i)("
+    r"error:.*not found in PATH"
+    r"|timed out after \d+s"
+    r"|FileNotFoundError"
+    r"|ConnectionRefusedError"
+    r"|ConnectionResetError"
+    r"|connection reset"
+    r"|connection refused"
+    r"|ECONNREFUSED"
+    r"|ECONNRESET"
+    r"|ETIMEDOUT"
+    r"|502 Bad Gateway"
+    r"|503 Service Unavailable"
+    r"|504 Gateway Timeout"
+    r"|500 Internal Server Error"
+    r"|rate.?limit"
+    r"|too many requests"
+    r"|429"
+    r"|oauth token has expired"
+    r"|\(error:"
+    r"|could not connect"
+    r"|network.?error"
+    r"|api.?key.*(missing|invalid|not set)"
+    r"|OPENAI_API_KEY"
+    r"|GEMINI_API_KEY"
+    r"|exited [1-9]"
+    r")"
+)
+
+# Built-in AI keys (always available if CLI is installed)
+_BUILTIN_AIS = ["claude", "ollama"]
+
+
+def _is_failure(output: str) -> bool:
+    """Check if AI output indicates a recoverable failure."""
+    if not output or output == "(no output)":
+        return False
+    return bool(_FAILURE_PATTERNS.search(output))
+
+
+def _find_available_ais(exclude: str) -> list[str]:
+    """Return a list of available AI keys, excluding the failed one.
+
+    Checks both built-in CLIs (claude, ollama) and registered integrations
+    (gemini, codex, etc.) for availability.
+    """
+    available = []
+
+    # Check built-in CLIs
+    for ai_key in _BUILTIN_AIS:
+        if ai_key == exclude:
+            continue
+        if ai_key == "claude" and shutil.which("claude"):
+            available.append(ai_key)
+        elif ai_key == "ollama" and shutil.which("ollama"):
+            available.append(ai_key)
+
+    # Check registered integration CLIs
+    for ai_key, info in _st.integrations.items():
+        if ai_key == exclude:
+            continue
+        # Integration build_command returns a list; the first element is the CLI name
+        try:
+            test_cmd = info["build_command"]("test", model=None)
+            cli_name = test_cmd[0] if test_cmd else ai_key
+            if shutil.which(cli_name):
+                available.append(ai_key)
+        except Exception:
+            pass  # skip broken integrations
+
+    return available
 
 
 _ANSI_ESC_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
@@ -313,71 +404,14 @@ async def process_message(text: str, source: str = "web",
     safe_text = _SAFETY_PREAMBLE + text
 
     output = ""  # safe default — overwritten in every branch below
+    actual_ai = ai  # tracks which AI actually produced the output (may change on fallback)
     try:
-        if ai == "claude":
-            await push_thinking(True, "claude", session_id=sid)
-            has_history = len(sess["claude_msgs"]) > 0
-            # Skill injection — enrich prompt with best-practice templates
-            enriched_text = inject_skill_prefix(safe_text, ai="claude")
-            cmd = build_claude_cmd(enriched_text, has_history, model=sess.get("model"))
-            sess["claude_msgs"].append(text)  # store original (unenriched) for history
-            before = await asyncio.to_thread(snapshot_dir, cwd)
-            output = await asyncio.to_thread(run_ai_popen, cmd, cwd, "claude", sess)
-            after  = await asyncio.to_thread(snapshot_dir, cwd)
-            await push_thinking(False, session_id=sid)
-            await push_message("assistant", output, ai="claude", source=source, session_id=sid)
-            await handle_diff(before, after, source, cwd, session_id=sid)
-            # Auto-create a skill if no existing skill matched
-            if not detect_skill(text):
-                asyncio.create_task(
-                    asyncio.to_thread(auto_create_skill_template, text, "claude", output)
-                )
-
-        elif ai == "ollama":
-            # Ollama uses the REST API + tool calling agent loop
-            from .ollama import _run_ollama_agent  # lazy to avoid circular import
-            await push_thinking(True, ai, session_id=sid)
-            output = await _run_ollama_agent(sess, safe_text, source, sid)
-            await push_thinking(False, session_id=sid)
-            await push_message("assistant", output, ai=ai, source=source, session_id=sid)
-
-        elif ai in _st.integrations:
-            await push_thinking(True, ai, session_id=sid)
-            skill_matched = detect_skill(text)
-            enriched_text = inject_skill_prefix(safe_text, ai=ai)
-            integration = _st.integrations[ai]
-            use_stdin   = integration.get("stdin_prompt", False)
-            cmd    = integration["build_command"](enriched_text,
-                                                  model=sess.get("model"))
-            before = await asyncio.to_thread(snapshot_dir, cwd)
-            output = await asyncio.to_thread(
-                run_ai_popen, cmd, cwd, ai, sess, INTEGRATION_TIMEOUT,
-                stdin_text=enriched_text if use_stdin else None,
-            )
-            after  = await asyncio.to_thread(snapshot_dir, cwd)
-            await push_thinking(False, session_id=sid)
-            await push_message("assistant", output, ai=ai, source=source, session_id=sid)
-            await handle_diff(before, after, source, cwd, session_id=sid)
-
-            # Auto-create a skill if no existing skill matched this task.
-            if not skill_matched:
-                asyncio.create_task(
-                    asyncio.to_thread(auto_create_skill_template, text, ai, output)
-                )
-
-        else:
-            # Shell mode
-            if not terminal.is_alive():
-                output = "Terminal stopped. Stop and restart this session."
-                await push_message("system", output, source=source, session_id=sid)
-            else:
-                before = await asyncio.to_thread(snapshot_dir, cwd)
-                terminal.write(text)
-                output = await asyncio.to_thread(terminal.drain)
-                after  = await asyncio.to_thread(snapshot_dir, cwd)
-                output = output or "(no output)"
-                await push_message("assistant", output, ai="shell", source=source, session_id=sid)
-                await handle_diff(before, after, source, cwd, session_id=sid)
+        # ── Dispatch with retry + fallback ─────────────────────────────────
+        output, actual_ai = await _dispatch_with_recovery(
+            ai=ai, sess=sess, text=text, safe_text=safe_text,
+            cwd=cwd, terminal=terminal, source=source, sid=sid,
+            snapshot_dir=snapshot_dir, handle_diff=handle_diff,
+        )
 
     finally:
         started = sess.get("task_start") if sess else None
@@ -385,10 +419,10 @@ async def process_message(text: str, source: str = "web",
         if sess:
             sess["total_task_seconds"] = float(sess.get("total_task_seconds") or 0.0) + max(0.0, elapsed)
             sess["task_count"] = int(sess.get("task_count") or 0) + 1
-        record_usage_task(ai, elapsed, prompt=text, output=output)
+        record_usage_task(actual_ai, elapsed, prompt=text, output=output)
         # Audit: log any destructive file commands in the AI output
         if output:
-            _log_deletion_warning(ai, sid or "", output)
+            _log_deletion_warning(actual_ai, sid or "", output)
         sess["busy"]       = False
         sess["task_start"] = None
         await push_state()  # flip session back to idle
@@ -398,3 +432,216 @@ async def process_message(text: str, source: str = "web",
 
 
 _process_message = process_message  # legacy alias
+
+
+# ---------------------------------------------------------------------------
+# Error Recovery — dispatch with retry + fallback AI switching
+# ---------------------------------------------------------------------------
+
+async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
+                         cwd: str, terminal, source: str, sid: str,
+                         snapshot_dir, handle_diff) -> str:
+    """Execute a single AI dispatch attempt. Returns output string.
+
+    Raises no exceptions — errors are returned as string output.
+    """
+    if ai == "claude":
+        await push_thinking(True, "claude", session_id=sid)
+        has_history = len(sess["claude_msgs"]) > 0
+        enriched_text = inject_skill_prefix(safe_text, ai="claude")
+        cmd = build_claude_cmd(enriched_text, has_history, model=sess.get("model"))
+        sess["claude_msgs"].append(text)
+        before = await asyncio.to_thread(snapshot_dir, cwd)
+        output = await asyncio.to_thread(run_ai_popen, cmd, cwd, "claude", sess)
+        after  = await asyncio.to_thread(snapshot_dir, cwd)
+        await push_thinking(False, session_id=sid)
+
+        # If successful, broadcast and handle file diff
+        if not _is_failure(output):
+            await push_message("assistant", output, ai="claude", source=source, session_id=sid)
+            await handle_diff(before, after, source, cwd, session_id=sid)
+            if not detect_skill(text):
+                asyncio.create_task(
+                    asyncio.to_thread(auto_create_skill_template, text, "claude", output)
+                )
+        return output
+
+    elif ai == "ollama":
+        from .ollama import _run_ollama_agent
+        await push_thinking(True, ai, session_id=sid)
+        output = await _run_ollama_agent(sess, safe_text, source, sid)
+        await push_thinking(False, session_id=sid)
+        if not _is_failure(output):
+            await push_message("assistant", output, ai=ai, source=source, session_id=sid)
+        return output
+
+    elif ai in _st.integrations:
+        await push_thinking(True, ai, session_id=sid)
+        skill_matched = detect_skill(text)
+        enriched_text = inject_skill_prefix(safe_text, ai=ai)
+        integration = _st.integrations[ai]
+        use_stdin   = integration.get("stdin_prompt", False)
+        cmd    = integration["build_command"](enriched_text, model=sess.get("model"))
+        before = await asyncio.to_thread(snapshot_dir, cwd)
+        output = await asyncio.to_thread(
+            run_ai_popen, cmd, cwd, ai, sess, INTEGRATION_TIMEOUT,
+            stdin_text=enriched_text if use_stdin else None,
+        )
+        after  = await asyncio.to_thread(snapshot_dir, cwd)
+        await push_thinking(False, session_id=sid)
+
+        if not _is_failure(output):
+            await push_message("assistant", output, ai=ai, source=source, session_id=sid)
+            await handle_diff(before, after, source, cwd, session_id=sid)
+            if not skill_matched:
+                asyncio.create_task(
+                    asyncio.to_thread(auto_create_skill_template, text, ai, output)
+                )
+        return output
+
+    else:
+        # Shell mode — no retry/fallback for shell
+        if not terminal.is_alive():
+            output = "Terminal stopped. Stop and restart this session."
+            await push_message("system", output, source=source, session_id=sid)
+        else:
+            before = await asyncio.to_thread(snapshot_dir, cwd)
+            terminal.write(text)
+            output = await asyncio.to_thread(terminal.drain)
+            after  = await asyncio.to_thread(snapshot_dir, cwd)
+            output = output or "(no output)"
+            await push_message("assistant", output, ai="shell", source=source, session_id=sid)
+            await handle_diff(before, after, source, cwd, session_id=sid)
+        return output
+
+
+async def _dispatch_with_recovery(ai: str, sess: dict, text: str, safe_text: str,
+                                   cwd: str, terminal, source: str, sid: str,
+                                   snapshot_dir, handle_diff) -> tuple[str, str]:
+    """Dispatch with retry logic and automatic AI fallback.
+
+    Returns (output, actual_ai_used).
+    """
+    # Shell mode — no recovery needed
+    if ai not in ("claude", "ollama") and ai not in _st.integrations:
+        output = await _run_single_ai(
+            ai, sess, text, safe_text, cwd, terminal, source, sid,
+            snapshot_dir, handle_diff,
+        )
+        return output, ai
+
+    # ── Retry loop with the primary AI ──────────────────────────────────
+    last_output = ""
+    max_retries = _max_retries()
+    for attempt in range(1, max_retries + 1):
+        logger.info("AI dispatch attempt %d/%d for %s", attempt, max_retries, ai)
+        last_output = await _run_single_ai(
+            ai, sess, text, safe_text, cwd, terminal, source, sid,
+            snapshot_dir, handle_diff,
+        )
+
+        if not _is_failure(last_output):
+            # Success
+            return last_output, ai
+
+        # Failed — notify user of retry (unless last attempt)
+        if attempt < max_retries:
+            retry_msg = (
+                f"⚠️ **{ai}** encountered an error (attempt {attempt}/{max_retries}). "
+                f"Retrying in {int(RETRY_DELAY)}s…"
+            )
+            logger.warning("AI %s attempt %d failed: %s", ai, attempt,
+                           last_output[:200].replace('\n', ' '))
+            await push_message("system", retry_msg, source=source, session_id=sid)
+            await asyncio.sleep(RETRY_DELAY)
+
+    # ── All retries exhausted — find a fallback AI ──────────────────────
+    logger.warning("AI %s failed all %d attempts. Searching for fallback…", ai, max_retries)
+
+    # Check if auto-switch is enabled
+    if not _auto_switch_enabled():
+        fail_msg = (
+            f"❌ **{ai}** failed after {max_retries} attempts. "
+            f"Auto-switch is disabled in settings.\n\n"
+            f"Last error:\n{last_output[:500]}"
+        )
+        await push_message("system", fail_msg, source=source, session_id=sid)
+        return last_output, ai
+
+    fallback_list = await asyncio.to_thread(_find_available_ais, ai)
+
+    if not fallback_list:
+        # No fallback available — deliver the error as-is
+        fail_msg = (
+            f"❌ **{ai}** failed after {max_retries} attempts and no other AI is available.\n\n"
+            f"Last error:\n{last_output[:500]}"
+        )
+        await push_message("system", fail_msg, source=source, session_id=sid)
+        return last_output, ai
+
+    fallback_ai = fallback_list[0]  # pick the first available
+
+    # Notify user about the switch
+    switch_msg = (
+        f"🔄 **{ai}** failed after {max_retries} attempts. "
+        f"Automatically switching to **{fallback_ai}** to complete your task…"
+    )
+    await push_message("system", switch_msg, source=source, session_id=sid)
+    logger.info("Switching from %s to fallback AI: %s", ai, fallback_ai)
+
+    # Temporarily switch session AI for the fallback dispatch
+    original_ai = sess["ai"]
+    sess["ai"] = fallback_ai
+
+    try:
+        fallback_output = await _run_single_ai(
+            fallback_ai, sess, text, safe_text, cwd, terminal, source, sid,
+            snapshot_dir, handle_diff,
+        )
+
+        if _is_failure(fallback_output):
+            # Fallback also failed — try remaining AIs
+            for backup_ai in fallback_list[1:]:
+                backup_msg = f"🔄 **{fallback_ai}** also failed. Trying **{backup_ai}**…"
+                await push_message("system", backup_msg, source=source, session_id=sid)
+                sess["ai"] = backup_ai
+                fallback_output = await _run_single_ai(
+                    backup_ai, sess, text, safe_text, cwd, terminal, source, sid,
+                    snapshot_dir, handle_diff,
+                )
+                if not _is_failure(fallback_output):
+                    # Notify about permanent switch
+                    done_msg = (
+                        f"✅ Task completed by **{backup_ai}** (original AI: {ai}). "
+                        f"Session AI has been switched to **{backup_ai}**."
+                    )
+                    await push_message("system", done_msg, source=source, session_id=sid)
+                    await push_state()
+                    return fallback_output, backup_ai
+
+            # ALL AIs failed
+            sess["ai"] = original_ai  # restore original
+            all_fail_msg = (
+                f"❌ All available AIs failed. Last error from **{fallback_list[-1]}**:\n"
+                f"{fallback_output[:500]}"
+            )
+            await push_message("system", all_fail_msg, source=source, session_id=sid)
+            await push_state()
+            return fallback_output, fallback_list[-1]
+
+        # Fallback succeeded
+        done_msg = (
+            f"✅ Task completed by **{fallback_ai}** (original AI: {ai}). "
+            f"Session AI has been switched to **{fallback_ai}**."
+        )
+        await push_message("system", done_msg, source=source, session_id=sid)
+        await push_state()
+        return fallback_output, fallback_ai
+
+    except Exception as exc:
+        logger.error("Fallback AI %s raised exception: %s", fallback_ai, exc)
+        sess["ai"] = original_ai  # restore original
+        await push_state()
+        error_msg = f"❌ Fallback to **{fallback_ai}** failed with error: {exc}"
+        await push_message("system", error_msg, source=source, session_id=sid)
+        return str(exc), ai
