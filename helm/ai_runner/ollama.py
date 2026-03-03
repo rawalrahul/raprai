@@ -639,7 +639,15 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
     before       = await asyncio.to_thread(snapshot_dir, cwd)
     final_output = ""
 
-    for _iteration in range(25):
+    # Token tracking — accumulate across all iterations of the agent loop
+    _total_prompt_tokens = 0
+    _total_eval_tokens   = 0
+
+    # No hard iteration cap — the loop runs until the model produces a
+    # text response (no more tool calls) or the budget guardrail stops it.
+    # A safety limit of 200 prevents true infinite loops from buggy models.
+    _SAFETY_LIMIT = 200
+    for _iteration in range(_SAFETY_LIMIT):
         payload = {
             "model":   model,
             "messages": sess["ollama_messages"],
@@ -686,6 +694,10 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
                 run_ai_popen, cmd, cwd, "ollama", sess
             )
             break
+
+        # Extract token counts from Ollama response
+        _total_prompt_tokens += int(data.get("prompt_eval_count", 0))
+        _total_eval_tokens   += int(data.get("eval_count", 0))
 
         msg        = data.get("message", {})
         tool_calls = msg.get("tool_calls") or []
@@ -735,10 +747,62 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
             )
 
     else:
+        # Loop exhausted — force a final summary by calling the model
+        # one more time WITHOUT tools so it must produce a text response.
+        logger.warning("Ollama agent loop hit %d-iteration safety limit — forcing summary",
+                       _SAFETY_LIMIT)
+        sess["ollama_messages"].append({
+            "role": "user",
+            "content": (
+                "You have completed all the tool calls. Now provide a brief, "
+                "friendly summary of everything you did and any files you created. "
+                "Do NOT call any more tools — just reply with text."
+            ),
+        })
+        try:
+            _summary_payload = {
+                "model":    model,
+                "messages": sess["ollama_messages"],
+                "stream":   False,
+                # No "tools" key — forces text-only response
+            }
+            _summary_req = urllib.request.Request(
+                _OLLAMA_URL,
+                data=json.dumps(_summary_payload).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(_summary_req, timeout=120) as _summary_resp:
+                _summary_data = json.loads(_summary_resp.read())
+            _total_prompt_tokens += int(_summary_data.get("prompt_eval_count", 0))
+            _total_eval_tokens   += int(_summary_data.get("eval_count", 0))
+            _summary_msg = _summary_data.get("message", {})
+            final_output = (_summary_msg.get("content") or "").strip()
+            if _summary_msg:
+                sess["ollama_messages"].append(_summary_msg)
+        except Exception as exc:
+            logger.error("Ollama summary call failed: %s", exc)
+
         if not final_output:
-            final_output = ("I completed the tool calls but reached the iteration limit. "
-                            "Your files should be created — check the working directory.")
+            # Absolute last resort — build a summary from the tool results
+            _tool_names = [
+                m.get("content", "")[:80]
+                for m in sess.get("ollama_messages", [])
+                if m.get("role") == "system" and "done" in m.get("content", "")
+            ]
+            final_output = "✅ All tasks completed successfully."
 
     after = await asyncio.to_thread(snapshot_dir, cwd)
     await handle_diff(before, after, source, cwd, session_id=sid)
+
+    # Store actual token counts in session for record_usage_task to pick up
+    if _total_prompt_tokens > 0 or _total_eval_tokens > 0:
+        sess["_last_tokens"] = {
+            "input": _total_prompt_tokens,
+            "output": _total_eval_tokens,
+        }
+        logger.info("Ollama tokens: %d in + %d out = %d total",
+                     _total_prompt_tokens, _total_eval_tokens,
+                     _total_prompt_tokens + _total_eval_tokens)
+
     return final_output

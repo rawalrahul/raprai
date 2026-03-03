@@ -213,17 +213,35 @@ _usage_cap_minutes = usage_cap_minutes  # legacy alias
 
 
 def record_usage_task(ai_key: Optional[str], elapsed_seconds: float,
-                      prompt: str = "", output: str = "") -> None:
+                      prompt: str = "", output: str = "",
+                      input_tokens: Optional[int] = None,
+                      output_tokens: Optional[int] = None) -> None:
     usage_reset_if_needed()
     key = ai_key or "shell"
     st = _st.usage_stats.setdefault(key, {
         "tasks": 0, "seconds": 0.0, "chars_in": 0, "chars_out": 0, "last_used": 0.0,
+        "tokens_in": 0, "tokens_out": 0, "tokens_source": "estimate",
     })
     st["tasks"]     += 1
     st["seconds"]   += max(0.0, float(elapsed_seconds))
     st["chars_in"]  += len(prompt or "")
     st["chars_out"] += len(output or "")
     st["last_used"]  = time.time()
+
+    # Store actual token counts when available
+    if input_tokens is not None or output_tokens is not None:
+        st.setdefault("tokens_in", 0)
+        st.setdefault("tokens_out", 0)
+        st["tokens_in"]  += input_tokens or 0
+        st["tokens_out"] += output_tokens or 0
+        st["tokens_source"] = "actual"
+    else:
+        # Ensure keys exist for backward compat
+        st.setdefault("tokens_in", 0)
+        st.setdefault("tokens_out", 0)
+        if st.get("tokens_source") != "actual":
+            st["tokens_source"] = "estimate"
+
     if key in ("codex", "claude", "gemini"):
         exact = _parse_cli_usage_from_text(output or "", key)
         if exact:
@@ -264,7 +282,14 @@ def usage_summary_text() -> str:
     for key, st in rows:
         mins_used  = st["seconds"] / 60.0
         tasks      = int(st["tasks"])
-        est_tokens = int((st.get("chars_in", 0) + st.get("chars_out", 0)) / 4)
+        # Prefer actual token counts over char-based estimates
+        actual_tok_in  = int(st.get("tokens_in", 0))
+        actual_tok_out = int(st.get("tokens_out", 0))
+        tok_source     = st.get("tokens_source", "estimate")
+        if tok_source == "actual" and (actual_tok_in + actual_tok_out) > 0:
+            est_tokens = actual_tok_in + actual_tok_out
+        else:
+            est_tokens = int((st.get("chars_in", 0) + st.get("chars_out", 0)) / 4)
         exact      = _st.usage_exact.get(key) or {}
         exact_pct  = exact.get("pct_used")
         exact_reset = exact.get("reset_in_sec")
@@ -315,6 +340,15 @@ def usage_for_ai(ai_key: Optional[str]) -> dict:
         pct = float(exact["pct_used"])
     if exact.get("reset_in_sec") is not None:
         reset_in = max(0, int(exact["reset_in_sec"]))
+    # Token data
+    tokens_in  = int(st.get("tokens_in", 0))
+    tokens_out = int(st.get("tokens_out", 0))
+    tok_source = st.get("tokens_source", "estimate")
+    if tok_source == "actual" and (tokens_in + tokens_out) > 0:
+        total_tokens = tokens_in + tokens_out
+    else:
+        total_tokens = int((st.get("chars_in", 0) + st.get("chars_out", 0)) / 4)
+        tok_source = "estimate"
     return {
         "used_min":  used_min,
         "cap_min":   cap,
@@ -322,6 +356,10 @@ def usage_for_ai(ai_key: Optional[str]) -> dict:
         "reset_in_sec": reset_in,
         "has_cap":   cap is not None,
         "source":    exact.get("source") or "estimate",
+        "tokens_in":  tokens_in,
+        "tokens_out": tokens_out,
+        "total_tokens": total_tokens,
+        "tokens_source": tok_source,
     }
 
 

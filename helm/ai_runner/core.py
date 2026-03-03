@@ -21,7 +21,7 @@ from helm.history import save_cwd_to_log
 from helm.session_mgr import focused_session, record_usage_task
 from helm.skills import inject_skill_prefix, detect_skill, auto_create_skill_template
 
-from .claude import build_claude_cmd
+from .claude import build_claude_cmd, parse_claude_json_output
 from .helpers import tg_progress_notify
 
 
@@ -115,6 +115,63 @@ def _find_available_ais(exclude: str) -> list[str]:
 
 
 _ANSI_ESC_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+
+# ---------------------------------------------------------------------------
+# Token parsing for CLI-based AIs (Gemini, Codex, etc.)
+# ---------------------------------------------------------------------------
+
+# Patterns to extract token counts from CLI output text
+_TOKEN_PATTERNS = [
+    # "Tokens: 1234 in / 567 out" or "1.2k input, 850 output"
+    re.compile(r'[Tt]okens?[:\s]+([0-9,.]+[kKmM]?)\s*(?:in(?:put)?|prompt)\s*[/,]\s*([0-9,.]+[kKmM]?)\s*(?:out(?:put)?|completion)', re.IGNORECASE),
+    # "input_tokens: 1234, output_tokens: 567"
+    re.compile(r'input.?tokens?[:\s]+([0-9,.]+)\s*[,;]\s*output.?tokens?[:\s]+([0-9,.]+)', re.IGNORECASE),
+    # "Usage: 1234 input tokens, 567 output tokens"
+    re.compile(r'([0-9,.]+[kKmM]?)\s+input\s+tokens?\s*[,;]\s*([0-9,.]+[kKmM]?)\s+output\s+tokens?', re.IGNORECASE),
+    # "Total tokens: 1801"
+    re.compile(r'[Tt]otal\s+tokens?[:\s]+([0-9,.]+[kKmM]?)', re.IGNORECASE),
+]
+
+
+def _parse_token_number(s: str) -> int:
+    """Parse a token count string like '1.2k', '3,456', '1.5M' into an integer."""
+    s = s.strip().replace(",", "")
+    multiplier = 1
+    if s.endswith(("k", "K")):
+        multiplier = 1000
+        s = s[:-1]
+    elif s.endswith(("m", "M")):
+        multiplier = 1_000_000
+        s = s[:-1]
+    try:
+        return int(float(s) * multiplier)
+    except (ValueError, TypeError):
+        return 0
+
+
+def _extract_tokens_from_cli_output(output: str) -> dict | None:
+    """Try to extract token counts from CLI text output.
+
+    Returns {"input": int, "output": int} or None if no token info found.
+    """
+    if not output:
+        return None
+    for pat in _TOKEN_PATTERNS:
+        m = pat.search(output)
+        if m:
+            groups = m.groups()
+            if len(groups) == 2:
+                return {
+                    "input": _parse_token_number(groups[0]),
+                    "output": _parse_token_number(groups[1]),
+                }
+            elif len(groups) == 1:
+                # Total only — split roughly 60/40 input/output
+                total = _parse_token_number(groups[0])
+                return {"input": int(total * 0.6), "output": int(total * 0.4)}
+    return None
+
 
 # ---------------------------------------------------------------------------
 # File deletion safety guard
@@ -286,34 +343,49 @@ async def process_message(text: str, source: str = "web",
         await push_message("system", msg, source=source)
         return msg
 
+    # ── Budget guardrail — block if AI has exceeded its daily cap ──────────
+    ai_for_budget = sess.get("ai")
+    if ai_for_budget and ai_for_budget != "shell":
+        from helm.web_routes.usage_routes import check_budget
+        budget = check_budget(ai_for_budget)
+        if not budget["allowed"]:
+            msg = f"🚫 **Budget limit reached** — {budget['reason']}"
+            await push_message("system", msg, source=source, session_id=sid)
+            return msg
+        if budget.get("warn") and budget.get("reason"):
+            await push_message("system", budget["reason"], source=source, session_id=sid)
+
     # ── /model slash command — handled before routing to any AI ──────────────
     stripped = text.strip()
     if stripped.lower().startswith("/model"):
-        from helm.web_routes import (
-            _fetch_claude_models, _fetch_ollama_models,
-            _fetch_gemini_models, _fetch_openai_models,
-        )
+        from helm.web_routes.helpers import _fetch_ollama_models
         parts_cmd = stripped.split(None, 1)
         arg = parts_cmd[1].strip() if len(parts_cmd) == 2 else ""
         arg_lower = arg.lower()
+        ai_key = sess.get("ai") or "shell"
 
-        # ── /model  or  /model list  → show status ──────────────────────────
+        # ── Non-Ollama AIs: model switching not supported (CLI + OAuth) ──────
+        _CLI_AIS = {"claude", "gemini", "codex", "openai"}
+        if ai_key in _CLI_AIS:
+            msg = (
+                f"ℹ️ **Model switching is not available for {ai_key.title()}.**\n\n"
+                f"{ai_key.title()} runs as a CLI tool authenticated via OAuth — "
+                f"it uses the model assigned to your account by default.\n\n"
+                f"Model switching is available for **Ollama** sessions, which use "
+                f"a local REST API and let you choose from any locally installed model.\n\n"
+                f"To use a different Ollama model: create an Ollama session, then "
+                f"type `/model <name>` (e.g. `/model qwen2.5-coder:7b`)."
+            )
+            await push_message("system", msg, source=source, session_id=sid)
+            return msg
+
+        # ── /model  or  /model list  → show status (Ollama only) ────────────
         if not arg or arg_lower in ("list", "ls", "show", "?"):
-            ai_key        = sess.get("ai") or "shell"
             current_model = sess.get("model") or None
 
-            # Fetch available models live for this AI
+            # Fetch available Ollama models
             try:
-                if ai_key == "claude":
-                    available = await asyncio.to_thread(_fetch_claude_models)
-                elif ai_key == "ollama":
-                    available = await asyncio.to_thread(_fetch_ollama_models)
-                elif ai_key == "gemini":
-                    available = await asyncio.to_thread(_fetch_gemini_models)
-                elif ai_key in ("codex", "openai"):
-                    available = await asyncio.to_thread(_fetch_openai_models)
-                else:
-                    available = []
+                available = await asyncio.to_thread(_fetch_ollama_models)
             except Exception:
                 available = []
 
@@ -332,8 +404,9 @@ async def process_message(text: str, source: str = "web",
                 )
             else:
                 models_line = (
-                    "\n\n_Could not fetch model list — AI service may be offline,_"
-                    "_or no API key is configured. The AI will use its own built-in default._"
+                    "\n\n_Could not fetch model list — is Ollama running?_ "
+                    "_Start it with `ollama serve` and make sure you have at least "
+                    "one model pulled (e.g. `ollama pull qwen2.5-coder:7b`)._"
                 )
 
             msg = (
@@ -354,34 +427,33 @@ async def process_message(text: str, source: str = "web",
             await push_message("system", msg, source=source, session_id=sid)
             return msg
 
-        # ── /model <name>  → switch to named model ───────────────────────────
+        # ── /model <name>  → switch to named model (Ollama) ─────────────────
         sess["model"] = arg
         await push_state()
 
-        # For Ollama: warn if the requested model isn't installed locally.
-        if sess.get("ai") == "ollama":
-            try:
-                _list_result = subprocess.run(
-                    ["ollama", "list"],
-                    capture_output=True, text=True, timeout=5,
+        # Warn if the requested model isn't installed locally
+        try:
+            _list_result = subprocess.run(
+                ["ollama", "list"],
+                capture_output=True, text=True, timeout=5,
+            )
+            _local = []
+            for _line in _list_result.stdout.strip().splitlines()[1:]:
+                _parts = _line.split()
+                if _parts:
+                    _local.append(_parts[0].strip())
+            if _local and arg not in _local:
+                _names = ", ".join(f"`{m}`" for m in _local)
+                await push_message(
+                    "system",
+                    f"⚠️ **`{arg}`** is not installed locally.\n"
+                    f"Locally available: {_names}\n"
+                    f"Ollama will attempt to pull `{arg}` from the registry "
+                    f"on your next message. Use `/model default` to revert.",
+                    source=source, session_id=sid,
                 )
-                _local = []
-                for _line in _list_result.stdout.strip().splitlines()[1:]:
-                    _parts = _line.split()
-                    if _parts:
-                        _local.append(_parts[0].strip())
-                if _local and arg not in _local:
-                    _names = ", ".join(f"`{m}`" for m in _local)
-                    await push_message(
-                        "system",
-                        f"⚠️ **`{arg}`** is not installed locally.\n"
-                        f"Locally available: {_names}\n"
-                        f"Ollama will attempt to pull `{arg}` from the registry "
-                        f"on your next message. Use `/model default` to revert.",
-                        source=source, session_id=sid,
-                    )
-            except Exception:
-                pass  # if ollama list fails, don't block the switch
+        except Exception:
+            pass  # if ollama list fails, don't block the switch
 
         msg = f"✅ Model switched to `{arg}`."
         await push_message("system", msg, source=source, session_id=sid)
@@ -419,7 +491,16 @@ async def process_message(text: str, source: str = "web",
         if sess:
             sess["total_task_seconds"] = float(sess.get("total_task_seconds") or 0.0) + max(0.0, elapsed)
             sess["task_count"] = int(sess.get("task_count") or 0) + 1
-        record_usage_task(actual_ai, elapsed, prompt=text, output=output)
+        # Extract actual token counts from session (set by AI backends)
+        _last_tok = sess.pop("_last_tokens", None) if sess else None
+        _tok_in  = _last_tok["input"]  if _last_tok else None
+        _tok_out = _last_tok["output"] if _last_tok else None
+        if _last_tok:
+            logger.info("Token handoff: ai=%s in=%s out=%s", actual_ai, _tok_in, _tok_out)
+        else:
+            logger.info("Token handoff: ai=%s — no actual tokens captured", actual_ai)
+        record_usage_task(actual_ai, elapsed, prompt=text, output=output,
+                          input_tokens=_tok_in, output_tokens=_tok_out)
         # Audit: log any destructive file commands in the AI output
         if output:
             _log_deletion_warning(actual_ai, sid or "", output)
@@ -452,9 +533,23 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         cmd = build_claude_cmd(enriched_text, has_history, model=sess.get("model"))
         sess["claude_msgs"].append(text)
         before = await asyncio.to_thread(snapshot_dir, cwd)
-        output = await asyncio.to_thread(run_ai_popen, cmd, cwd, "claude", sess)
+        raw_output = await asyncio.to_thread(run_ai_popen, cmd, cwd, "claude", sess)
         after  = await asyncio.to_thread(snapshot_dir, cwd)
         await push_thinking(False, session_id=sid)
+
+        # Parse Claude JSON output for token counts
+        parsed = parse_claude_json_output(raw_output)
+        output = parsed["text"]
+        if parsed.get("input_tokens") is not None or parsed.get("output_tokens") is not None:
+            sess["_last_tokens"] = {
+                "input": parsed.get("input_tokens", 0),
+                "output": parsed.get("output_tokens", 0),
+            }
+            if parsed.get("cost_usd") is not None:
+                sess["_last_cost_usd"] = parsed["cost_usd"]
+            logger.info("Claude tokens: %s in + %s out, cost=$%s",
+                        parsed.get("input_tokens"), parsed.get("output_tokens"),
+                        parsed.get("cost_usd"))
 
         # If successful, broadcast and handle file diff
         if not _is_failure(output):
@@ -489,6 +584,13 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         )
         after  = await asyncio.to_thread(snapshot_dir, cwd)
         await push_thinking(False, session_id=sid)
+
+        # Try to extract token counts from CLI output (Gemini, Codex, etc.)
+        cli_tokens = _extract_tokens_from_cli_output(output)
+        if cli_tokens:
+            sess["_last_tokens"] = cli_tokens
+            logger.info("%s tokens (parsed from CLI): %d in + %d out",
+                        ai, cli_tokens["input"], cli_tokens["output"])
 
         if not _is_failure(output):
             await push_message("assistant", output, ai=ai, source=source, session_id=sid)

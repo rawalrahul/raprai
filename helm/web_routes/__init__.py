@@ -22,6 +22,7 @@ from .history_routes import router as history_router
 from .settings_routes import router as settings_router
 from .file_routes import router as file_router
 from .voice_routes import router as voice_router
+from .usage_routes import router as usage_router
 
 # Include all routers in the app
 app.include_router(auth_router)
@@ -31,6 +32,17 @@ app.include_router(history_router)
 app.include_router(settings_router)
 app.include_router(file_router)
 app.include_router(voice_router)
+app.include_router(usage_router)
+
+# Re-export model fetchers so they can be imported as: from helm.web_routes import _fetch_claude_models
+from .helpers import (
+    _fetch_claude_models, _fetch_ollama_models,
+    _fetch_gemini_models, _fetch_openai_models,
+)
 
 # Re-export app so it can be imported as: from helm.web_routes import app
-__all__ = ["app"]
+__all__ = [
+    "app",
+    "_fetch_claude_models", "_fetch_ollama_models",
+    "_fetch_gemini_models", "_fetch_openai_models",
+]

@@ -193,10 +193,7 @@ async def action_callback(update, context):
 
         elif verb == "model":
             # Show model picker for the focused session's AI
-            from helm.web_routes import (
-                _fetch_claude_models, _fetch_ollama_models,
-                _fetch_gemini_models, _fetch_openai_models,
-            )
+            from helm.web_routes.helpers import _fetch_ollama_models
             fs = focused_session()
             if not fs or not fs.get("ai"):
                 await query.edit_message_text(
@@ -207,22 +204,23 @@ async def action_callback(update, context):
             ai_key = fs["ai"]
             current_model = fs.get("model") or None
 
-            # AIs that use local OAuth auth can't list models via API —
-            # inform the user and let them type a model name manually.
-            _oauth_only_ais = {"claude", "gemini", "codex"}
+            # CLI + OAuth AIs don't support model switching
+            _CLI_AIS = {"claude", "gemini", "codex", "openai"}
+            if ai_key in _CLI_AIS:
+                await query.edit_message_text(
+                    f"ℹ️ *Model switching is not available for {ai_key.title()}.*\n\n"
+                    f"{ai_key.title()} runs as a CLI tool authenticated via OAuth — "
+                    f"it uses the model assigned to your account.\n\n"
+                    f"Model switching is available for *Ollama* sessions, which use "
+                    f"a local REST API with locally installed models.",
+                    parse_mode="Markdown",
+                    reply_markup=session_controls_keyboard(),
+                )
+                return
 
-            # Fetch available models live for this AI
+            # Fetch available Ollama models
             try:
-                if ai_key == "claude":
-                    models = await asyncio.to_thread(_fetch_claude_models)
-                elif ai_key == "ollama":
-                    models = await asyncio.to_thread(_fetch_ollama_models)
-                elif ai_key == "gemini":
-                    models = await asyncio.to_thread(_fetch_gemini_models)
-                elif ai_key in ("codex", "openai"):
-                    models = await asyncio.to_thread(_fetch_openai_models)
-                else:
-                    models = []
+                models = await asyncio.to_thread(_fetch_ollama_models)
             except Exception:
                 models = []
 
@@ -239,20 +237,12 @@ async def action_callback(update, context):
             else:
                 hint = f"(default — `{models[0]}`)" if models else "(default)"
 
-            # Build the appropriate note when no models are found
-            if not models and ai_key in _oauth_only_ais:
-                no_models_note = (
-                    "\n\n⚠️ _Model listing is not available for local OAuth auth._\n"
-                    "_You can still switch models manually — type_ `/model <name>` _in chat._\n"
-                    "_Example:_ `/model claude-sonnet-4-5-20250514`"
-                )
-            elif not models:
-                no_models_note = "\n\n_No models found — check that the AI service is running._"
-            else:
-                no_models_note = ""
+            no_models_note = ""
+            if not models:
+                no_models_note = "\n\n_No models found — is Ollama running? Start it with_ `ollama serve`"
 
             await query.edit_message_text(
-                f"🎯 *Model picker* for *{ai_key}*\n"
+                f"🎯 *Model picker* for *Ollama*\n"
                 f"Current: {hint}{no_models_note}\n\n"
                 f"Tap a model to switch, or type `/model <name>` in chat:",
                 parse_mode="Markdown",
