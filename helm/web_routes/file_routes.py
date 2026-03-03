@@ -9,7 +9,7 @@ import platform
 import subprocess as _sub
 import sys as _sys
 import time as _time
-from fastapi import APIRouter
+from fastapi import APIRouter, UploadFile, File
 from fastapi.responses import JSONResponse, Response
 
 import helm.state as _st
@@ -118,3 +118,28 @@ async def diagnostics_export():
             "Content-Disposition": f'attachment; filename="helm_diagnostics_{ts()[:10]}.json"'
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# File Upload — save attachment to the focused session's CWD
+# ---------------------------------------------------------------------------
+
+@router.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """Save an uploaded file to the active session's CWD."""
+    from helm.config import _DEFAULT_CWD
+
+    sid = _st.focused_id
+    sess = _st.sessions.get(sid) if sid else None
+    cwd = sess.get("cwd", _DEFAULT_CWD) if sess else _DEFAULT_CWD
+
+    filename = file.filename or f"upload_{int(_time.time())}"
+    save_path = os.path.join(cwd, filename)
+
+    try:
+        data = await file.read()
+        with open(save_path, "wb") as f:
+            f.write(data)
+        return JSONResponse({"filename": filename, "path": save_path, "size": len(data)})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)

@@ -937,3 +937,106 @@ def _transcribe_audio(audio_path: str) -> str:
     model = whisper.load_model("base")
     result = model.transcribe(audio_path, fp16=False)
     return (result.get("text") or "").strip()
+
+
+# ---------------------------------------------------------------------------
+# File / Photo attachment handler — save to CWD and notify AI
+# ---------------------------------------------------------------------------
+
+@authorized_only
+async def tg_file(update, context):
+    """Handle photos and document attachments from Telegram.
+
+    Saves the file to the active session's CWD and optionally asks the AI
+    to process it (if a caption is provided).
+    """
+    from helm.session_mgr import focused_session
+    from helm.ai_runner import process_message
+    import tempfile
+
+    # Must have a focused session
+    if not _st.focused_id or _st.focused_id not in _st.sessions:
+        if _st.sessions:
+            await update.message.reply_text(
+                "👋 Tap a session first, then send a file:",
+                reply_markup=sessions_keyboard(),
+            )
+        else:
+            await update.message.reply_text(
+                "👋 No sessions yet. Create one first:",
+                reply_markup=new_session_keyboard(),
+            )
+        return
+
+    sess = _st.sessions.get(_st.focused_id)
+    if sess and sess["status"] == "stopped":
+        await update.message.reply_text(
+            f"✨ *{sess['name']}* is stopped. Resume it or switch session:",
+            parse_mode="Markdown",
+            reply_markup=sessions_keyboard(),
+        )
+        return
+
+    cwd = sess.get("cwd", os.getcwd())
+
+    # Determine file type
+    photo = update.message.photo
+    document = update.message.document
+    caption = (update.message.caption or "").strip()
+
+    if photo:
+        # Get highest resolution photo
+        file_obj = await photo[-1].get_file()
+        filename = f"telegram_photo_{int(time.time())}.jpg"
+    elif document:
+        file_obj = await document.get_file()
+        filename = document.file_name or f"telegram_file_{int(time.time())}"
+    else:
+        await update.message.reply_text("⚠️ Unsupported attachment type.")
+        return
+
+    # Save to session CWD
+    save_path = os.path.join(cwd, filename)
+    try:
+        await file_obj.download_to_drive(save_path)
+    except Exception as exc:
+        await update.message.reply_text(f"⚠️ Failed to save file: {exc}")
+        return
+
+    fs = focused_session()
+    label = f"{fs['emoji']} {fs['name']}" if fs else "session"
+
+    if caption:
+        # User wants the AI to process this file
+        prompt = f"[File attached: {filename} saved to {cwd}]\n\n{caption}"
+        await update.message.reply_text(
+            f"📎 Saved `{filename}` to project folder.\n\nProcessing with [{label}]...",
+            parse_mode="Markdown",
+        )
+
+        async def _tg_file_fire(
+            _text: str = prompt,
+            _update=update,
+        ) -> None:
+            try:
+                response = await process_message(_text, source="telegram")
+                await tg_send_chunks(
+                    _update, response,
+                    reply_markup=session_controls_keyboard(),
+                )
+            except Exception as exc:
+                logger.warning("tg_file_fire error: %s", exc)
+                try:
+                    await _update.message.reply_text(f"⚠️ Error: {exc}")
+                except Exception:
+                    pass
+
+        asyncio.create_task(_tg_file_fire())
+    else:
+        # Just save, no AI processing
+        await update.message.reply_text(
+            f"📎 Saved `{filename}` to project folder.\n"
+            f"Send a message to tell the AI what to do with it.",
+            parse_mode="Markdown",
+            reply_markup=session_controls_keyboard(),
+        )

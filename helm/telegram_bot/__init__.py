@@ -26,7 +26,7 @@ from .commands import (
     tg_start, tg_menu, tg_launch, tg_claude, tg_codex, tg_gemini,
     tg_stop_ai, tg_clear, tg_cmd, tg_status, tg_interrupt, tg_stop,
     tg_cwd, tg_timeout, tg_schedule, tg_history, tg_resume,
-    tg_clear_context, tg_text, tg_voice,
+    tg_clear_context, tg_text, tg_voice, tg_file,
     perform_resume, _perform_resume,
     _update_env,
 )
@@ -81,6 +81,7 @@ __all__ = [
     "tg_clear_context",
     "tg_text",
     "tg_voice",
+    "tg_file",
     "perform_resume",
     "_perform_resume",
     "_update_env",

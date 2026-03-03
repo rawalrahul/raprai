@@ -15,6 +15,7 @@ from helm.config import BOT_TOKEN, WEB_HOST, WEB_PORT, logger
 from helm.integrations import load_integrations
 from helm.skills import scan_skills
 from helm.scheduler import load_scheduled_tasks, cron_runner
+from helm.heartbeat import heartbeat_runner, heartbeat_callback
 from helm.history import rebuild_hist_cache_sync
 from helm.web_routes import app
 
@@ -71,7 +72,7 @@ async def _main():
             tg_codex, tg_cwd, tg_gemini, tg_history, tg_interrupt,
             tg_launch, tg_menu, tg_resume, tg_schedule, tg_start,
             tg_status, tg_stop, tg_stop_ai, tg_text, tg_timeout,
-            tg_voice,
+            tg_voice, tg_file,
         )
 
         _st.telegram_app = (
@@ -104,9 +105,12 @@ async def _main():
         tg.add_handler(CommandHandler("schedule",      tg_schedule))
         # Inline keyboard callbacks — action/ms: buttons BEFORE browse_callback
         tg.add_handler(CallbackQueryHandler(action_callback, pattern=r"^(action:|ms:)"))
+        tg.add_handler(CallbackQueryHandler(heartbeat_callback, pattern=r"^heartbeat:"))
         tg.add_handler(CallbackQueryHandler(browse_callback))
         # Voice / audio messages
         tg.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, tg_voice))
+        # Photos and document attachments
+        tg.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, tg_file))
         # Plain text + natural language
         tg.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, tg_text))
 
@@ -130,6 +134,7 @@ async def _main():
     # Load persisted scheduled tasks and start the cron runner
     load_scheduled_tasks()
     asyncio.create_task(cron_runner())
+    asyncio.create_task(heartbeat_runner())
     asyncio.create_task(_open_browser())
 
     if _st.telegram_app:
