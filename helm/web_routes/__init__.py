@@ -21,6 +21,7 @@ from .chat_ws import router as chat_ws_router
 from .history_routes import router as history_router
 from .settings_routes import router as settings_router
 from .file_routes import router as file_router
+from .voice_routes import router as voice_router
 
 # Include all routers in the app
 app.include_router(auth_router)
@@ -29,6 +30,7 @@ app.include_router(chat_ws_router)
 app.include_router(history_router)
 app.include_router(settings_router)
 app.include_router(file_router)
+app.include_router(voice_router)
 
 # Re-export app so it can be imported as: from helm.web_routes import app
 __all__ = ["app"]

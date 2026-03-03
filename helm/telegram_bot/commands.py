@@ -799,3 +799,141 @@ async def tg_text(update, context):
                 pass
 
     asyncio.create_task(_tg_fire())
+
+
+# ---------------------------------------------------------------------------
+# Voice message handler — Whisper speech-to-text → process_message
+# ---------------------------------------------------------------------------
+
+@authorized_only
+async def tg_voice(update, context):
+    """Transcribe voice/audio messages via Whisper and forward to the active AI."""
+    from helm.session_mgr import focused_session
+    from helm.ai_runner import process_message
+    from helm.broadcast import push_state
+    import os
+    import subprocess
+    import sys
+    import tempfile
+
+    # Must have a focused session
+    if not _st.focused_id or _st.focused_id not in _st.sessions:
+        if _st.sessions:
+            await update.message.reply_text(
+                "👋 Tap a session first, then send a voice message:",
+                reply_markup=sessions_keyboard(),
+            )
+        else:
+            await update.message.reply_text(
+                "👋 No sessions yet. Create one first:",
+                reply_markup=new_session_keyboard(),
+            )
+        return
+
+    sess = _st.sessions.get(_st.focused_id)
+    if sess and sess["status"] == "stopped":
+        await update.message.reply_text(
+            f"✨ *{sess['name']}* is stopped. Resume it or switch session:",
+            parse_mode="Markdown",
+            reply_markup=sessions_keyboard(),
+        )
+        return
+
+    # Download the voice/audio file from Telegram
+    voice = update.message.voice or update.message.audio
+    if not voice:
+        await update.message.reply_text("⚠️ No audio found in message.")
+        return
+
+    await update.message.reply_text("🎤 Transcribing voice message...")
+
+    try:
+        tg_file = await voice.get_file()
+        # Save to temp .ogg file
+        tmp_dir = tempfile.mkdtemp(prefix="helm_voice_")
+        ogg_path = os.path.join(tmp_dir, "voice.ogg")
+        await tg_file.download_to_drive(ogg_path)
+
+        # Transcribe using Whisper
+        transcript = await asyncio.get_event_loop().run_in_executor(
+            None, _transcribe_audio, ogg_path
+        )
+
+        # Clean up temp files
+        try:
+            os.remove(ogg_path)
+            os.rmdir(tmp_dir)
+        except Exception:
+            pass
+
+        if not transcript or not transcript.strip():
+            await update.message.reply_text("⚠️ Could not transcribe audio — no speech detected.")
+            return
+
+        # Show the transcript to the user
+        fs = focused_session()
+        label = f"{fs['emoji']} {fs['name']}" if fs else "session"
+        await update.message.reply_text(
+            f"🎤 *Transcript:* {transcript}\n\nThinking... [{label}]",
+            parse_mode="Markdown",
+        )
+
+        # Forward transcript to the active AI — same flow as tg_text
+        async def _tg_voice_fire(
+            _text: str = transcript,
+            _update=update,
+        ) -> None:
+            try:
+                response = await process_message(_text, source="telegram")
+                await tg_send_chunks(
+                    _update, response,
+                    reply_markup=session_controls_keyboard(),
+                )
+            except Exception as exc:
+                logger.warning("tg_voice_fire error: %s", exc)
+                try:
+                    await _update.message.reply_text(f"⚠️ Error: {exc}")
+                except Exception:
+                    pass
+
+        asyncio.create_task(_tg_voice_fire())
+
+    except Exception as exc:
+        logger.warning("Voice transcription error: %s", exc)
+        await update.message.reply_text(f"⚠️ Voice transcription failed: {exc}")
+
+
+def _ensure_ffmpeg():
+    """Make sure ffmpeg is on PATH. Uses static-ffmpeg as fallback on Windows."""
+    import shutil, subprocess, sys
+    if shutil.which("ffmpeg"):
+        return  # already available
+    # Install static-ffmpeg which bundles the binary
+    try:
+        import static_ffmpeg
+    except ImportError:
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "static-ffmpeg", "-q"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        import static_ffmpeg
+    static_ffmpeg.add_paths()
+
+
+def _transcribe_audio(audio_path: str) -> str:
+    """Transcribe audio file using Whisper. Runs in a thread pool."""
+    _ensure_ffmpeg()
+
+    try:
+        import whisper
+    except ImportError:
+        import subprocess, sys
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "openai-whisper", "-q"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        import whisper
+
+    model = whisper.load_model("base")
+    result = model.transcribe(audio_path, fp16=False)
+    return (result.get("text") or "").strip()

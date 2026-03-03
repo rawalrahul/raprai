@@ -34,7 +34,7 @@ goto :skip_helper
 :: ════════════════════════════════════════════════════════════════════════════
 :: 1. PYTHON
 :: ════════════════════════════════════════════════════════════════════════════
-echo  [1/7]  Checking Python...
+echo  [1/8]  Checking Python...
 python --version >nul 2>&1
 if errorlevel 1 (
     echo.
@@ -74,7 +74,7 @@ echo.
 :: ════════════════════════════════════════════════════════════════════════════
 :: 2. NODE.JS
 :: ════════════════════════════════════════════════════════════════════════════
-echo  [2/7]  Checking Node.js...
+echo  [2/8]  Checking Node.js...
 node --version >nul 2>&1
 if errorlevel 1 (
     echo.
@@ -124,7 +124,7 @@ echo.
 :: ════════════════════════════════════════════════════════════════════════════
 :: 3. PANDOC  (optional — used by docx skill for text extraction)
 :: ════════════════════════════════════════════════════════════════════════════
-echo  [3/7]  Checking Pandoc (optional)...
+echo  [3/8]  Checking Pandoc (optional)...
 pandoc --version >nul 2>&1
 if errorlevel 1 (
     echo   Pandoc not found.  Attempting automatic install via winget...
@@ -146,7 +146,7 @@ echo.
 :: ════════════════════════════════════════════════════════════════════════════
 :: 4. PYTHON PACKAGES
 :: ════════════════════════════════════════════════════════════════════════════
-echo  [4/7]  Installing Python packages...
+echo  [4/8]  Installing Python packages...
 echo.
 
 echo     Core server dependencies (requirements.txt)...
@@ -166,6 +166,13 @@ if errorlevel 1 (
     echo   Helm HQ will still run but PDF/PPTX skills may be limited.
 )
 
+echo     Voice support (openai-whisper, static-ffmpeg)...
+python -m pip install openai-whisper static-ffmpeg --quiet
+if errorlevel 1 (
+    echo   WARNING: Whisper/FFmpeg install failed.
+    echo   Voice messages will not work until these are installed.
+)
+
 echo     Done.
 echo.
 
@@ -173,7 +180,7 @@ echo.
 :: ════════════════════════════════════════════════════════════════════════════
 :: 5. NPM GLOBAL PACKAGES  (docx + pptxgenjs for document/slide creation)
 :: ════════════════════════════════════════════════════════════════════════════
-echo  [5/7]  Installing Node packages...
+echo  [5/8]  Installing Node packages...
 if defined NODE_MISSING (
     echo   Skipping — Node.js was not installed.
 ) else (
@@ -196,9 +203,31 @@ echo.
 
 
 :: ════════════════════════════════════════════════════════════════════════════
-:: 6. TESSERACT OCR  (optional — used by pdf skill for scanned documents)
+:: 6. FFMPEG  (optional — used by Whisper for voice transcription)
 :: ════════════════════════════════════════════════════════════════════════════
-echo  [6/7]  Checking Tesseract OCR (optional)...
+echo  [6/8]  Checking FFmpeg (optional — for voice messages)...
+ffmpeg -version >nul 2>&1
+if errorlevel 1 (
+    echo   FFmpeg not found.  Attempting automatic install via winget...
+    call :winget_install "Gyan.FFmpeg" "FFmpeg"
+    if errorlevel 1 (
+        echo.
+        echo   FFmpeg could not be installed automatically.
+        echo   It is optional — only needed for Telegram voice message transcription.
+        echo   Install later from: https://ffmpeg.org/download.html
+    ) else (
+        echo   FFmpeg installed.
+    )
+) else (
+    echo     FFmpeg found.
+)
+echo.
+
+
+:: ════════════════════════════════════════════════════════════════════════════
+:: 7. TESSERACT OCR  (optional — used by pdf skill for scanned documents)
+:: ════════════════════════════════════════════════════════════════════════════
+echo  [7/8]  Checking Tesseract OCR (optional)...
 tesseract --version >nul 2>&1
 if errorlevel 1 (
     echo   Tesseract not found.  Attempting automatic install via winget...
@@ -220,7 +249,7 @@ echo.
 :: ════════════════════════════════════════════════════════════════════════════
 :: 7. CREATE .env IF MISSING
 :: ════════════════════════════════════════════════════════════════════════════
-echo  [7/7]  Checking .env...
+echo  [8/8]  Checking .env...
 if not exist .env (
     if exist .env.example (
         copy .env.example .env >nul

@@ -71,6 +71,7 @@ async def _main():
             tg_codex, tg_cwd, tg_gemini, tg_history, tg_interrupt,
             tg_launch, tg_menu, tg_resume, tg_schedule, tg_start,
             tg_status, tg_stop, tg_stop_ai, tg_text, tg_timeout,
+            tg_voice,
         )
 
         _st.telegram_app = (
@@ -104,6 +105,8 @@ async def _main():
         # Inline keyboard callbacks — action/ms: buttons BEFORE browse_callback
         tg.add_handler(CallbackQueryHandler(action_callback, pattern=r"^(action:|ms:)"))
         tg.add_handler(CallbackQueryHandler(browse_callback))
+        # Voice / audio messages
+        tg.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, tg_voice))
         # Plain text + natural language
         tg.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, tg_text))
 
