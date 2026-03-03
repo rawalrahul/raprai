@@ -152,40 +152,66 @@ def scan_skills(skills_bases=None) -> dict[str, dict]:
             break
 
     # ── Load skills; first occurrence wins (higher-priority path) ───────────
+    # Scans up to 2 levels deep: skills_base/*/SKILL.md  AND
+    # skills_base/*/*/SKILL.md  (covers grouped skills like document-skills/pptx/).
     new_registry: dict[str, dict] = {}
     total_found = 0
+
+    def _load_skill(skill_dir: pathlib.Path, skills_base: pathlib.Path) -> bool:
+        """Try to register the skill in skill_dir. Returns True on success."""
+        nonlocal total_found
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.exists():
+            return False
+        try:
+            raw  = skill_md.read_text(encoding="utf-8", errors="replace")
+            meta, body = _parse_frontmatter(raw)
+            name = meta.get("name", skill_dir.name)
+
+            if name in new_registry:
+                # Already loaded from a higher-priority directory — skip.
+                return False
+
+            description = meta.get("description", "")
+            keywords    = _extract_keywords(name, description)
+            new_registry[name] = {
+                "name":        name,
+                "description": description,
+                "keywords":    keywords,
+                "content":     body,
+                "path":        str(skill_md),
+                "source_dir":  str(skills_base),
+            }
+            total_found += 1
+            return True
+        except Exception as exc:
+            logger.warning("skills.py: failed to load %s — %s", skill_md, exc)
+            return False
 
     for skills_base in _skills_dirs:
         dir_found = 0
         for skill_dir in sorted(skills_base.iterdir()):
             if not skill_dir.is_dir():
                 continue
-            skill_md = skill_dir / "SKILL.md"
-            if not skill_md.exists():
-                continue
-            try:
-                raw  = skill_md.read_text(encoding="utf-8", errors="replace")
-                meta, body = _parse_frontmatter(raw)
-                name = meta.get("name", skill_dir.name)
-
-                if name in new_registry:
-                    # Already loaded from a higher-priority directory — skip.
-                    continue
-
-                description = meta.get("description", "")
-                keywords    = _extract_keywords(name, description)
-                new_registry[name] = {
-                    "name":        name,
-                    "description": description,
-                    "keywords":    keywords,
-                    "content":     body,
-                    "path":        str(skill_md),
-                    "source_dir":  str(skills_base),
-                }
-                dir_found   += 1
-                total_found += 1
-            except Exception as exc:
-                logger.warning("skills.py: failed to load %s — %s", skill_md, exc)
+            # Level 1: skills_base/foo/SKILL.md
+            if _load_skill(skill_dir, skills_base):
+                dir_found += 1
+            else:
+                # Level 2: skills_base/foo/bar/SKILL.md
+                # (covers grouped directories like document-skills/pptx/)
+                # Cap at 50 entries to avoid scanning huge dirs like composio-skills (800+).
+                try:
+                    count = 0
+                    for sub_dir in skill_dir.iterdir():
+                        count += 1
+                        if count > 50:
+                            logger.debug("Skills: level-2 scan of %s capped at 50",
+                                         skill_dir.name)
+                            break
+                        if sub_dir.is_dir() and _load_skill(sub_dir, skills_base):
+                            dir_found += 1
+                except PermissionError:
+                    pass
 
         logger.info("Skills: loaded %d skill(s) from %s", dir_found, skills_base)
 
@@ -250,10 +276,11 @@ _STOP_WORDS = {
 # Hand-curated extra keywords that aren't always obvious from the description
 _EXTRA_KEYWORDS: dict[str, list[str]] = {
     "docx":              ["word doc", "word document", "report", "memo",
-                          "letter", "manuscript", "essay", ".docx"],
+                          "letter", "manuscript", "essay", ".docx", "docx",
+                          "document"],
     "pdf":               [".pdf", "portable document", "fillable form", "ocr"],
     "pptx":              ["powerpoint", "slides", "slide deck", "pitch deck",
-                          "presentation", "deck", ".pptx"],
+                          "presentation", "deck", ".pptx", "ppt"],
     "xlsx":              ["excel", "spreadsheet", "xls", "csv", "tabular",
                           ".xlsx", "budget", "financial model"],
     "humanizer":         ["write", "draft", "rewrite", "improve", "polish",

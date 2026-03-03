@@ -1,0 +1,744 @@
+"""
+helm/ai_runner/ollama.py — Ollama REST API agent and tool execution.
+
+Covers: ollama_model_supports_tools, _OLLAMA_TOOLS, _execute_ollama_tool,
+        _parse_content_tool_calls, _ollama_system_prompt, _run_ollama_agent.
+"""
+
+import asyncio
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+
+import helm.state as _st
+from helm.broadcast import push_message
+from helm.config import logger
+from helm.skills import inject_skill_prefix, detect_skill
+
+from .doc_generators import _generate_pptx_code, _generate_pdf_code, _generate_docx_code
+
+
+_OLLAMA_URL = "http://localhost:11434/api/chat"
+
+_OLLAMA_TOOL_SUPPORT: dict[str, bool] = {
+    "qwen2.5":          True,
+    "qwen3":            True,
+    "llama3.1":         True,
+    "llama3.2":         True,
+    "llama3.3":         True,
+    "mistral-nemo":     True,
+    "mistral":          True,
+    "command-r":        True,
+    "granite3":         True,
+    "firefunction":     True,
+    "smollm2":          True,
+    "deepseek-r1":      False,
+    "deepseek-v":       False,
+    "llama2":           False,
+    "phi3":             False,
+    "gemma":            False,
+    "gemma2":           False,
+    "gemma3":           False,
+    "codellama":        False,
+    "starcoder":        False,
+    "flux":             False,
+    "stable-diffusion": False,
+}
+
+
+def ollama_model_supports_tools(model: str) -> bool | None:
+    """
+    Return True if the model is known to support tool calling,
+    False if known not to, or None if unknown.
+    """
+    m = model.lower().split(":")[0]
+    for prefix, supported in _OLLAMA_TOOL_SUPPORT.items():
+        if m.startswith(prefix):
+            return supported
+    return None
+
+
+_OLLAMA_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "create_presentation",
+            "description": (
+                "Create a professional, beautifully-styled PowerPoint presentation (.pptx) "
+                "with dark themed slides, accent bars, and polished visuals. "
+                "YOU MUST USE THIS TOOL for any presentation / slide / ppt request. "
+                "Provide the slide content and this tool handles all the styling."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "Output filename, e.g. 'AGI_vs_AI_Agents.pptx'",
+                    },
+                    "title": {"type": "string", "description": "Presentation title for the title slide"},
+                    "subtitle": {"type": "string", "description": "Subtitle or tagline for the title slide"},
+                    "slides": {
+                        "type": "array",
+                        "description": (
+                            "Array of slide objects. Each slide has a 'type' and content fields. "
+                            "Types: 'content' (title + bullets), 'two_column' (title + left/right lists), "
+                            "'stat' (big number + label), 'section' (section divider). "
+                            "Aim for 8-12 slides with varied types."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "description": "Slide type: 'content', 'two_column', 'stat', or 'section'",
+                                },
+                                "title": {"type": "string", "description": "Slide title (for content/two_column)"},
+                                "bullets": {
+                                    "type": "array", "items": {"type": "string"},
+                                    "description": "Bullet points (for content slides)",
+                                },
+                                "left_title": {"type": "string", "description": "Left column title (two_column)"},
+                                "left_items": {"type": "array", "items": {"type": "string"}},
+                                "right_title": {"type": "string", "description": "Right column title (two_column)"},
+                                "right_items": {"type": "array", "items": {"type": "string"}},
+                                "stat_value": {"type": "string", "description": "Big number/stat (stat slide)"},
+                                "stat_label": {"type": "string", "description": "Label below stat"},
+                                "context": {"type": "string", "description": "Context line (stat slide)"},
+                                "number": {"type": "integer", "description": "Section number (section slide)"},
+                            },
+                            "required": ["type"],
+                        },
+                    },
+                },
+                "required": ["filename", "title", "slides"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_pdf",
+            "description": (
+                "Create a professional styled PDF document with headers, footers, "
+                "tables, callout boxes, and polished typography. "
+                "YOU MUST USE THIS TOOL for any PDF creation request."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "description": "Output filename, e.g. 'Report.pdf'"},
+                    "title": {"type": "string", "description": "Document title"},
+                    "subtitle": {"type": "string", "description": "Subtitle or byline"},
+                    "sections": {
+                        "type": "array",
+                        "description": "Array of sections. Each has heading + content (paragraphs, bullets, table, callout).",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "heading": {"type": "string", "description": "Section heading"},
+                                "paragraphs": {
+                                    "type": "array", "items": {"type": "string"},
+                                    "description": "Body paragraphs",
+                                },
+                                "bullets": {
+                                    "type": "array", "items": {"type": "string"},
+                                    "description": "Bullet points",
+                                },
+                                "callout": {"type": "string", "description": "Highlighted callout text"},
+                                "table_headers": {"type": "array", "items": {"type": "string"}},
+                                "table_rows": {
+                                    "type": "array",
+                                    "items": {"type": "array", "items": {"type": "string"}},
+                                },
+                                "page_break": {"type": "boolean", "description": "Insert page break after section"},
+                            },
+                            "required": ["heading"],
+                        },
+                    },
+                },
+                "required": ["filename", "title", "sections"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_document",
+            "description": (
+                "Create a professional styled Word document (.docx) with proper headings, "
+                "bullet points, tables, and formatting. "
+                "YOU MUST USE THIS TOOL for any Word document / .docx request."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "description": "Output filename, e.g. 'Report.docx'"},
+                    "title": {"type": "string", "description": "Document title"},
+                    "sections": {
+                        "type": "array",
+                        "description": "Array of sections with heading + content.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "heading": {"type": "string", "description": "Section heading"},
+                                "paragraphs": {"type": "array", "items": {"type": "string"}},
+                                "bullets": {"type": "array", "items": {"type": "string"}},
+                                "table_headers": {"type": "array", "items": {"type": "string"}},
+                                "table_rows": {
+                                    "type": "array",
+                                    "items": {"type": "array", "items": {"type": "string"}},
+                                },
+                            },
+                            "required": ["heading"],
+                        },
+                    },
+                },
+                "required": ["filename", "title", "sections"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_python",
+            "description": (
+                "Execute Python code in the user's working directory. "
+                "Use for general coding tasks, Excel (.xlsx), images, and scripts. "
+                "Do NOT use for .pptx (use create_presentation), "
+                ".pdf (use create_pdf), or .docx (use create_document). "
+                "Install packages with subprocess if needed. "
+                "Always print a confirmation at the end."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": (
+                            "Complete, self-contained Python code to execute. "
+                            "Use try/except for error handling. "
+                            "All file paths should be relative to the working directory."
+                        ),
+                    },
+                },
+                "required": ["code"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": (
+                "Write text content directly to a file. "
+                "ONLY for plain text, Markdown, JSON, CSV, HTML, or source code. "
+                "NEVER for .pptx, .pdf, or .docx — use create_presentation, "
+                "create_pdf, or create_document instead."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path relative to working directory (e.g. 'report.md')",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Full text content to write to the file",
+                    },
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read an existing file's contents. Use before editing files.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path relative to working directory",
+                    },
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_directory",
+            "description": "List files and folders in the working directory or a subdirectory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path to list. Use '.' for the current directory.",
+                    },
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_skill",
+            "description": (
+                "Save a new reusable skill to the Helm HQ skill library. "
+                "Call this when you discover a reliable pattern for a task type "
+                "that you've successfully completed and that no existing skill covers. "
+                "The skill will be available to you and all other AIs for future similar tasks. "
+                "Use a kebab-case name like 'word-document-from-template' or 'quarterly-report'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": (
+                            "Kebab-case skill name (e.g. 'document-creation', "
+                            "'excel-budget', 'api-data-fetch'). "
+                            "Must be unique — do not overwrite existing skills."
+                        ),
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": (
+                            "One sentence describing what tasks this skill covers "
+                            "(used in the skill registry and UI)."
+                        ),
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": (
+                            "Full Markdown content of the skill. Include: "
+                            "## What this skill covers, "
+                            "## Step-by-step approach, "
+                            "## Python code template (for Ollama), "
+                            "## Tips and common pitfalls."
+                        ),
+                    },
+                },
+                "required": ["name", "description", "content"],
+            },
+        },
+    },
+]
+
+
+async def _execute_ollama_tool(name: str, args: dict, cwd: str) -> str:
+    """Dispatch and run a single Ollama tool call; return the result as a string."""
+    try:
+        if name == "execute_python":
+            code = args.get("code", "")
+            result = await asyncio.to_thread(
+                subprocess.run,
+                [sys.executable, "-c", code],
+                capture_output=True, text=True, timeout=600, cwd=cwd,
+            )
+            out = result.stdout.strip()
+            err = result.stderr.strip()
+            if result.returncode != 0:
+                return f"Exit {result.returncode}:\n{err}\n{out}".strip()
+            return out or "✓ executed (no output)"
+
+        elif name == "write_file":
+            rel     = args.get("path", "")
+            content = args.get("content", "")
+            dest    = pathlib.Path(cwd) / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content, encoding="utf-8")
+            return f"✓ wrote {len(content):,} chars → {rel}"
+
+        elif name == "read_file":
+            rel  = args.get("path", "")
+            text = (pathlib.Path(cwd) / rel).read_text(encoding="utf-8")
+            if len(text) > 8000:
+                text = text[:8000] + "\n…(truncated — file continues)"
+            return text
+
+        elif name == "list_directory":
+            rel     = args.get("path", ".")
+            entries = sorted(
+                (pathlib.Path(cwd) / rel).iterdir(),
+                key=lambda p: (p.is_file(), p.name),
+            )
+            lines = [
+                f"📁 {e.name}/" if e.is_dir() else f"📄 {e.name} ({e.stat().st_size:,} B)"
+                for e in entries
+            ]
+            return "\n".join(lines) or "(empty directory)"
+
+        elif name == "save_skill":
+            from helm.skills import create_skill, get_user_skills_dir
+            skill_name  = args.get("name", "").strip()
+            description = args.get("description", "").strip()
+            content     = args.get("content", "").strip()
+            if not skill_name or not content:
+                return "Error: 'name' and 'content' are required."
+            skills_dir = get_user_skills_dir()
+            if not skills_dir:
+                return "Error: No writable skills directory configured."
+            ok = await asyncio.to_thread(create_skill, skill_name, description, content)
+            if ok:
+                return (
+                    f"✓ Skill '{skill_name}' saved to {skills_dir}/{skill_name}/SKILL.md\n"
+                    f"It is now active in the registry and will be used for future tasks."
+                )
+            return f"Error: could not save skill '{skill_name}'. Check server logs."
+
+        elif name == "create_presentation":
+            filename = args.get("filename", "Presentation.pptx")
+            if not filename.endswith(".pptx"):
+                filename += ".pptx"
+            title    = args.get("title", "Presentation")
+            subtitle = args.get("subtitle", "")
+            slides   = args.get("slides", [])
+            if not slides:
+                return "Error: 'slides' list is required with at least one slide."
+            code = _generate_pptx_code(filename, title, subtitle, slides)
+            result = await asyncio.to_thread(
+                subprocess.run,
+                [sys.executable, "-c", code],
+                capture_output=True, text=True, timeout=120, cwd=cwd,
+            )
+            if result.returncode != 0:
+                return f"Error creating presentation:\n{result.stderr.strip()}"
+            return f"✓ Created {filename} with {len(slides)+1} slides (title + {len(slides)} content slides)"
+
+        elif name == "create_pdf":
+            filename = args.get("filename", "Document.pdf")
+            if not filename.endswith(".pdf"):
+                filename += ".pdf"
+            title    = args.get("title", "Document")
+            subtitle = args.get("subtitle", "")
+            sections = args.get("sections", [])
+            if not sections:
+                return "Error: 'sections' list is required with at least one section."
+            code = _generate_pdf_code(filename, title, subtitle, sections)
+            result = await asyncio.to_thread(
+                subprocess.run,
+                [sys.executable, "-c", code],
+                capture_output=True, text=True, timeout=120, cwd=cwd,
+            )
+            if result.returncode != 0:
+                return f"Error creating PDF:\n{result.stderr.strip()}"
+            return f"✓ Created {filename} with {len(sections)} sections"
+
+        elif name == "create_document":
+            filename = args.get("filename", "Document.docx")
+            if not filename.endswith(".docx"):
+                filename += ".docx"
+            title    = args.get("title", "Document")
+            sections = args.get("sections", [])
+            if not sections:
+                return "Error: 'sections' list is required with at least one section."
+            code = _generate_docx_code(filename, title, sections)
+            result = await asyncio.to_thread(
+                subprocess.run,
+                [sys.executable, "-c", code],
+                capture_output=True, text=True, timeout=120, cwd=cwd,
+            )
+            if result.returncode != 0:
+                return f"Error creating document:\n{result.stderr.strip()}"
+            return f"✓ Created {filename} with {len(sections)} sections"
+
+        return f"Unknown tool: {name}"
+
+    except subprocess.TimeoutExpired:
+        return "Error: timed out after 600 s"
+    except Exception as exc:
+        return f"Error: {exc}"
+
+
+def _parse_content_tool_calls(content: str) -> list[dict]:
+    """
+    Some models embed tool calls as JSON text in the message content field
+    instead of the structured tool_calls field.
+
+    Handles all common formats:
+      • {"name": "fn", "arguments": {...}}
+      • [{"name": "fn", "arguments": {...}}, ...]
+      • ```json\n{...}\n```
+      • <tool_call>{...}</tool_call>
+      • <tool_call>\n{...}\n</tool_call>
+
+    Returns a list of synthetic tool-call dicts matching the shape our agent
+    loop already expects:  [{"function": {"name": ..., "arguments": ...}}, ...]
+    """
+    if not content:
+        return []
+
+    text = content.strip()
+
+    # Strip markdown code fences
+    fence = re.search(r'```(?:json|tool_call)?\s*(\[.*?\]|\{.*?\})\s*```',
+                      text, re.DOTALL)
+    if fence:
+        text = fence.group(1)
+
+    # Strip XML-style tool_call tags
+    xml = re.search(r'<tool_call>\s*(\{.*?\}|\[.*?\])\s*</tool_call>',
+                    text, re.DOTALL)
+    if xml:
+        text = xml.group(1)
+
+    # Try to parse whatever we have
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        # Last-ditch: find the first {...} block in the content
+        m = re.search(r'\{.*\}', text, re.DOTALL)
+        if not m:
+            return []
+        try:
+            parsed = json.loads(m.group(0))
+        except (json.JSONDecodeError, ValueError):
+            return []
+
+    # Normalise to a list
+    if isinstance(parsed, dict):
+        parsed = [parsed]
+    if not isinstance(parsed, list):
+        return []
+
+    result = []
+    for item in parsed:
+        if not isinstance(item, dict) or "name" not in item:
+            continue
+        args = item.get("arguments") or item.get("parameters") or {}
+        # Some models wrap arguments as a JSON string
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:
+                args = {}
+        result.append({"function": {"name": item["name"], "arguments": args}})
+
+    return result
+
+
+def _ollama_system_prompt(cwd: str, skill_content: str = "") -> str:
+    """Build the Ollama system prompt."""
+    base = (
+        f"You are a capable AI assistant with tools to create and manage files.\n"
+        f"Working directory: {cwd}\n\n"
+        "RULES:\n"
+        "• For PowerPoint presentations → ALWAYS use the create_presentation tool. "
+        "Provide a title, subtitle, and a list of slides. Each slide needs a type "
+        "(content, two_column, stat, section), a title, and appropriate data. "
+        "Aim for 8-12 slides with varied types.\n"
+        "• For PDF documents → ALWAYS use the create_pdf tool. "
+        "Provide a title, subtitle, and sections with headings, body text, bullets, and tables.\n"
+        "• For Word documents → ALWAYS use the create_document tool. "
+        "Provide a title and sections with headings, body text, bullets, and tables.\n"
+        "• Do NOT use execute_python for presentations, PDFs, or Word docs. "
+        "Use the dedicated tools above instead.\n"
+        "• For other code tasks → use execute_python.\n"
+        "• For plain text, Markdown, JSON, CSV → use write_file.\n"
+        "• To inspect files → use list_directory or read_file.\n"
+        "• Always confirm at the end what was created, with the exact file name.\n"
+        "• QUALITY: produce detailed, professional content. Never produce stubs.\n"
+    )
+
+    if skill_content:
+        base += (
+            "\n"
+            "═══ MANDATORY SKILL INSTRUCTIONS ═══\n"
+            "You MUST follow the code templates, helper functions, color palettes, "
+            "and patterns below EXACTLY. Copy the boilerplate code and adapt it "
+            "for the user's topic. Do NOT write your own code from scratch — "
+            "use these templates.\n\n"
+            f"{skill_content}\n"
+            "═══ END SKILL ═══\n"
+        )
+
+    return base
+
+
+async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str:
+    """
+    Ollama agentic loop via /api/chat with tool calling.
+
+    Sends the user message together with tool definitions, executes any
+    tool_calls the model returns, feeds results back, and repeats until the
+    model gives a plain-text answer.  Falls back to the regular subprocess
+    (ollama run) when the REST API is unreachable or the model does not
+    support tools.
+    """
+    from helm.file_tracker import snapshot_dir, handle_diff
+    from .core import run_ai_popen  # lazy to avoid circular import
+
+    cwd   = sess["cwd"]
+    model = sess.get("model") or os.environ.get("OLLAMA_MODEL", "")
+    if not model:
+        try:
+            _r = subprocess.run(
+                ["ollama", "list"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for _line in _r.stdout.strip().splitlines()[1:]:
+                _parts = _line.split()
+                if _parts:
+                    model = _parts[0].strip()
+                    break
+        except Exception:
+            pass
+    if not model:
+        model = "qwen3:4b"
+
+    tool_support = ollama_model_supports_tools(model)
+    if tool_support is False:
+        await push_message(
+            "system",
+            f"⚠️ **{model}** does not support tool calling — file creation tools are disabled.\n"
+            f"Switch to a compatible model (e.g. `qwen2.5-coder:7b`, `qwen3:4b`, `llama3.1:8b`) "
+            f"via `/model` to enable tools.",
+            source=source, session_id=sid,
+        )
+    elif tool_support is None:
+        await push_message(
+            "system",
+            f"ℹ️ **{model}** — tool calling support unknown. "
+            f"If file creation doesn't work, switch to `qwen2.5-coder:7b` or `llama3.1:8b`.",
+            source=source, session_id=sid,
+        )
+
+    from helm.skills import _registry
+    skill_name = detect_skill(text)
+    skill_content = ""
+    if skill_name:
+        ai_specific = f"{sess['ai']}-{skill_name}" if sess.get("ai") else ""
+        if ai_specific and ai_specific in _registry:
+            skill_name = ai_specific
+        skill_content = _registry.get(skill_name, {}).get("content", "")
+        logger.info("Ollama skill injection (system prompt): skill=%s chars=%d",
+                     skill_name, len(skill_content))
+
+    system_content = _ollama_system_prompt(cwd, skill_content=skill_content)
+    if not sess.get("ollama_messages"):
+        sess["ollama_messages"] = [{"role": "system", "content": system_content}]
+    else:
+        if sess["ollama_messages"][0].get("role") == "system":
+            sess["ollama_messages"][0]["content"] = system_content
+
+    sess["ollama_messages"].append({"role": "user", "content": text})
+
+    before       = await asyncio.to_thread(snapshot_dir, cwd)
+    final_output = ""
+
+    for _iteration in range(25):
+        payload = {
+            "model":   model,
+            "messages": sess["ollama_messages"],
+            "tools":   _OLLAMA_TOOLS,
+            "stream":  False,
+        }
+
+        try:
+            req = urllib.request.Request(
+                _OLLAMA_URL,
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=600) as resp:
+                data = json.loads(resp.read())
+
+        except urllib.error.URLError as exc:
+            logger.warning("Ollama REST API unreachable (%s) — falling back to CLI", exc)
+            cli_text = inject_skill_prefix(text, ai=sess.get("ai", "ollama"))
+            cmd = _st.integrations["ollama"]["build_command"](
+                cli_text, model=sess.get("model")
+            )
+            final_output = await asyncio.to_thread(
+                run_ai_popen, cmd, cwd, "ollama", sess
+            )
+            break
+
+        except Exception as exc:
+            final_output = f"Ollama error: {exc}"
+            logger.error(final_output)
+            break
+
+        api_error = data.get("error", "")
+        if api_error:
+            logger.warning(
+                "Ollama API returned error (%s) — falling back to CLI", api_error
+            )
+            cli_text = inject_skill_prefix(text, ai=sess.get("ai", "ollama"))
+            cmd = _st.integrations["ollama"]["build_command"](
+                cli_text, model=sess.get("model")
+            )
+            final_output = await asyncio.to_thread(
+                run_ai_popen, cmd, cwd, "ollama", sess
+            )
+            break
+
+        msg        = data.get("message", {})
+        tool_calls = msg.get("tool_calls") or []
+        content    = (msg.get("content") or "").strip()
+
+        if not tool_calls and content:
+            tool_calls = _parse_content_tool_calls(content)
+            if tool_calls:
+                logger.info(
+                    "Ollama: parsed %d tool call(s) from content text (model=%s)",
+                    len(tool_calls), model,
+                )
+                content = ""
+
+        sess["ollama_messages"].append(msg)
+
+        if not tool_calls:
+            final_output = content or "(no response)"
+            break
+
+        for tc in tool_calls:
+            fn        = tc.get("function", {})
+            tool_name = fn.get("name", "")
+            tool_args = fn.get("arguments", {})
+
+            if isinstance(tool_args, str):
+                try:
+                    tool_args = json.loads(tool_args)
+                except Exception:
+                    tool_args = {}
+
+            await push_message(
+                "system", f"🔧 `{tool_name}` — running…",
+                source=source, session_id=sid,
+            )
+
+            tool_result = await _execute_ollama_tool(tool_name, tool_args, cwd)
+
+            sess["ollama_messages"].append({
+                "role":    "tool",
+                "content": tool_result,
+            })
+
+            await push_message(
+                "system", f"✅ `{tool_name}` — done",
+                source=source, session_id=sid,
+            )
+
+    else:
+        if not final_output:
+            final_output = ("I completed the tool calls but reached the iteration limit. "
+                            "Your files should be created — check the working directory.")
+
+    after = await asyncio.to_thread(snapshot_dir, cwd)
+    await handle_diff(before, after, source, cwd, session_id=sid)
+    return final_output

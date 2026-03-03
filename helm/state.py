@@ -86,3 +86,9 @@ sched_counter: int = 0
 
 hist_cache: list = []
 hist_cache_ts: float = 0.0
+
+# ---------------------------------------------------------------------------
+# Generated files log (populated by file_tracker.handle_diff)
+# ---------------------------------------------------------------------------
+
+generated_files: list[dict] = []     # [{path, name, ext, size, ai, session_id, session_name, ts}]

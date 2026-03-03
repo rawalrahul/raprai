@@ -300,9 +300,29 @@ async def handle_diff(before: dict, after: dict, source: str, cwd: str,
             continue
         local_url = f"http://localhost:{WEB_PORT}/files/{path.name}"
         try:
-            size_kb = path.stat().st_size // 1024
+            size_bytes = path.stat().st_size
+            size_kb = size_bytes // 1024
         except Exception:
+            size_bytes = 0
             size_kb = 0
+
+        # Track in generated files log
+        sess = _st.sessions.get(session_id) if session_id else None
+        _st.generated_files.append({
+            "path": str(path),
+            "name": path.name,
+            "ext": ext,
+            "size": size_bytes,
+            "ai": sess.get("ai", "") if sess else "",
+            "session_id": session_id or "",
+            "session_name": sess.get("name", "") if sess else "",
+            "cwd": cwd,
+            "ts": time.time(),
+        })
+        # Keep only last 200 entries
+        if len(_st.generated_files) > 200:
+            _st.generated_files[:] = _st.generated_files[-200:]
+
         await push_message(
             "system",
             f"📌 New file: {path.name} ({size_kb} KB)  ->  {local_url}",
