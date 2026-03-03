@@ -33,6 +33,7 @@ def load_integrations() -> None:
                 "build_command": mod.build_command,
                 "env_vars":      getattr(mod, "ENV_VARS",   []),
                 "setup_hint":    getattr(mod, "SETUP_HINT", ""),
+                "stdin_prompt":  getattr(mod, "STDIN_PROMPT", False),
             }
             logger.info("Loaded AI integration: %s (%s)", key, _st.integrations[key]["name"])
         except Exception as exc:
