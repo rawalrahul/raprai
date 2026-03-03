@@ -119,6 +119,7 @@ async def history_get(date: str):
         return JSONResponse({"error": "Not found"}, status_code=404)
     messages = []
     last_cwd = None
+    last_ai = ""
     for line in log_file.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
@@ -129,9 +130,11 @@ async def history_get(date: str):
                 last_cwd = rec["path"]
             elif rec.get("type") == "message":
                 messages.append(rec)
+                if rec.get("ai"):
+                    last_ai = rec["ai"]
         except Exception:
             pass
-    return JSONResponse({"messages": messages, "cwd": last_cwd})
+    return JSONResponse({"messages": messages, "cwd": last_cwd, "ai": last_ai})
 
 
 @router.get("/history/{date}/resume")
