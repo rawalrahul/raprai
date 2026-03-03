@@ -172,6 +172,8 @@ async def run_scheduled_task(task: dict) -> None:
     # Clean up ephemeral session
     sess["terminal"].stop()
     if sess["id"] in _st.sessions:
+        # Cache CWD so late-arriving messages still log to the right file
+        _st.deleted_session_cwds[sess["id"]] = sess.get("cwd") or _st.last_cwd
         del _st.sessions[sess["id"]]
     from helm.broadcast import push_state
     await push_state()

@@ -29,6 +29,10 @@ sessions: dict[str, dict] = {}       # sid -> session_dict
 focused_id: Optional[str] = None     # which session Telegram/Web are talking to
 session_counter: int = 0             # incremented for each new session
 
+# Cache of CWD for deleted sessions so late-arriving messages still log
+# to the correct path-based JSONL file instead of falling back to _DEFAULT_CWD.
+deleted_session_cwds: dict[str, str] = {}   # sid -> cwd (kept after deletion)
+
 # ---------------------------------------------------------------------------
 # CWD tracking
 # ---------------------------------------------------------------------------

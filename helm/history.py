@@ -166,14 +166,24 @@ _get_history_messages = get_history_messages  # legacy alias
 # Write helpers
 # ---------------------------------------------------------------------------
 
+def _resolve_session_cwd(session_id: Optional[str]) -> str:
+    """Look up the CWD for a session, falling back to the deleted-session cache."""
+    from helm.config import _DEFAULT_CWD
+    if session_id:
+        # 1. Live session
+        if session_id in _st.sessions:
+            return _st.sessions[session_id].get("cwd") or _DEFAULT_CWD
+        # 2. Recently deleted session — still know its CWD
+        if session_id in _st.deleted_session_cwds:
+            return _st.deleted_session_cwds[session_id]
+    return _DEFAULT_CWD
+
+
 def save_message_to_log(msg: dict, session_id: Optional[str] = None):
     """Append a message to the path-based JSONL log file in CHAT_LOG_DIR."""
     try:
         CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
-        from helm.config import _DEFAULT_CWD
-        cwd = _DEFAULT_CWD
-        if session_id and session_id in _st.sessions:
-            cwd = _st.sessions[session_id].get("cwd") or _DEFAULT_CWD
+        cwd = _resolve_session_cwd(session_id)
 
         path_id  = path_to_id(cwd)
         log_file = CHAT_LOG_DIR / f"{path_id}.jsonl"
@@ -221,10 +231,7 @@ def save_ai_to_log(model: Optional[str], session_id: Optional[str] = None):
     """Persist the active AI model as a record in the path-based JSONL log."""
     try:
         CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
-        from helm.config import _DEFAULT_CWD
-        cwd = _DEFAULT_CWD
-        if session_id and session_id in _st.sessions:
-            cwd = _st.sessions[session_id].get("cwd") or _DEFAULT_CWD
+        cwd = _resolve_session_cwd(session_id)
 
         path_id  = path_to_id(cwd)
         log_file = CHAT_LOG_DIR / f"{path_id}.jsonl"
