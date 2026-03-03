@@ -25,6 +25,56 @@ from .helpers import tg_progress_notify
 
 _ANSI_ESC_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
+# ---------------------------------------------------------------------------
+# File deletion safety guard
+# ---------------------------------------------------------------------------
+_SAFETY_PREAMBLE = (
+    "\n[SAFETY RULE — FILE DELETION]\n"
+    "You MUST NEVER delete, remove, or overwrite any file or directory without "
+    "explicitly asking the user for permission first and receiving confirmation. "
+    "This applies to ALL destructive operations: rm, del, rmdir, shutil.rmtree, "
+    "os.remove, os.unlink, pathlib.Path.unlink, rimraf, Remove-Item, etc. "
+    "Always list the exact files/folders you intend to delete and wait for the "
+    "user to say 'yes' before proceeding. If in doubt, DO NOT delete.\n\n"
+)
+
+_DESTRUCTIVE_PATTERNS = re.compile(
+    r'\b(?:'
+    r'rm\s+-[rf]|rm\s+|rmdir\s+|del\s+/|Remove-Item|'
+    r'shutil\.rmtree|os\.remove|os\.unlink|pathlib.*\.unlink|'
+    r'rimraf\s+|fs\.rm|fs\.unlink'
+    r')\b',
+    re.IGNORECASE,
+)
+
+
+def _log_deletion_warning(ai: str, session_id: str, output: str):
+    """Log any destructive commands found in AI output to deletion_log.json."""
+    import json
+    from datetime import datetime
+    matches = _DESTRUCTIVE_PATTERNS.findall(output)
+    if not matches:
+        return
+    log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "deletion_log.json")
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "ai": ai,
+        "session_id": session_id,
+        "commands_detected": matches,
+        "snippet": output[:500],
+    }
+    try:
+        existing = []
+        if os.path.exists(log_path):
+            with open(log_path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        existing.append(entry)
+        with open(log_path, "w", encoding="utf-8") as f:
+            json.dump(existing, f, indent=2, ensure_ascii=False)
+        logger.warning("⚠️ Destructive command detected in %s output: %s", ai, matches)
+    except Exception as exc:
+        logger.warning("Could not write deletion_log.json: %s", exc)
+
 
 # ---------------------------------------------------------------------------
 # Pre-install document-generation packages (runs once at import time)
@@ -259,13 +309,16 @@ async def process_message(text: str, source: str = "web",
 
     await push_message("user", text, ai=None, source=source, session_id=sid)
 
+    # Inject file-deletion safety preamble into every AI prompt
+    safe_text = _SAFETY_PREAMBLE + text
+
     output = ""  # safe default — overwritten in every branch below
     try:
         if ai == "claude":
             await push_thinking(True, "claude", session_id=sid)
             has_history = len(sess["claude_msgs"]) > 0
             # Skill injection — enrich prompt with best-practice templates
-            enriched_text = inject_skill_prefix(text, ai="claude")
+            enriched_text = inject_skill_prefix(safe_text, ai="claude")
             cmd = build_claude_cmd(enriched_text, has_history, model=sess.get("model"))
             sess["claude_msgs"].append(text)  # store original (unenriched) for history
             before = await asyncio.to_thread(snapshot_dir, cwd)
@@ -284,14 +337,14 @@ async def process_message(text: str, source: str = "web",
             # Ollama uses the REST API + tool calling agent loop
             from .ollama import _run_ollama_agent  # lazy to avoid circular import
             await push_thinking(True, ai, session_id=sid)
-            output = await _run_ollama_agent(sess, text, source, sid)
+            output = await _run_ollama_agent(sess, safe_text, source, sid)
             await push_thinking(False, session_id=sid)
             await push_message("assistant", output, ai=ai, source=source, session_id=sid)
 
         elif ai in _st.integrations:
             await push_thinking(True, ai, session_id=sid)
             skill_matched = detect_skill(text)
-            enriched_text = inject_skill_prefix(text, ai=ai)
+            enriched_text = inject_skill_prefix(safe_text, ai=ai)
             integration = _st.integrations[ai]
             use_stdin   = integration.get("stdin_prompt", False)
             cmd    = integration["build_command"](enriched_text,
@@ -333,6 +386,9 @@ async def process_message(text: str, source: str = "web",
             sess["total_task_seconds"] = float(sess.get("total_task_seconds") or 0.0) + max(0.0, elapsed)
             sess["task_count"] = int(sess.get("task_count") or 0) + 1
         record_usage_task(ai, elapsed, prompt=text, output=output)
+        # Audit: log any destructive file commands in the AI output
+        if output:
+            _log_deletion_warning(ai, sid or "", output)
         sess["busy"]       = False
         sess["task_start"] = None
         await push_state()  # flip session back to idle
