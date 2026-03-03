@@ -37,6 +37,15 @@ def _ai() -> str:
 def _enabled() -> bool:
     return os.environ.get("HEARTBEAT_ENABLED", "1").strip() in ("1", "true", "yes")
 
+def _interval_label() -> str:
+    """Human-readable label for the current interval (e.g. '15 min', '2 hrs')."""
+    secs = _interval()
+    if secs < 3600:
+        m = round(secs / 60)
+        return f"{m} min"
+    h = round(secs / 3600)
+    return f"{h} hr{'s' if h != 1 else ''}"
+
 
 # ---------------------------------------------------------------------------
 # Pending-task detection — scan recent history logs
@@ -165,7 +174,7 @@ async def _notify_telegram(pending_items: list[dict]):
             InlineKeyboardButton("✕ Dismiss", callback_data=f"heartbeat:dismiss:{item['history_id']}")
         ])
 
-    buttons.append([InlineKeyboardButton("🔕 Snooze 24h", callback_data="heartbeat:snooze")])
+    buttons.append([InlineKeyboardButton("🔕 Snooze", callback_data="heartbeat:snooze")])
 
     text = "\n".join(lines)
     markup = InlineKeyboardMarkup(buttons)
@@ -198,7 +207,7 @@ async def _notify_telegram_idle():
     )
     markup = InlineKeyboardMarkup([[
         InlineKeyboardButton("💬 Start a session", callback_data="action:menu"),
-        InlineKeyboardButton("🔕 Snooze 24h", callback_data="heartbeat:snooze"),
+        InlineKeyboardButton("🔕 Snooze", callback_data="heartbeat:snooze"),
     ]])
 
     for uid in ALLOWED_USER_IDS:
@@ -227,19 +236,25 @@ async def heartbeat_callback(update, context):
     payload = parts[2] if len(parts) > 2 else ""
 
     if action == "snooze":
-        # Set a snooze marker so the next heartbeat skips
-        _st._heartbeat_snooze_until = time.time() + 86400
-        await query.answer("Snoozed for 24 hours ✓")
-        await query.edit_message_text("🔕 Heartbeat snoozed for 24 hours.")
+        # Snooze indefinitely until user sends Continue/Dismiss or disables heartbeat
+        _st._heartbeat_snoozed = True
+        await query.answer("Snoozed ✓")
+        await query.edit_message_text(
+            "🔕 Heartbeat snoozed. I won't check in again until you "
+            "continue a task, dismiss, or re-enable from Settings."
+        )
         return
 
     if action == "dismiss":
+        # Clear snooze so heartbeat resumes on next interval
+        _st._heartbeat_snoozed = False
         await query.answer("Dismissed ✓")
-        # Remove just that button row (or simplify — just acknowledge)
+        await query.edit_message_text("✓ Dismissed. Heartbeat will check in again next cycle.")
         return
 
     if action == "resume":
-        # Resume the session from history
+        # Clear snooze and resume the session from history
+        _st._heartbeat_snoozed = False
         from helm.telegram_bot import perform_resume
         await query.answer("Resuming…")
         await perform_resume(payload, update, context)
@@ -270,10 +285,9 @@ async def heartbeat_runner():
 
             interval = _interval()
 
-            # Check if snoozed
-            snooze_until = getattr(_st, "_heartbeat_snooze_until", 0)
-            if time.time() < snooze_until:
-                await asyncio.sleep(min(300, snooze_until - time.time()))
+            # Check if snoozed (indefinite until user interacts)
+            if getattr(_st, "_heartbeat_snoozed", False):
+                await asyncio.sleep(60)
                 continue
 
             # Sleep for the configured interval
@@ -282,6 +296,17 @@ async def heartbeat_runner():
                 await asyncio.sleep(interval - elapsed)
 
             _last_heartbeat = time.time()
+
+            # Skip if user is currently active (any session busy or used recently)
+            active = any(
+                s.get("busy") or (time.time() - (s.get("last_used") or 0) < interval * 0.5)
+                for s in _st.sessions.values()
+                if s.get("status") != "stopped"
+            )
+            if active:
+                logger.info("Heartbeat: user is active — staying silent.")
+                continue
+
             logger.info("Heartbeat: scanning for pending tasks…")
 
             # Scan history
