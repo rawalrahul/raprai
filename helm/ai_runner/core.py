@@ -26,6 +26,28 @@ from .helpers import tg_progress_notify
 _ANSI_ESC_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 
+# ---------------------------------------------------------------------------
+# Pre-install document-generation packages (runs once at import time)
+# ---------------------------------------------------------------------------
+def _ensure_doc_packages():
+    """Silently install Python packages needed by document-generation skills."""
+    _pkgs = ["python-pptx", "python-docx", "openpyxl", "reportlab", "pypdf"]
+    for pkg in _pkgs:
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", pkg, "-q"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=60,
+            )
+        except Exception:
+            logger.warning("Could not pre-install %s — skills may install it on demand", pkg)
+
+try:
+    _ensure_doc_packages()
+except Exception:
+    pass
+
+
 def run_ai_popen(cmd: list[str], cwd: str, name: str, sess: dict,
                  timeout_override: float | None = None,
                  stdin_text: str | None = None) -> str:
@@ -242,14 +264,21 @@ async def process_message(text: str, source: str = "web",
         if ai == "claude":
             await push_thinking(True, "claude", session_id=sid)
             has_history = len(sess["claude_msgs"]) > 0
-            cmd = build_claude_cmd(text, has_history, model=sess.get("model"))
-            sess["claude_msgs"].append(text)
+            # Skill injection — enrich prompt with best-practice templates
+            enriched_text = inject_skill_prefix(text, ai="claude")
+            cmd = build_claude_cmd(enriched_text, has_history, model=sess.get("model"))
+            sess["claude_msgs"].append(text)  # store original (unenriched) for history
             before = await asyncio.to_thread(snapshot_dir, cwd)
             output = await asyncio.to_thread(run_ai_popen, cmd, cwd, "claude", sess)
             after  = await asyncio.to_thread(snapshot_dir, cwd)
             await push_thinking(False, session_id=sid)
             await push_message("assistant", output, ai="claude", source=source, session_id=sid)
             await handle_diff(before, after, source, cwd, session_id=sid)
+            # Auto-create a skill if no existing skill matched
+            if not detect_skill(text):
+                asyncio.create_task(
+                    asyncio.to_thread(auto_create_skill_template, text, "claude", output)
+                )
 
         elif ai == "ollama":
             # Ollama uses the REST API + tool calling agent loop

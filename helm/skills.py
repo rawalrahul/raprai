@@ -275,22 +275,72 @@ _STOP_WORDS = {
 
 # Hand-curated extra keywords that aren't always obvious from the description
 _EXTRA_KEYWORDS: dict[str, list[str]] = {
+    # ── Document generation ────────────────────────────────────────────────
     "docx":              ["word doc", "word document", "report", "memo",
                           "letter", "manuscript", "essay", ".docx", "docx",
-                          "document"],
-    "pdf":               [".pdf", "portable document", "fillable form", "ocr"],
+                          "document", "write a report", "formal letter"],
+    "pdf":               [".pdf", "portable document", "fillable form", "ocr",
+                          "pdf report", "merge pdf", "split pdf", "extract pdf"],
     "pptx":              ["powerpoint", "slides", "slide deck", "pitch deck",
-                          "presentation", "deck", ".pptx", "ppt"],
+                          "presentation", "deck", ".pptx", "ppt", "keynote"],
     "xlsx":              ["excel", "spreadsheet", "xls", "csv", "tabular",
-                          ".xlsx", "budget", "financial model"],
+                          ".xlsx", "budget", "financial model", "data table",
+                          "pivot table", "chart", "workbook"],
+    # ── Content & writing ──────────────────────────────────────────────────
     "humanizer":         ["write", "draft", "rewrite", "improve", "polish",
                           "humanize", "tone", "blog post", "email", "linkedin"],
+    "content-research-writer": ["research", "article", "blog", "write about",
+                          "content", "long form", "seo", "topic research",
+                          "blog post", "write a post", "write an article"],
+    # ── Scheduling & automation ────────────────────────────────────────────
+    "schedule":          ["scheduled task", "recurring", "automation", "cron",
+                          "run daily", "run weekly", "automate", "periodic",
+                          "schedule this", "timer", "interval"],
+    # ── Design & visual ────────────────────────────────────────────────────
     "canvas-design":     ["poster", "artwork", "flyer", "banner",
                           "illustration", "visual design", "graphic design"],
+    "image-enhancer":    ["enhance image", "upscale", "improve image",
+                          "photo edit", "resize image", "compress image"],
+    "brand-guidelines":  ["brand guide", "brand kit", "brand identity",
+                          "logo usage", "brand colors", "style guide"],
+    "theme-factory":     ["theme", "colour scheme", "color scheme", "styling",
+                          "dark mode", "light mode", "ui theme"],
+    # ── Web & code ─────────────────────────────────────────────────────────
+    "artifacts-builder": ["react", "html artifact", "ui component", "shadcn",
+                          "web app", "frontend", "interactive", "dashboard",
+                          "web component", "single page"],
+    "webapp-testing":    ["test website", "qa", "selenium", "playwright",
+                          "end to end test", "e2e test", "browser test"],
     "mcp-builder":       ["mcp server", "model context protocol", "mcp tool"],
-    "slack-gif-creator": ["gif", "animated gif", "slack gif"],
-    "theme-factory":     ["theme", "colour scheme", "color scheme", "styling"],
-    "web-artifacts-builder": ["react", "html artifact", "ui component", "shadcn"],
+    # ── Business & productivity ────────────────────────────────────────────
+    "invoice-organizer": ["invoice", "receipt", "billing", "expense",
+                          "payment", "accounts payable"],
+    "file-organizer":    ["organize files", "sort files", "clean up folder",
+                          "rename files", "file management", "declutter"],
+    "meeting-insights-analyzer": ["meeting notes", "meeting summary", "action items",
+                          "meeting transcript", "standup", "retrospective"],
+    "changelog-generator": ["changelog", "release notes", "what changed",
+                          "version history", "git log summary"],
+    "lead-research-assistant": ["lead research", "prospect", "company research",
+                          "sales research", "linkedin research"],
+    "competitive-ads-extractor": ["competitor ads", "ad copy", "competitor analysis",
+                          "marketing analysis", "ad research"],
+    "developer-growth-analysis": ["developer metrics", "github stats",
+                          "code review", "team velocity", "dev productivity",
+                          "developer team", "dev team", "engineering metrics"],
+    # ── Media ──────────────────────────────────────────────────────────────
+    "slack-gif-creator": ["gif", "animated gif", "slack gif", "create gif",
+                          "make a gif", "gif from", "screen gif"],
+    "video-downloader":  ["download video", "youtube download", "save video",
+                          "video url", "extract video", "youtube", "video from"],
+    # ── Resume & career ────────────────────────────────────────────────────
+    "tailored-resume-generator": ["resume", "cv", "cover letter", "job application",
+                          "tailor resume", "career"],
+    "domain-name-brainstormer":  ["domain name", "website name", "url ideas",
+                          "domain brainstorm", "name generator"],
+    # ── Skill management ───────────────────────────────────────────────────
+    "skill-creator":     ["create skill", "new skill", "edit skill",
+                          "skill template", "build a skill"],
 }
 
 
@@ -404,11 +454,14 @@ def detect_skill(prompt: str) -> Optional[str]:
 # Skill prefix builder
 # ---------------------------------------------------------------------------
 
-def _build_prefix(skill_name: str) -> str:
+def _build_prefix(skill_name: str, ai: str = "") -> str:
     """
     Build the context-prefix block injected before the user prompt.
     Takes up to _MAX_SKILL_LINES lines of content, breaking at a clean
     section boundary (## heading or --- divider) where possible.
+
+    For CLI-based AIs (claude, gemini, codex), appends an execution preamble
+    instructing the AI to write and run Python code from the skill templates.
     """
     info = _registry.get(skill_name)
     if not info:
@@ -427,12 +480,42 @@ def _build_prefix(skill_name: str) -> str:
 
     snippet = "\n".join(lines[:cutoff]).rstrip()
 
+    # CLI execution preamble for non-Ollama AIs
+    # (Ollama has its own tool-calling system prompt that handles this)
+    cli_preamble = ""
+    if ai and ai != "ollama":
+        has_code = "```python" in snippet or "```bash" in snippet
+        if has_code:
+            # Skill has code templates → instruct AI to write & execute code
+            cli_preamble = (
+                "\n[IMPORTANT — EXECUTION INSTRUCTIONS]\n"
+                "You MUST write and execute a complete, self-contained Python script "
+                "to complete this task. Copy the code templates above, adapt them for "
+                "the user's specific request, and RUN the script.\n"
+                "• Install packages silently: subprocess.check_call([sys.executable, "
+                '"-m", "pip", "install", "package-name", "-q"])\n'
+                "• Save output files to the current working directory.\n"
+                "• Print the exact filename(s) created when done.\n"
+                "• Do NOT just explain the code — actually execute it.\n"
+                "[END INSTRUCTIONS]\n\n"
+            )
+        else:
+            # Skill has guidance/instructions only → just ask AI to follow them
+            cli_preamble = (
+                "\n[IMPORTANT — FOLLOW THE SKILL GUIDE ABOVE]\n"
+                "Apply the best practices and instructions from the skill guide above "
+                "to complete the user's task. If you need to create files, write and "
+                "execute code to do so. Confirm what you created or accomplished.\n"
+                "[END INSTRUCTIONS]\n\n"
+            )
+
     return (
         f"[HELM HQ SKILL: {skill_name}]\n"
         f"The following best-practice guide applies to this task. "
         f"Follow it carefully to produce high-quality output.\n\n"
         f"{snippet}\n\n"
-        f"[END SKILL — now complete the user's task below]\n\n"
+        f"[END SKILL]{cli_preamble}"
+        f"Now complete the user's task below:\n\n"
     )
 
 
@@ -445,10 +528,11 @@ def inject_skill_prefix(prompt: str, ai: str = "") -> str:
     Detect the best skill for `prompt`, check it is enabled for `ai`,
     build the prefix, and return the augmented prompt.
 
-    AI-specific override: if a skill named "{ai}-{skill_name}" exists in the
-    registry (e.g. "ollama-pptx" for ai="ollama", skill="pptx"), that variant
-    is used instead of the generic skill.  This lets each AI integration have
-    tailored instructions (e.g. python-pptx code for Ollama vs JS for Claude).
+    AI-specific override order:
+      1. "{ai}-{skill}" variant  (e.g. "gemini-pptx")
+      2. "ollama-{skill}" as universal code-generation fallback
+         (ollama skills have Python code templates usable by ANY coding CLI)
+      3. Base skill (e.g. "pptx")
 
     Returns the original prompt unchanged if:
     - The registry is empty (skills directory not found)
@@ -459,23 +543,33 @@ def inject_skill_prefix(prompt: str, ai: str = "") -> str:
     if not skill_name:
         return prompt
 
-    # Prefer an AI-specific variant if one exists (e.g. "ollama-pptx")
+    resolved = skill_name  # will be updated if an AI variant is found
+
     if ai:
+        # 1. Prefer an AI-specific variant (e.g. "gemini-pptx")
         ai_specific = f"{ai}-{skill_name}"
         if ai_specific in _registry:
             logger.debug("Skill injection: using AI-specific variant '%s' (base='%s')",
                          ai_specific, skill_name)
-            skill_name = ai_specific
+            resolved = ai_specific
+        # 2. Fallback: use ollama variant for ANY CLI AI (has Python code templates)
+        elif ai != "ollama":
+            ollama_variant = f"ollama-{skill_name}"
+            if ollama_variant in _registry:
+                logger.debug("Skill injection: using ollama variant '%s' as universal "
+                             "code-gen fallback for ai='%s' (base='%s')",
+                             ollama_variant, ai, skill_name)
+                resolved = ollama_variant
 
-    if ai and not skill_enabled(skill_name, ai):
+    if ai and not skill_enabled(resolved, ai):
         return prompt
 
-    prefix = _build_prefix(skill_name)
+    prefix = _build_prefix(resolved, ai=ai)
     if not prefix:
         return prompt
 
-    logger.info("Skill injection: skill=%s ai=%s prompt_chars=%d",
-                skill_name, ai or "unknown", len(prompt))
+    logger.info("Skill injection: skill=%s (resolved=%s) ai=%s prompt_chars=%d",
+                skill_name, resolved, ai or "unknown", len(prompt))
     return prefix + prompt
 
 
