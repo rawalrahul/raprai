@@ -38,11 +38,24 @@ ALLOWED_USER_IDS: set[int] = set(
 # ---------------------------------------------------------------------------
 # Terminal / AI timeouts
 # ---------------------------------------------------------------------------
+# All values are in seconds.  0 = unlimited where applicable.
+# Override via environment variables (e.g. in .env).
+#
+# OUTPUT_IDLE_TIMEOUT  – how long to wait after the last output chunk before
+#                         declaring the subprocess "done" (shell / terminal mode)
+# OUTPUT_MAX_WAIT      – hard ceiling on total shell/terminal wait
+# OUTPUT_NO_RESPONSE   – how long to wait before first output appears
+# CLAUDE_TIMEOUT       – Claude CLI subprocess timeout (0 = unlimited)
 
-IDLE_TIMEOUT        = float(os.environ.get("OUTPUT_IDLE_TIMEOUT", "1.5"))
-MAX_WAIT            = float(os.environ.get("OUTPUT_MAX_WAIT", "60"))
-NO_OUTPUT_TIMEOUT   = float(os.environ.get("OUTPUT_NO_RESPONSE", "5"))
-CLAUDE_TIMEOUT      = float(os.environ.get("CLAUDE_TIMEOUT", "0"))  # 0 = unlimited
+IDLE_TIMEOUT        = float(os.environ.get("OUTPUT_IDLE_TIMEOUT", "30"))   # was 1.5
+MAX_WAIT            = float(os.environ.get("OUTPUT_MAX_WAIT",      "600"))  # was 60  (10 min)
+NO_OUTPUT_TIMEOUT   = float(os.environ.get("OUTPUT_NO_RESPONSE",   "120"))  # was 5   (2 min)
+CLAUDE_TIMEOUT      = float(os.environ.get("CLAUDE_TIMEOUT",       "0"))    # 0 = unlimited
+# INTEGRATION_TIMEOUT – max seconds for non-Claude AI subprocesses (Gemini, Codex, …).
+#                       These are single-turn CLIs so a 3-min ceiling is ample.
+#                       Prevents infinite hang when an invalid --model causes the
+#                       CLI to enter an interactive picker (no terminal attached).
+INTEGRATION_TIMEOUT = float(os.environ.get("INTEGRATION_TIMEOUT", "180"))  # 3 min
 
 # ---------------------------------------------------------------------------
 # Paths / server

@@ -62,6 +62,8 @@ def make_session(ai: Optional[str], cwd: Optional[str] = None,
         "history": history,
         # Per-session model override — None means use the integration's default
         "model": model or None,
+        # Ollama REST-API conversation history (None = not yet initialised)
+        "ollama_messages": None,
     }
     _st.sessions[sid] = sess
 
