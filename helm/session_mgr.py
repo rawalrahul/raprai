@@ -39,6 +39,10 @@ def make_session(ai: Optional[str], cwd: Optional[str] = None,
     else:
         name  = f"Shell #{_st.session_counter}"; emoji = "🐚"; color = "#6b7280"; ai = None
 
+    # Auto-apply default model if none explicitly chosen
+    if not model and ai:
+        model = _st.default_models.get(ai) or None
+
     target_cwd = cwd or _st.last_cwd
     path_id    = path_to_id(target_cwd)
     history    = get_history_messages(path_id)

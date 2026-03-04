@@ -99,3 +99,10 @@ generated_files: list[dict] = []     # [{path, name, ext, size, ai, session_id, 
 
 pipelines: dict[str, dict] = {}      # pipeline_id -> Pipeline dict
 pipeline_counter: int = 0
+pipeline_templates: dict[str, dict] = {}  # template_id -> Template dict
+
+# ---------------------------------------------------------------------------
+# Default models per AI (for REST-API-based AIs like Ollama)
+# ---------------------------------------------------------------------------
+
+default_models: dict[str, str] = {}      # ai_key -> default model name

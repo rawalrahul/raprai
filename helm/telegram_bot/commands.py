@@ -8,6 +8,7 @@ Covers: tg_start, tg_menu, tg_launch, tg_claude, tg_codex, tg_gemini, tg_stop_ai
 
 import asyncio
 import json
+import os
 import pathlib
 from datetime import datetime, timedelta
 from typing import Optional
@@ -773,6 +774,64 @@ async def tg_text(update, context):
         )
         return
 
+    # --- Auto-pipeline detection for complex tasks ---
+    pipeline_auto = os.environ.get("PIPELINE_AUTO_SUGGEST", "true").lower()
+    if pipeline_auto == "true" and len(text) > 100:
+        try:
+            from helm.pipeline.planner import looks_complex
+            if looks_complex(text):
+                # Auto-invoke pipeline instead of sending to a single AI
+                from helm.pipeline.planner import plan_pipeline, discover_available_ais
+                from helm.pipeline.models import pipeline_state_payload, pipeline_progress
+                from helm.pipeline.executor import broadcast_pipeline_update
+                from .keyboards import pipeline_approval_keyboard
+
+                fs = focused_session()
+                cwd = fs["cwd"] if fs else session_cwd()
+                sid = fs["id"] if fs else None
+                planner_ai = os.environ.get("PIPELINE_PLANNER_AI", "claude")
+
+                await update.message.reply_text(
+                    "🔀 This looks like a complex multi-step task. "
+                    "Automatically creating a pipeline plan…"
+                )
+
+                pipeline = await plan_pipeline(
+                    prompt=text, session_id=sid, cwd=cwd, planner_ai=planner_ai,
+                )
+                _st.pipelines[pipeline["id"]] = pipeline
+                await broadcast_pipeline_update(pipeline)
+
+                # Show plan for approval
+                lines = [f"🔀 *Pipeline Plan* (`{pipeline['id'][:8]}`)\n"]
+                est_cost = pipeline.get("estimated_total_cost", 0)
+                if est_cost > 0:
+                    lines[0] += f"💰 Est. cost: ${est_cost:.4f}\n"
+                for i, step in enumerate(pipeline["steps"], 1):
+                    deps = ""
+                    if step["depends_on"]:
+                        deps = f" ← after {', '.join(step['depends_on'])}"
+                    cost_hint = ""
+                    if step.get("estimated_cost_usd", 0) > 0:
+                        cost_hint = f" (~${step['estimated_cost_usd']:.4f})"
+                    fb = ""
+                    if step.get("fallback_ais"):
+                        fb = f" [fallback: {','.join(step['fallback_ais'])}]"
+                    lines.append(
+                        f"*{i}. {step['title']}*\n"
+                        f"  🤖 {step['assigned_ai']}{cost_hint}{fb}{deps}\n"
+                        f"  _{step['description'][:80]}{'…' if len(step['description']) > 80 else ''}_"
+                    )
+
+                await update.message.reply_text(
+                    "\n\n".join(lines),
+                    parse_mode="Markdown",
+                    reply_markup=pipeline_approval_keyboard(pipeline["id"]),
+                )
+                return
+        except Exception as exc:
+            logger.warning("Auto-pipeline detection failed: %s — falling back to normal", exc)
+
     # --- Focused session is active -> forward message ---
     if _st.pending_tg_context:
         text = _st.pending_tg_context + text
@@ -1043,6 +1102,7 @@ async def tg_file(update, context):
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # /pipeline — Task Pipeline & AI Delegation
 # ---------------------------------------------------------------------------
 
@@ -1109,16 +1169,29 @@ async def tg_pipeline(update, context):
         _st.pipelines[pipeline["id"]] = pipeline
         await broadcast_pipeline_update(pipeline)
 
-        # Show plan for approval
-        lines = [f"🔀 *Pipeline Plan* (`{pipeline['id'][:8]}`)\n"]
+        # Show plan for approval with cost + fallback info
+        lines = [f"🔀 *Pipeline Plan* (`{pipeline['id'][:8]}`)"]
+        est_cost = pipeline.get("estimated_total_cost", 0)
+        if est_cost > 0:
+            lines[0] += f"\n💰 Est. cost: ${est_cost:.4f}"
+        lines[0] += "\n"
         for i, step in enumerate(pipeline["steps"], 1):
             deps = ""
             if step["depends_on"]:
-                deps = f" ← depends on {', '.join(step['depends_on'])}"
+                deps = f" ← after {', '.join(step['depends_on'])}"
+            cost_hint = ""
+            if step.get("estimated_cost_usd", 0) > 0:
+                cost_hint = f" (~${step['estimated_cost_usd']:.4f})"
+            fb = ""
+            if step.get("fallback_ais"):
+                fb = f" [↩ {','.join(step['fallback_ais'])}]"
+            cond = ""
+            if step.get("condition"):
+                cond = " ⚡conditional"
             lines.append(
                 f"*{i}. {step['title']}*\n"
-                f"  🤖 {step['assigned_ai']}{deps}\n"
-                f"  _{step['description'][:100]}{'…' if len(step['description']) > 100 else ''}_"
+                f"  🤖 {step['assigned_ai']}{cost_hint}{fb}{cond}{deps}\n"
+                f"  _{step['description'][:80]}{'…' if len(step['description']) > 80 else ''}_"
             )
 
         await update.message.reply_text(

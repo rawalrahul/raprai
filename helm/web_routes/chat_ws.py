@@ -144,7 +144,13 @@ async def handle_web_command(command: str, ws: WebSocket):
         _st.focused_id = sess["id"]
         await push_state()
         label = sess["emoji"] + " " + sess["name"]
-        model_note = f" [{chosen_model}]" if chosen_model else ""
+        actual_model = sess.get("model")
+        if chosen_model:
+            model_note = f" [{chosen_model}]"
+        elif actual_model:
+            model_note = f" [default: {actual_model}]"
+        else:
+            model_note = ""
         await push_message("system", f"Session created: {label}{model_note}", source="web",
                            session_id=sess["id"])
         await tg_update_focus()

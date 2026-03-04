@@ -275,7 +275,7 @@ async def ollama_status():
     cli_ok = shutil.which("ollama") is not None
 
     models: list[str] = []
-    current_model = os.environ.get("OLLAMA_MODEL", "qwen3:4b").strip()
+    current_model = (_st.default_models.get("ollama", "") or os.environ.get("OLLAMA_MODEL", "qwen3:4b")).strip()
     model_ok = False
 
     if cli_ok:
@@ -297,7 +297,7 @@ async def ollama_status():
     elif not models:
         hint = "Pull a model first: ollama pull qwen3:4b"
     elif not model_ok:
-        hint = f"Model '{current_model}' not found — set OLLAMA_MODEL to one of: {', '.join(models)}"
+        hint = f"Model '{current_model}' not found — set default model in Settings to one of: {', '.join(models)}"
     else:
         hint = ""
 

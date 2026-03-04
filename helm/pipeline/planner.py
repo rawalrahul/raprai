@@ -59,7 +59,8 @@ Output ONLY valid JSON — no explanation, no markdown fences, just the JSON obj
       "description": "Full detailed prompt for the AI to execute this subtask.",
       "assigned_ai": "claude",
       "depends_on": [],
-      "expected_output": "text"
+      "expected_output": "text",
+      "fallback_ais": ["gemini"]
     }},
     {{
       "id": "step-2",
@@ -67,7 +68,18 @@ Output ONLY valid JSON — no explanation, no markdown fences, just the JSON obj
       "description": "Full prompt for this task. Reference step-1's output if needed.",
       "assigned_ai": "gemini",
       "depends_on": ["step-1"],
-      "expected_output": "code"
+      "expected_output": "code",
+      "fallback_ais": ["claude"]
+    }},
+    {{
+      "id": "step-3",
+      "title": "Conditional review step",
+      "description": "Review the code only if step-2 produced code output.",
+      "assigned_ai": "claude",
+      "depends_on": ["step-2"],
+      "expected_output": "analysis",
+      "condition": {{"check": "step-2", "field": "status", "equals": "completed"}},
+      "fallback_ais": []
     }}
   ]
 }}
@@ -79,6 +91,8 @@ Rules:
 - Keep descriptions detailed enough that the AI can work independently
 - If a step needs output from a dependency, mention it: "Using the analysis from the previous step..."
 - Don't over-decompose: 2-5 steps for moderate tasks, up to 8 for very complex ones
+- fallback_ais: list of alternative AIs to try if the primary fails (ordered by preference). Optional — omit or set to [] if no fallback needed
+- condition: optional — makes a step conditional on a prior step's result. Format: {{"check": "step-id", "field": "status"|"output", "equals"|"contains": "value"}}. If the condition is not met, the step is skipped. Use sparingly — only when a step genuinely depends on a specific outcome
 """
 
 
@@ -116,6 +130,14 @@ def _build_ai_descriptions(available_ais: list[str],
 # Planner AI dispatch
 # ---------------------------------------------------------------------------
 
+def _get_ollama_model() -> str:
+    """Resolve the Ollama model: default_models > env var > fallback."""
+    import helm.state as _st
+    return (_st.default_models.get("ollama", "")
+            or os.environ.get("OLLAMA_MODEL", "")
+            or "qwen3:4b")
+
+
 async def _call_planner_ai(planner_ai: str, prompt: str, cwd: str) -> str:
     """Call the planner AI and return raw text output."""
     from helm.ai_runner.core import run_ai_popen
@@ -131,7 +153,7 @@ async def _call_planner_ai(planner_ai: str, prompt: str, cwd: str) -> str:
     elif planner_ai == "ollama":
         import urllib.request
         payload = {
-            "model": os.environ.get("OLLAMA_MODEL", "qwen3:4b"),
+            "model": _get_ollama_model(),
             "messages": [
                 {"role": "system", "content": "You are a task planner. Output ONLY valid JSON."},
                 {"role": "user", "content": prompt},
@@ -292,7 +314,7 @@ async def plan_pipeline(
     available = discover_available_ais()
     actual_planner = _pick_planner_ai(planner_ai, available)
 
-    ollama_model = os.environ.get("OLLAMA_MODEL", "")
+    ollama_model = _get_ollama_model()
     ai_desc = _build_ai_descriptions(available, ollama_model)
 
     meta_prompt = _PLANNER_PROMPT_TEMPLATE.format(
@@ -347,14 +369,26 @@ async def plan_pipeline(
         ai = raw_step.get("assigned_ai", "claude")
         deps = raw_step.get("depends_on", [])
         expected = raw_step.get("expected_output", "text")
+        condition = raw_step.get("condition")
+        fallback_ais = raw_step.get("fallback_ais", [])
 
         # Validate assigned AI is available
         if ai not in available:
-            # Fallback to best available
             ai = available[0] if available else "claude"
 
+        # Validate fallback AIs
+        fallback_ais = [fa for fa in fallback_ais if fa in available and fa != ai]
+
+        # Auto-generate fallback if none provided: pick a different AI
+        if not fallback_ais:
+            for candidate in available:
+                if candidate != ai:
+                    fallback_ais = [candidate]
+                    break
+
         step = make_step(sid, title, desc, assigned_ai=ai,
-                         depends_on=deps, expected_output=expected)
+                         depends_on=deps, expected_output=expected,
+                         condition=condition, fallback_ais=fallback_ais)
         pipeline["steps"].append(step)
 
     compute_edges(pipeline)
@@ -372,4 +406,9 @@ async def plan_pipeline(
         compute_edges(pipeline)
 
     pipeline["status"] = "awaiting_approval"
+
+    # Estimate cost before presenting to user for approval
+    from .cost import estimate_pipeline_cost
+    estimate_pipeline_cost(pipeline)
+
     return pipeline

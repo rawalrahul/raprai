@@ -62,6 +62,49 @@ async def save_settings(request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Default Models per AI
+# ---------------------------------------------------------------------------
+
+@router.get("/settings/default-models")
+async def get_default_models():
+    """Return configured default models for each AI."""
+    return JSONResponse({"default_models": dict(_st.default_models)})
+
+
+@router.post("/settings/default-models")
+async def save_default_models(request: Request):
+    """Save default models per AI. Body: {ai_key: model_name, ...}
+    Empty string or null removes the default for that AI.
+    """
+    body = await request.json()
+    updated = []
+
+    # Only allow setting defaults for REST-API AIs (ollama + integrations)
+    # CLI/OAuth AIs (claude, gemini, codex) don't support model switching
+    _cli_ais = {"claude", "gemini", "codex"}
+
+    for ai_key, model_name in body.items():
+        if ai_key in _cli_ais:
+            continue  # skip CLI-based AIs
+        model_name = (model_name or "").strip()
+        if model_name:
+            _st.default_models[ai_key] = model_name
+            # Also persist to .env as DEFAULT_MODEL_{AI}
+            env_key = f"DEFAULT_MODEL_{ai_key.upper()}"
+            update_env(env_key, model_name)
+            os.environ[env_key] = model_name
+        else:
+            _st.default_models.pop(ai_key, None)
+            # Clear from .env
+            env_key = f"DEFAULT_MODEL_{ai_key.upper()}"
+            update_env(env_key, "")
+            os.environ.pop(env_key, None)
+        updated.append(ai_key)
+
+    return JSONResponse({"ok": True, "updated": updated})
+
+
+# ---------------------------------------------------------------------------
 # Model Discovery API
 # ---------------------------------------------------------------------------
 

@@ -28,7 +28,14 @@ COLOR = "#10b981"   # emerald green — matches Ollama brand
 # ── Model selection ───────────────────────────────────────────────────────────
 
 def _model() -> str:
-    """Return the model name from .env, or fall back to the sensible default."""
+    """Return the model name: default_models > env var > fallback."""
+    try:
+        import helm.state as _st
+        dm = _st.default_models.get("ollama", "")
+        if dm:
+            return dm
+    except Exception:
+        pass
     return os.environ.get("OLLAMA_MODEL", "qwen3:4b").strip()
 
 # ── Command builder ───────────────────────────────────────────────────────────

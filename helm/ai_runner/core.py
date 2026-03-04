@@ -456,8 +456,11 @@ async def process_message(text: str, source: str = "web",
             except Exception:
                 available = []
 
+            default_model = _st.default_models.get(ai_key, "")
             if current_model:
                 current_line = f"**Current model:** `{current_model}`"
+            elif default_model:
+                current_line = f"**Current model:** `{default_model}` (configured default)"
             elif available:
                 current_line = f"**Current model:** (default — `{available[0]}`)"
             else:

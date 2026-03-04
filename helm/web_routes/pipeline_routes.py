@@ -13,10 +13,12 @@ import helm.state as _st
 from helm.config import logger
 from helm.pipeline.models import (
     find_step, pipeline_state_payload, pipeline_progress,
+    make_template, instantiate_template,
 )
 from helm.pipeline.executor import (
     broadcast_pipeline_update, retry_step, reassign_step, skip_step,
 )
+from helm.pipeline.cost import estimate_pipeline_cost
 
 router = APIRouter()
 
@@ -263,8 +265,127 @@ async def get_step_detail(pipeline_id: str, step_id: str):
             "output_summary": step.get("output_summary"),
             "error": step.get("error"),
             "artifacts": step.get("artifacts", []),
+            "artifact_files": step.get("artifact_files", []),
             "elapsed_seconds": step.get("elapsed_seconds", 0),
             "retry_count": step.get("retry_count", 0),
             "session_id": step.get("session_id"),
+            "condition": step.get("condition"),
+            "fallback_ais": step.get("fallback_ais", []),
+            "fallback_index": step.get("fallback_index", 0),
+            "estimated_tokens": step.get("estimated_tokens", 0),
+            "estimated_cost_usd": step.get("estimated_cost_usd", 0.0),
+            "actual_tokens": step.get("actual_tokens", 0),
+            "actual_cost_usd": step.get("actual_cost_usd", 0.0),
+            "stream_buffer": (step.get("stream_buffer") or "")[-500:],
         }
     })
+
+
+# ---------------------------------------------------------------------------
+# Pipeline Templates
+# ---------------------------------------------------------------------------
+
+@router.get("/api/pipeline/templates")
+async def list_templates():
+    """List all saved pipeline templates."""
+    items = []
+    for tpl in sorted(
+        _st.pipeline_templates.values(),
+        key=lambda t: t.get("created_at", 0),
+        reverse=True,
+    ):
+        items.append({
+            "id": tpl["id"],
+            "name": tpl["name"],
+            "description": tpl.get("description", ""),
+            "planner_ai": tpl.get("planner_ai", ""),
+            "step_count": len(tpl.get("steps_template", [])),
+            "use_count": tpl.get("use_count", 0),
+            "created_at": tpl.get("created_at", 0),
+        })
+    return JSONResponse({"templates": items})
+
+
+@router.post("/api/pipeline/{pipeline_id}/save-template")
+async def save_template(pipeline_id: str, request: Request):
+    """Save a completed pipeline as a reusable template."""
+    pl = _st.pipelines.get(pipeline_id)
+    if not pl:
+        return JSONResponse({"error": "Pipeline not found"}, status_code=404)
+    if pl["status"] != "completed":
+        return JSONResponse(
+            {"error": "Only completed pipelines can be saved as templates"},
+            status_code=400,
+        )
+
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        name = f"Template from {pl['original_prompt'][:50]}"
+
+    tpl = make_template(name, pl, description=body.get("description", ""))
+    _st.pipeline_templates[tpl["id"]] = tpl
+
+    return JSONResponse({"ok": True, "template": {
+        "id": tpl["id"],
+        "name": tpl["name"],
+        "step_count": len(tpl.get("steps_template", [])),
+    }})
+
+
+@router.post("/api/pipeline/from-template")
+async def pipeline_from_template(request: Request):
+    """Create a new pipeline from a saved template."""
+    import os
+    from helm.session_mgr import focused_session, session_cwd
+
+    body = await request.json()
+    tpl_id = (body.get("template_id") or "").strip()
+    prompt = (body.get("prompt") or "").strip()
+
+    if not tpl_id:
+        return JSONResponse({"error": "template_id is required"}, status_code=400)
+
+    tpl = _st.pipeline_templates.get(tpl_id)
+    if not tpl:
+        return JSONResponse({"error": "Template not found"}, status_code=404)
+
+    if not prompt:
+        prompt = tpl.get("description", "Run pipeline from template")
+
+    fs = focused_session()
+    cwd = fs["cwd"] if fs else session_cwd()
+    sid = fs["id"] if fs else None
+
+    pipeline = instantiate_template(tpl, prompt, sid, cwd)
+    # Estimate cost
+    estimate_pipeline_cost(pipeline)
+
+    _st.pipelines[pipeline["id"]] = pipeline
+    await broadcast_pipeline_update(pipeline)
+
+    return JSONResponse({"pipeline": pipeline_state_payload(pipeline)})
+
+
+@router.delete("/api/pipeline/template/{template_id}")
+async def delete_template(template_id: str):
+    """Delete a pipeline template."""
+    if template_id not in _st.pipeline_templates:
+        return JSONResponse({"error": "Template not found"}, status_code=404)
+    del _st.pipeline_templates[template_id]
+    return JSONResponse({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Cost estimation
+# ---------------------------------------------------------------------------
+
+@router.get("/api/pipeline/{pipeline_id}/cost")
+async def get_pipeline_cost(pipeline_id: str):
+    """Get cost estimation for a pipeline."""
+    pl = _st.pipelines.get(pipeline_id)
+    if not pl:
+        return JSONResponse({"error": "Pipeline not found"}, status_code=404)
+
+    cost = estimate_pipeline_cost(pl)
+    return JSONResponse({"cost": cost})

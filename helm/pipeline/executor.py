@@ -37,6 +37,17 @@ async def broadcast_pipeline_update(pipeline: dict):
     })
 
 
+async def broadcast_step_stream(pipeline_id: str, step_id: str, chunk: str):
+    """Send a live streaming chunk for a running step."""
+    from helm.broadcast import broadcast
+    await broadcast({
+        "type": "pipeline_step_stream",
+        "pipeline_id": pipeline_id,
+        "step_id": step_id,
+        "chunk": chunk,
+    })
+
+
 # ---------------------------------------------------------------------------
 # Concurrency limit
 # ---------------------------------------------------------------------------
@@ -49,8 +60,27 @@ def _max_parallel() -> int:
 # Single step execution
 # ---------------------------------------------------------------------------
 
+def _build_artifact_context(pipeline: dict, step: dict) -> str:
+    """Build file artifact context from dependency steps' artifact registries."""
+    parts = []
+    registry = pipeline.get("artifact_registry", {})
+    for dep_id in step.get("depends_on", []):
+        dep_artifacts = registry.get(dep_id, [])
+        if dep_artifacts:
+            lines = [f"Files from '{dep_id}':"]
+            for af in dep_artifacts:
+                lines.append(f"  - {af['name']} ({af['path']}, {af.get('size', '?')} bytes)")
+            parts.append("\n".join(lines))
+    if parts:
+        return "\n\n=== File artifacts from previous steps ===\n" + "\n".join(parts) + "\n=== End artifacts ===\n"
+    return ""
+
+
 async def _execute_step(pipeline: dict, step: dict, semaphore: asyncio.Semaphore):
-    """Execute one pipeline step in its own session."""
+    """Execute one pipeline step in its own session.
+
+    Features: live streaming, artifact handoff, cost tracking, auto-fallback retry.
+    """
     from helm.ai_runner.core import process_message
 
     async with semaphore:
@@ -60,10 +90,15 @@ async def _execute_step(pipeline: dict, step: dict, semaphore: asyncio.Semaphore
         # Build context from dependencies
         context = build_step_context(pipeline, step)
 
+        # Build artifact context (file handoff)
+        artifact_ctx = _build_artifact_context(pipeline, step)
+
         # Build the full prompt
         prompt = step["description"]
         if context:
             prompt = f"{context}\n\n---\n\nYour task:\n{prompt}"
+        if artifact_ctx:
+            prompt += f"\n\n{artifact_ctx}"
 
         # Add artifacts directory instruction
         artifacts_path = pathlib.Path(pipeline["cwd"]) / pipeline["artifacts_dir"] / step["id"]
@@ -80,6 +115,7 @@ async def _execute_step(pipeline: dict, step: dict, semaphore: asyncio.Semaphore
         step["session_id"] = child_sess["id"]
         step["status"] = "running"
         step["started_at"] = time.time()
+        step["stream_buffer"] = ""
 
         await broadcast_pipeline_update(pipeline)
         await push_message(
@@ -87,6 +123,20 @@ async def _execute_step(pipeline: dict, step: dict, semaphore: asyncio.Semaphore
             f"▶️ Pipeline step **{step['title']}** started → {step_ai}",
             source="pipeline", session_id=sid,
         )
+
+        # Set up streaming callback for this step
+        _stream_count = [0]
+
+        async def _stream_hook(chunk: str):
+            """Called periodically with output chunks during step execution."""
+            step["stream_buffer"] = (step.get("stream_buffer", "") + chunk)[-2000:]
+            _stream_count[0] += 1
+            # Broadcast every 5th chunk to avoid flooding
+            if _stream_count[0] % 5 == 0:
+                await broadcast_step_stream(pipeline["id"], step["id"], chunk)
+
+        # Store streaming hook on child session so AI runner can call it
+        child_sess["_pipeline_stream_hook"] = _stream_hook
 
         try:
             output = await process_message(
@@ -97,44 +147,101 @@ async def _execute_step(pipeline: dict, step: dict, semaphore: asyncio.Semaphore
             step["status"] = "completed"
             step["completed_at"] = time.time()
             step["elapsed_seconds"] = step["completed_at"] - step["started_at"]
+            step["stream_buffer"] = ""  # clear buffer after completion
 
             # Smart context: summarize if long
             step["output_summary"] = await maybe_summarize(
                 output, pipeline["planner_ai"]
             )
 
-            # Capture file artifacts
+            # Capture file artifacts + register in pipeline artifact registry
             if artifacts_path.exists():
-                step["artifacts"] = [
-                    str(f.relative_to(pathlib.Path(pipeline["cwd"])))
-                    for f in artifacts_path.rglob("*") if f.is_file()
-                ]
+                step_artifacts = []
+                artifact_files = []
+                for f in artifacts_path.rglob("*"):
+                    if not f.is_file():
+                        continue
+                    rel = str(f.relative_to(pathlib.Path(pipeline["cwd"])))
+                    step_artifacts.append(rel)
+                    artifact_files.append({
+                        "name": f.name,
+                        "path": str(f.resolve()),
+                        "size": f.stat().st_size,
+                        "type": f.suffix.lstrip(".") or "unknown",
+                    })
+                step["artifacts"] = step_artifacts
+                step["artifact_files"] = artifact_files
+                # Register in pipeline-level artifact registry for downstream steps
+                if artifact_files:
+                    pipeline.setdefault("artifact_registry", {})[step["id"]] = artifact_files
+
+            # Track actual cost (from session usage_stats if available)
+            usage = child_sess.get("usage_stats", {})
+            step["actual_tokens"] = usage.get("total_tokens", 0)
+            if step["actual_tokens"]:
+                from helm.pipeline.cost import _PRICING, _chars_to_tokens
+                pricing = _PRICING.get(step_ai, _PRICING.get("claude"))
+                in_tok = usage.get("input_tokens", 0)
+                out_tok = usage.get("output_tokens", 0)
+                step["actual_cost_usd"] = round(
+                    (in_tok / 1000) * pricing["input"]
+                    + (out_tok / 1000) * pricing["output"], 6
+                )
+                pipeline["actual_total_cost"] = round(
+                    pipeline.get("actual_total_cost", 0) + step["actual_cost_usd"], 6
+                )
 
             await push_message(
                 "system",
                 f"✅ Pipeline step **{step['title']}** completed "
-                f"({step['elapsed_seconds']:.1f}s)",
+                f"({step['elapsed_seconds']:.1f}s)"
+                f"{' · $'+format(step['actual_cost_usd'],'.4f') if step.get('actual_cost_usd') else ''}",
                 source="pipeline", session_id=sid,
             )
 
         except Exception as exc:
-            step["status"] = "failed"
             step["error"] = str(exc)
             step["completed_at"] = time.time()
             step["elapsed_seconds"] = (step["completed_at"] or 0) - (step["started_at"] or 0)
 
-            logger.error("Pipeline step %s failed: %s", step["id"], exc)
-            await push_message(
-                "system",
-                f"❌ Pipeline step **{step['title']}** failed: {str(exc)[:200]}",
-                source="pipeline", session_id=sid,
-            )
+            # --- Auto-fallback retry with different AI ---
+            fallback_ais = step.get("fallback_ais", [])
+            fallback_idx = step.get("fallback_index", 0)
+
+            if fallback_idx < len(fallback_ais):
+                next_ai = fallback_ais[fallback_idx]
+                step["fallback_index"] = fallback_idx + 1
+                step["assigned_ai"] = next_ai
+                step["status"] = "pending"
+                step["error"] = None
+                step["output"] = None
+                step["stream_buffer"] = ""
+                step["retry_count"] = step.get("retry_count", 0) + 1
+
+                logger.info("Step %s failed with %s — auto-fallback to %s",
+                            step["id"], step_ai, next_ai)
+                await push_message(
+                    "system",
+                    f"⚠️ Step **{step['title']}** failed with {step_ai} — "
+                    f"retrying with {next_ai}…",
+                    source="pipeline", session_id=sid,
+                )
+            else:
+                step["status"] = "failed"
+                logger.error("Pipeline step %s failed (no fallback left): %s",
+                             step["id"], exc)
+                await push_message(
+                    "system",
+                    f"❌ Pipeline step **{step['title']}** failed: {str(exc)[:200]}",
+                    source="pipeline", session_id=sid,
+                )
 
         finally:
             # Clean up child session (stop it, keep for inspection)
             child_sess["busy"] = False
             child_sess["task_start"] = None
             child_sess["status"] = "stopped"
+            child_sess.pop("_pipeline_stream_hook", None)
             await broadcast_pipeline_update(pipeline)
             await push_state()
 

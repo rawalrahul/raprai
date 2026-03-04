@@ -582,7 +582,7 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
     from .core import run_ai_popen  # lazy to avoid circular import
 
     cwd   = sess["cwd"]
-    model = sess.get("model") or os.environ.get("OLLAMA_MODEL", "")
+    model = sess.get("model") or _st.default_models.get("ollama", "") or os.environ.get("OLLAMA_MODEL", "")
     if not model:
         try:
             _r = subprocess.run(

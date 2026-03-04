@@ -26,6 +26,14 @@ async def _main():
     # Load AI integration plugins from integrations/ folder
     load_integrations()
 
+    # Load default models per AI from .env (DEFAULT_MODEL_OLLAMA, etc.)
+    import os
+    for key, val in os.environ.items():
+        if key.startswith("DEFAULT_MODEL_") and val.strip():
+            ai_key = key[len("DEFAULT_MODEL_"):].lower()
+            _st.default_models[ai_key] = val.strip()
+            logger.info("Default model for %s: %s", ai_key, val.strip())
+
     # Scan for Claude skills and build the shared skill registry.
     # All non-Claude AIs (Ollama, Gemini, Codex, custom CLIs) will
     # automatically receive relevant skill instructions injected into

@@ -54,15 +54,22 @@ def build_step_context(pipeline: dict, step: dict) -> str:
     parts = []
     for dep_id in step.get("depends_on", []):
         dep = find_step(pipeline, dep_id)
-        if not dep or dep.get("status") != "completed":
+        if not dep or dep.get("status") not in ("completed", "skipped"):
             continue
 
         # Prefer summary, fall back to full output
         text = dep.get("output_summary") or dep.get("output") or ""
         if text:
-            parts.append(
-                f"### Result from: {dep['title']} (by {dep['assigned_ai']})\n{text}"
-            )
+            section = f"### Result from: {dep['title']} (by {dep['assigned_ai']})\n{text}"
+
+            # Include artifact file list if any
+            af_list = dep.get("artifact_files", [])
+            if af_list:
+                section += "\n\nFiles produced:"
+                for af in af_list:
+                    section += f"\n  - {af['name']} ({af['path']}, {af.get('size', '?')} bytes)"
+
+            parts.append(section)
 
     if not parts:
         return ""

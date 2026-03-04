@@ -397,7 +397,15 @@ async def pipeline_callback(update, context):
         prog = pipeline_progress(pl)
         status_icon = {"running": "🔵", "completed": "✅", "failed": "❌",
                       "paused": "⏸", "awaiting_approval": "🟡", "cancelled": "⚫"}.get(pl["status"], "❓")
-        lines = [f"{status_icon} *Pipeline — {pl['status']}*\n"]
+        cost_str = ""
+        actual_cost = pl.get("actual_total_cost", 0)
+        est_cost = pl.get("estimated_total_cost", 0)
+        if actual_cost > 0:
+            cost_str = f"\n💰 Cost: ${actual_cost:.4f}"
+        elif est_cost > 0:
+            cost_str = f"\n💰 Est: ~${est_cost:.4f}"
+
+        lines = [f"{status_icon} *Pipeline — {pl['status']}*{cost_str}\n"]
         for step in pl["steps"]:
             s_icon = {"pending": "⏳", "running": "🔵", "completed": "✅",
                      "failed": "❌", "skipped": "⏭"}.get(step["status"], "❓")
@@ -407,7 +415,11 @@ async def pipeline_callback(update, context):
             error = ""
             if step.get("error"):
                 error = f"\n  ⚠️ _{step['error'][:80]}_"
-            lines.append(f"{s_icon} *{step['title']}* — {step['assigned_ai']}{elapsed}{error}")
+            fb_info = ""
+            if step.get("fallback_ais") and step.get("fallback_index", 0) > 0:
+                fb_info = f" (fallback #{step['fallback_index']})"
+            cond_info = " ⚡" if step.get("condition") else ""
+            lines.append(f"{s_icon} *{step['title']}* — {step['assigned_ai']}{fb_info}{cond_info}{elapsed}{error}")
 
         lines.append(f"\n📊 {prog['completed']}/{prog['total']} completed, "
                      f"{prog['failed']} failed, {prog['skipped']} skipped")
