@@ -355,8 +355,75 @@ async def process_message(text: str, source: str = "web",
         if budget.get("warn") and budget.get("reason"):
             await push_message("system", budget["reason"], source=source, session_id=sid)
 
-    # ── /model slash command — handled before routing to any AI ──────────────
+    # ── /pipeline slash command — task decomposition ─────────────────────────
     stripped = text.strip()
+    if stripped.lower().startswith("/pipeline"):
+        parts_cmd = stripped.split(None, 1)
+        pipeline_prompt = parts_cmd[1].strip() if len(parts_cmd) == 2 else ""
+        if not pipeline_prompt:
+            msg = (
+                "📋 **Pipeline Mode** — Decompose complex tasks into subtasks "
+                "assigned to different AIs.\n\n"
+                "Usage: `/pipeline <your complex task>`\n\n"
+                "Example: `/pipeline Research competitor pricing, create a comparison "
+                "spreadsheet, write a summary report, and generate a presentation`"
+            )
+            await push_message("system", msg, source=source, session_id=sid)
+            return msg
+
+        planner_ai = os.environ.get("PIPELINE_PLANNER_AI", "claude")
+        await push_message(
+            "system",
+            f"🧠 Planning pipeline via **{planner_ai}**…",
+            source=source, session_id=sid,
+        )
+
+        from helm.pipeline.planner import plan_pipeline as _plan_pipeline
+        pipeline = await _plan_pipeline(
+            prompt=pipeline_prompt,
+            session_id=sid,
+            cwd=cwd,
+            planner_ai=planner_ai,
+        )
+        _st.pipelines[pipeline["id"]] = pipeline
+
+        from helm.pipeline.executor import broadcast_pipeline_update
+        await broadcast_pipeline_update(pipeline)
+
+        # Build a readable summary for chat
+        step_lines = []
+        for i, s in enumerate(pipeline["steps"], 1):
+            deps = ""
+            if s["depends_on"]:
+                deps = f" (after {', '.join(s['depends_on'])})"
+            step_lines.append(
+                f"  {i}. **{s['title']}** → {s['assigned_ai']}{deps}"
+            )
+        steps_text = "\n".join(step_lines)
+
+        msg = (
+            f"📋 **Pipeline plan ready** — {len(pipeline['steps'])} steps\n\n"
+            f"{steps_text}\n\n"
+            f"Review the pipeline graph above. Click **Execute** to start, "
+            f"or edit AI assignments before running."
+        )
+        await push_message("system", msg, source=source, session_id=sid)
+        return msg
+
+    # ── Auto-suggest pipeline for complex tasks ───────────────────────────
+    if os.environ.get("PIPELINE_AUTO_SUGGEST", "1") == "1":
+        from helm.pipeline.planner import looks_complex
+        if looks_complex(stripped) and not (sess or {}).get("pipeline_id"):
+            await push_message(
+                "system",
+                "💡 This looks like a complex multi-step task. Want me to break it "
+                "into a pipeline with different AIs handling each part?\n\n"
+                "Type `/pipeline` followed by your task to decompose it, "
+                "or just press Enter to run it directly with the current AI.",
+                source=source, session_id=sid,
+            )
+
+    # ── /model slash command — handled before routing to any AI ──────────────
     if stripped.lower().startswith("/model"):
         from helm.web_routes.helpers import _fetch_ollama_models
         parts_cmd = stripped.split(None, 1)

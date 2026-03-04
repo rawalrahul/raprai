@@ -87,3 +87,46 @@ def _ai_select_keyboard():
 
 def _running_keyboard():
     return session_controls_keyboard()
+
+
+# ---------------------------------------------------------------------------
+# Pipeline keyboards
+# ---------------------------------------------------------------------------
+
+def pipeline_approval_keyboard(pipeline_id: str):
+    """Approve/cancel buttons for a planned pipeline."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("▶️ Execute", callback_data=f"pl:approve:{pipeline_id}"),
+            InlineKeyboardButton("❌ Cancel", callback_data=f"pl:cancel:{pipeline_id}"),
+        ],
+    ])
+
+
+def pipeline_controls_keyboard(pipeline_id: str, status: str):
+    """Controls for an active pipeline."""
+    rows: list = []
+    if status == "running":
+        rows.append([
+            InlineKeyboardButton("⏸ Pause", callback_data=f"pl:pause:{pipeline_id}"),
+            InlineKeyboardButton("❌ Cancel", callback_data=f"pl:cancel:{pipeline_id}"),
+        ])
+    elif status == "paused":
+        rows.append([
+            InlineKeyboardButton("▶️ Resume", callback_data=f"pl:resume:{pipeline_id}"),
+            InlineKeyboardButton("❌ Cancel", callback_data=f"pl:cancel:{pipeline_id}"),
+        ])
+    elif status == "failed":
+        rows.append([
+            InlineKeyboardButton("🔄 Retry Failed", callback_data=f"pl:resume:{pipeline_id}"),
+        ])
+    rows.append([InlineKeyboardButton("📋 Status", callback_data=f"pl:status:{pipeline_id}")])
+    rows.append([InlineKeyboardButton("← Back", callback_data="ms:list")])
+    return InlineKeyboardMarkup(rows)
+
+
+def pipeline_list_keyboard():
+    """Quick actions for the pipeline list."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("← Sessions", callback_data="ms:list")],
+    ])

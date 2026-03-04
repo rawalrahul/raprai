@@ -312,3 +312,108 @@ async def action_callback(update, context):
         if query.message:
             await query.edit_message_text("⌛ Loading last session...")
             await perform_resume(query.message, date_str="")
+
+
+async def pipeline_callback(update, context):
+    """Handle all pl:* inline keyboard button presses for pipelines."""
+    from helm.pipeline.models import pipeline_progress
+    from helm.pipeline.executor import (
+        broadcast_pipeline_update, execute_pipeline, retry_step,
+    )
+    from .keyboards import pipeline_controls_keyboard
+
+    query = update.callback_query
+    user_id = query.from_user.id
+    if not ALLOWED_USER_IDS or user_id not in ALLOWED_USER_IDS:
+        await query.answer("Not authorized.", show_alert=True)
+        return
+    await query.answer()
+
+    parts = query.data.split(":")
+    verb = parts[1] if len(parts) > 1 else ""
+    pipeline_id = parts[2] if len(parts) > 2 else ""
+
+    pl = _st.pipelines.get(pipeline_id)
+    if not pl:
+        await query.edit_message_text("Pipeline not found.")
+        return
+
+    if verb == "approve":
+        if pl["status"] != "awaiting_approval":
+            await query.edit_message_text(
+                f"Pipeline is already '{pl['status']}'.",
+                reply_markup=pipeline_controls_keyboard(pipeline_id, pl["status"]),
+            )
+            return
+        # Start execution
+        asyncio.create_task(execute_pipeline(pipeline_id))
+        prog = pipeline_progress(pl)
+        await query.edit_message_text(
+            f"🚀 *Pipeline started!*\n"
+            f"{prog['total']} steps, executing now…\n\n"
+            f"I'll send updates as steps complete.",
+            parse_mode="Markdown",
+            reply_markup=pipeline_controls_keyboard(pipeline_id, "running"),
+        )
+
+    elif verb == "cancel":
+        pl["status"] = "cancelled"
+        for step in pl["steps"]:
+            if step["status"] == "pending":
+                step["status"] = "skipped"
+        await broadcast_pipeline_update(pl)
+        await query.edit_message_text(
+            f"⚫ Pipeline cancelled.",
+            reply_markup=pipeline_controls_keyboard(pipeline_id, "cancelled"),
+        )
+
+    elif verb == "pause":
+        if pl["status"] == "running":
+            pl["status"] = "paused"
+            await broadcast_pipeline_update(pl)
+        await query.edit_message_text(
+            f"⏸ Pipeline paused.",
+            reply_markup=pipeline_controls_keyboard(pipeline_id, "paused"),
+        )
+
+    elif verb == "resume":
+        if pl["status"] in ("paused", "failed"):
+            # For failed pipelines, retry all failed steps
+            if pl["status"] == "failed":
+                for step in pl["steps"]:
+                    if step["status"] == "failed":
+                        step["status"] = "pending"
+                        step["error"] = None
+                        step["retry_count"] = step.get("retry_count", 0) + 1
+            pl["status"] = "running"
+            asyncio.create_task(execute_pipeline(pipeline_id))
+            await broadcast_pipeline_update(pl)
+        await query.edit_message_text(
+            f"▶️ Pipeline resumed.",
+            reply_markup=pipeline_controls_keyboard(pipeline_id, "running"),
+        )
+
+    elif verb == "status":
+        prog = pipeline_progress(pl)
+        status_icon = {"running": "🔵", "completed": "✅", "failed": "❌",
+                      "paused": "⏸", "awaiting_approval": "🟡", "cancelled": "⚫"}.get(pl["status"], "❓")
+        lines = [f"{status_icon} *Pipeline — {pl['status']}*\n"]
+        for step in pl["steps"]:
+            s_icon = {"pending": "⏳", "running": "🔵", "completed": "✅",
+                     "failed": "❌", "skipped": "⏭"}.get(step["status"], "❓")
+            elapsed = ""
+            if step.get("elapsed_seconds"):
+                elapsed = f" ({step['elapsed_seconds']:.1f}s)"
+            error = ""
+            if step.get("error"):
+                error = f"\n  ⚠️ _{step['error'][:80]}_"
+            lines.append(f"{s_icon} *{step['title']}* — {step['assigned_ai']}{elapsed}{error}")
+
+        lines.append(f"\n📊 {prog['completed']}/{prog['total']} completed, "
+                     f"{prog['failed']} failed, {prog['skipped']} skipped")
+
+        await query.edit_message_text(
+            "\n".join(lines),
+            parse_mode="Markdown",
+            reply_markup=pipeline_controls_keyboard(pipeline_id, pl["status"]),
+        )

@@ -67,11 +67,11 @@ async def _main():
             MessageHandler, filters,
         )
         from helm.telegram_bot import (
-            action_callback, browse_callback,
+            action_callback, browse_callback, pipeline_callback,
             tg_browse, tg_clear, tg_clear_context, tg_claude, tg_cmd,
             tg_codex, tg_cwd, tg_gemini, tg_history, tg_interrupt,
-            tg_launch, tg_menu, tg_resume, tg_schedule, tg_start,
-            tg_status, tg_stop, tg_stop_ai, tg_text, tg_timeout,
+            tg_launch, tg_menu, tg_pipeline, tg_resume, tg_schedule,
+            tg_start, tg_status, tg_stop, tg_stop_ai, tg_text, tg_timeout,
             tg_voice, tg_file,
         )
 
@@ -103,8 +103,10 @@ async def _main():
         tg.add_handler(CommandHandler("resume",        tg_resume))
         tg.add_handler(CommandHandler("clear_context", tg_clear_context))
         tg.add_handler(CommandHandler("schedule",      tg_schedule))
+        tg.add_handler(CommandHandler("pipeline",      tg_pipeline))
         # Inline keyboard callbacks — action/ms: buttons BEFORE browse_callback
         tg.add_handler(CallbackQueryHandler(action_callback, pattern=r"^(action:|ms:)"))
+        tg.add_handler(CallbackQueryHandler(pipeline_callback, pattern=r"^pl:"))
         tg.add_handler(CallbackQueryHandler(heartbeat_callback, pattern=r"^heartbeat:"))
         tg.add_handler(CallbackQueryHandler(browse_callback))
         # Voice / audio messages

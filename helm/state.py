@@ -92,3 +92,10 @@ hist_cache_ts: float = 0.0
 # ---------------------------------------------------------------------------
 
 generated_files: list[dict] = []     # [{path, name, ext, size, ai, session_id, session_name, ts}]
+
+# ---------------------------------------------------------------------------
+# Pipeline state (Task Pipeline & AI Delegation)
+# ---------------------------------------------------------------------------
+
+pipelines: dict[str, dict] = {}      # pipeline_id -> Pipeline dict
+pipeline_counter: int = 0
