@@ -20,6 +20,7 @@ from helm.config import CLAUDE_TIMEOUT, INTEGRATION_TIMEOUT, logger
 from helm.history import save_cwd_to_log
 from helm.session_mgr import focused_session, record_usage_task
 from helm.skills import inject_skill_prefix, detect_skill, auto_create_skill_template
+from helm.plugins import inject_plugin_context
 
 from .claude import build_claude_cmd, parse_claude_json_output
 from .helpers import tg_progress_notify
@@ -616,6 +617,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         await push_thinking(True, "claude", session_id=sid)
         has_history = len(sess["claude_msgs"]) > 0
         enriched_text = inject_skill_prefix(safe_text, ai="claude")
+        enriched_text = inject_plugin_context(enriched_text)
         # Always auto-approve CLI permissions — Helm's own destructive-action
         # detection (file deletion alerts, pipeline step approval) provides safety.
         cmd = build_claude_cmd(
@@ -666,6 +668,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         await push_thinking(True, ai, session_id=sid)
         skill_matched = detect_skill(text)
         enriched_text = inject_skill_prefix(safe_text, ai=ai)
+        enriched_text = inject_plugin_context(enriched_text)
         integration = _st.integrations[ai]
         use_stdin   = integration.get("stdin_prompt", False)
         cmd    = integration["build_command"](enriched_text, model=sess.get("model"))

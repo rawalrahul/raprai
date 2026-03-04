@@ -40,6 +40,10 @@ async def _main():
     # their prompts at dispatch time.
     scan_skills()
 
+    # Load Helm-level plugins (helm/plugins/ directory)
+    from helm.plugins import load_plugins
+    load_plugins()
+
     # Warm history cache in background so first /history request is instant
     import concurrent.futures
     _thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
