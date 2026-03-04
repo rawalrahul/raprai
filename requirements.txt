@@ -4,5 +4,6 @@ fastapi==0.115.5
 uvicorn[standard]==0.32.1
 python-multipart>=0.0.9
 croniter>=2.0
+requests>=2.31
 openai-whisper>=20231117
 static-ffmpeg>=2.5

@@ -5,10 +5,10 @@ setlocal enabledelayedexpansion
 
 echo.
 echo  ╔══════════════════════════════════════════════╗
-echo  ║          Helm HQ  —  First-Run Setup         ║
+echo  ║          RAPR AI  —  First-Run Setup         ║
 echo  ╚══════════════════════════════════════════════╝
 echo.
-echo  This script installs everything Helm HQ needs.
+echo  This script installs everything RAPR AI needs.
 echo  It is safe to run more than once.
 echo.
 
@@ -92,7 +92,7 @@ if errorlevel 1 (
         echo   └──────────────────────────────────────────────────────────────┘
         echo.
         echo   NOTE: Node.js is needed for Word (.docx) and PowerPoint (.pptx)
-        echo   file creation.  Helm HQ will still run without it, but those
+        echo   file creation.  RAPR AI will still run without it, but those
         echo   features will not work until Node.js is installed.
         echo.
         set /p "SKIP_NODE=  Skip Node.js and continue anyway? [y/N]: "
@@ -163,7 +163,7 @@ echo     Skill dependencies (markitdown, Pillow, pytesseract, pdf2image)...
 python -m pip install "markitdown[pptx]" Pillow pytesseract pdf2image --quiet
 if errorlevel 1 (
     echo   WARNING: Some skill packages failed to install.
-    echo   Helm HQ will still run but PDF/PPTX skills may be limited.
+    echo   RAPR AI will still run but PDF/PPTX skills may be limited.
 )
 
 echo     Voice support (openai-whisper, static-ffmpeg)...
@@ -271,7 +271,7 @@ echo  ╔═══════════════════════�
 echo  ║            Setup complete!                   ║
 echo  ╚══════════════════════════════════════════════╝
 echo.
-echo  Next step: run launch.bat to start Helm HQ.
+echo  Next step: run launch.bat to start RAPR AI.
 echo.
 echo  The web UI will open at http://localhost:8000
 echo  A setup wizard will guide you through configuring

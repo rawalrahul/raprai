@@ -36,10 +36,15 @@ _plugins_dir: Optional[pathlib.Path] = None
 # ---------------------------------------------------------------------------
 
 def load_plugins() -> None:
-    """Scan helm/plugins/ for plugin folders and populate the registry."""
-    global _registry, _enabled, _plugins_dir
+    """Scan helm/plugins/ for plugin folders and populate the registry.
 
-    _registry = {}
+    IMPORTANT: We use .clear() + in-place mutation instead of reassigning
+    _registry/_enabled so that any module that imported these references
+    (e.g. ``from helm.plugins import _registry``) sees the updated data.
+    """
+    global _plugins_dir
+
+    _registry.clear()
 
     # Locate plugins directory
     here = pathlib.Path(__file__).parent
@@ -49,11 +54,10 @@ def load_plugins() -> None:
         return
 
     # Read enabled set from env
+    _enabled.clear()
     raw = os.environ.get("ENABLED_PLUGINS", "").strip()
     if raw:
-        _enabled = {p.strip().lower() for p in raw.split(",") if p.strip()}
-    else:
-        _enabled = set()
+        _enabled.update(p.strip().lower() for p in raw.split(",") if p.strip())
 
     # Scan subdirectories
     for entry in sorted(_plugins_dir.iterdir()):

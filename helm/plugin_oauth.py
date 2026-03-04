@@ -74,9 +74,16 @@ def start_oauth(plugin_info: dict) -> dict:
 
     if not client_id:
         return {
-            "error": f"Missing {client_id_env} in .env. "
-                     f"Create an OAuth app at the provider's developer portal and add the client ID.",
-            "missing_env": client_id_env
+            "error": f"Missing {client_id_env} in .env.",
+            "needs_setup": True,
+            "plugin_id": plugin_id,
+            "plugin_name": plugin_info.get("name", plugin_id),
+            "plugin_emoji": plugin_info.get("emoji", ""),
+            "setup_url": plugin_info.get("setup_url", ""),
+            "setup_steps": plugin_info.get("setup_steps", []),
+            "env_client_id": client_id_env,
+            "env_client_secret": auth.get("env_client_secret", ""),
+            "callback_url": get_callback_url(),
         }
 
     # Generate state token
@@ -127,6 +134,14 @@ def start_oauth_provider(plugin_info: dict, provider_key: str) -> dict:
     # Build a synthetic plugin_info with provider-specific auth
     synth = {**plugin_info, "auth": {**provider, "type": "oauth2"}}
     synth["auth"]["_provider_key"] = provider_key
+    # Carry provider-specific setup info
+    setup_key = f"setup_url_{provider_key}"
+    steps_key = f"setup_steps_{provider_key}"
+    if setup_key in plugin_info:
+        synth["setup_url"] = plugin_info[setup_key]
+    if steps_key in plugin_info:
+        synth["setup_steps"] = plugin_info[steps_key]
+    synth["name"] = f"{plugin_info.get('name', '')} ({provider_key.title()})"
     return start_oauth(synth)
 
 
@@ -217,24 +232,37 @@ def handle_callback(code: str, state: str) -> dict:
 def check_connected(plugin_info: dict) -> bool:
     """Check if a plugin has a valid token stored."""
     auth = plugin_info.get("auth", {})
-    if auth.get("type") != "oauth2":
-        # For API key plugins, check if env vars have values
-        for env_var in plugin_info.get("env_vars", []):
-            if os.environ.get(env_var, ""):
+    auth_type = auth.get("type", "")
+
+    # Token-type plugins: check token_env or any of the multi-tokens
+    if auth_type == "token":
+        # Single token
+        token_env = auth.get("token_env", "")
+        if token_env and os.environ.get(token_env, ""):
+            return True
+        # Multi-token (e.g., Linear/Jira, Zapier)
+        for t in auth.get("tokens", []):
+            t_env = t.get("token_env", "")
+            if t_env and os.environ.get(t_env, ""):
                 return True
         return False
 
-    # For OAuth plugins, check if token env var has a value
-    token_env = auth.get("token_env", "")
-    if token_env and os.environ.get(token_env, ""):
-        return True
-
-    # Multi-provider: check any provider
-    for prov in auth.get("providers", {}).values():
-        t_env = prov.get("token_env", "")
-        if t_env and os.environ.get(t_env, ""):
+    # OAuth2 plugins: check token_env or fallback_token
+    if auth_type == "oauth2":
+        token_env = auth.get("token_env", "")
+        if token_env and os.environ.get(token_env, ""):
             return True
+        # Fallback token
+        fb = auth.get("fallback_token", {})
+        fb_env = fb.get("token_env", "")
+        if fb_env and os.environ.get(fb_env, ""):
+            return True
+        return False
 
+    # Fallback: check all env_vars
+    for env_var in plugin_info.get("env_vars", []):
+        if os.environ.get(env_var, ""):
+            return True
     return False
 
 
@@ -251,6 +279,22 @@ def disconnect(plugin_info: dict) -> dict:
         update_env(token_env, "")
         os.environ.pop(token_env, None)
         cleared.append(token_env)
+
+    # Clear multi-tokens (Linear/Jira, Zapier)
+    for t in auth.get("tokens", []):
+        t_env = t.get("token_env", "")
+        if t_env:
+            update_env(t_env, "")
+            os.environ.pop(t_env, None)
+            cleared.append(t_env)
+
+    # Clear fallback token
+    fb = auth.get("fallback_token", {})
+    fb_env = fb.get("token_env", "")
+    if fb_env and fb_env not in cleared:
+        update_env(fb_env, "")
+        os.environ.pop(fb_env, None)
+        cleared.append(fb_env)
 
     # Clear refresh token
     refresh_env = auth.get("refresh_token_env", "")
