@@ -296,7 +296,7 @@ _OLLAMA_TOOLS = [
         "function": {
             "name": "save_skill",
             "description": (
-                "Save a new reusable skill to the Helm HQ skill library. "
+                "Save a new reusable skill to the RAPR AI skill library. "
                 "Call this when you discover a reliable pattern for a task type "
                 "that you've successfully completed and that no existing skill covers. "
                 "The skill will be available to you and all other AIs for future similar tasks. "

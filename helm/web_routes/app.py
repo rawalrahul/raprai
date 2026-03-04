@@ -22,7 +22,7 @@ import helm.auth as _auth
 # FastAPI app initialization
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="Helm HQ")
+app = FastAPI(title="RAPR AI")
 
 # Serve logo.png (and any other static assets placed alongside web_app.py)
 _static_dir = pathlib.Path(__file__).parent.parent.parent

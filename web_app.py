@@ -1,5 +1,5 @@
 """
-web_app.py — Helm HQ entry point.
+web_app.py — RAPR AI entry point.
 
 This file is intentionally thin: all logic lives in the helm/ package.
 Run with:  python web_app.py
@@ -64,7 +64,7 @@ async def _main():
                 "║  1. Open http://localhost:%d/setup in your browser      ║\n"
                 "║  2. Enter your Telegram user ID in the setup wizard     ║\n"
                 "║     (find it via @userinfobot on Telegram)              ║\n"
-                "║  3. Restart Helm HQ                                     ║\n"
+                "║  3. Restart RAPR AI                                     ║\n"
                 "╚══════════════════════════════════════════════════════════╝",
                 WEB_PORT,
             )
@@ -76,6 +76,7 @@ async def _main():
         )
         from helm.telegram_bot import (
             action_callback, browse_callback, pipeline_callback,
+            approval_callback,
             tg_browse, tg_clear, tg_clear_context, tg_claude, tg_cmd,
             tg_codex, tg_cwd, tg_gemini, tg_history, tg_interrupt,
             tg_launch, tg_menu, tg_pipeline, tg_resume, tg_schedule,
@@ -115,6 +116,7 @@ async def _main():
         # Inline keyboard callbacks — action/ms: buttons BEFORE browse_callback
         tg.add_handler(CallbackQueryHandler(action_callback, pattern=r"^(action:|ms:)"))
         tg.add_handler(CallbackQueryHandler(pipeline_callback, pattern=r"^pl:"))
+        tg.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^appr:"))
         tg.add_handler(CallbackQueryHandler(heartbeat_callback, pattern=r"^heartbeat:"))
         tg.add_handler(CallbackQueryHandler(browse_callback))
         # Voice / audio messages

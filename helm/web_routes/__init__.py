@@ -24,6 +24,7 @@ from .file_routes import router as file_router
 from .voice_routes import router as voice_router
 from .usage_routes import router as usage_router
 from .pipeline_routes import router as pipeline_router
+from .approval_routes import router as approval_router
 
 # Include all routers in the app
 app.include_router(auth_router)
@@ -35,6 +36,7 @@ app.include_router(file_router)
 app.include_router(voice_router)
 app.include_router(usage_router)
 app.include_router(pipeline_router)
+app.include_router(approval_router)
 
 # Re-export model fetchers so they can be imported as: from helm.web_routes import _fetch_claude_models
 from .helpers import (

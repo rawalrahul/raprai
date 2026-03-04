@@ -31,10 +31,19 @@ from .context import build_step_context, maybe_summarize
 async def broadcast_pipeline_update(pipeline: dict):
     """Send pipeline state to all WS clients + track in chat history."""
     from helm.broadcast import broadcast
-    await broadcast({
-        "type": "pipeline_update",
-        "pipeline": pipeline_state_payload(pipeline),
-    })
+    if not _st.ws_clients:
+        logger.debug(
+            "Pipeline update for %s but no WS clients connected — "
+            "UI won't update until a client reconnects",
+            pipeline.get("id", "?")[:8],
+        )
+    try:
+        await broadcast({
+            "type": "pipeline_update",
+            "pipeline": pipeline_state_payload(pipeline),
+        })
+    except Exception as exc:
+        logger.error("Failed to broadcast pipeline update: %s", exc)
 
 
 async def broadcast_step_stream(pipeline_id: str, step_id: str, chunk: str):
@@ -107,6 +116,43 @@ async def _execute_step(pipeline: dict, step: dict, semaphore: asyncio.Semaphore
             f"\n\nSave any output files to this directory: "
             f"{artifacts_path.resolve()}"
         )
+
+        # ── Destructive step check — always require approval for destructive ops ──
+        import helm.approval as _appr
+        combined_text = f"{step['title']} {step['description']}"
+        if _appr.looks_destructive(combined_text):
+            approval_req = _appr.create_request(
+                session_id=sid,
+                action="pipeline_step",
+                description=(
+                    f"Pipeline step **{step['title']}** (via {step_ai}) "
+                    f"may perform destructive operations (delete/remove files)"
+                ),
+                details=[step["description"][:200]],
+                pipeline_id=pipeline["id"],
+                step_id=step["id"],
+            )
+            await _appr.broadcast_approval(approval_req)
+            await push_message(
+                "system",
+                f"⚠️ Step **{step['title']}** may delete or modify files.\n"
+                f"Approve or deny via the UI banner or Telegram.",
+                source="pipeline", session_id=sid,
+            )
+            result = await _appr.wait(approval_req["id"], timeout=300)
+            if result != "approved":
+                step["status"] = "skipped"
+                step["output"] = f"(step {result} by user)"
+                step["output_summary"] = step["output"]
+                step["completed_at"] = time.time()
+                step["elapsed_seconds"] = 0
+                await push_message(
+                    "system",
+                    f"⏭️ Step **{step['title']}** skipped — {result}",
+                    source="pipeline", session_id=sid,
+                )
+                await broadcast_pipeline_update(pipeline)
+                return
 
         # Create child session for this step
         child_sess = make_session(step_ai, cwd=pipeline["cwd"])
@@ -204,6 +250,23 @@ async def _execute_step(pipeline: dict, step: dict, semaphore: asyncio.Semaphore
             step["completed_at"] = time.time()
             step["elapsed_seconds"] = (step["completed_at"] or 0) - (step["started_at"] or 0)
 
+            # Classify the error for better diagnostics
+            err_str = str(exc)
+            if "not found" in err_str.lower() or "not recognized" in err_str.lower():
+                err_hint = f"(AI `{step_ai}` may not be installed)"
+            elif "timeout" in err_str.lower():
+                err_hint = "(request timed out — AI may be overloaded)"
+            elif "connection" in err_str.lower() or "urlopen" in err_str.lower():
+                err_hint = f"(cannot reach `{step_ai}` — is it running?)"
+            else:
+                err_hint = ""
+
+            logger.error(
+                "Pipeline step %s (%s via %s) failed after %.1fs: %s",
+                step["id"], step["title"], step_ai,
+                step["elapsed_seconds"], exc, exc_info=True,
+            )
+
             # --- Auto-fallback retry with different AI ---
             fallback_ais = step.get("fallback_ais", [])
             fallback_idx = step.get("fallback_index", 0)
@@ -223,16 +286,18 @@ async def _execute_step(pipeline: dict, step: dict, semaphore: asyncio.Semaphore
                 await push_message(
                     "system",
                     f"⚠️ Step **{step['title']}** failed with {step_ai} — "
-                    f"retrying with {next_ai}…",
+                    f"retrying with {next_ai}…\n"
+                    f"Error: `{err_str[:150]}`",
                     source="pipeline", session_id=sid,
                 )
             else:
                 step["status"] = "failed"
-                logger.error("Pipeline step %s failed (no fallback left): %s",
-                             step["id"], exc)
                 await push_message(
                     "system",
-                    f"❌ Pipeline step **{step['title']}** failed: {str(exc)[:200]}",
+                    f"❌ Pipeline step **{step['title']}** failed\n"
+                    f"**AI:** {step_ai}\n"
+                    f"**Error:** `{err_str[:200]}` {err_hint}\n"
+                    f"**Fallbacks exhausted** — retry manually or skip this step",
                     source="pipeline", session_id=sid,
                 )
 
@@ -417,7 +482,13 @@ async def execute_pipeline(pipeline_id: str) -> None:
         logger.info("Pipeline %s was cancelled", pipeline_id)
     except Exception as exc:
         pipeline["status"] = "failed"
-        logger.error("Pipeline %s failed: %s", pipeline_id, exc)
+        logger.error("Pipeline %s orchestration error: %s", pipeline_id, exc, exc_info=True)
+        await push_message(
+            "system",
+            f"❌ **Pipeline orchestration error:** `{str(exc)[:200]}`\n"
+            f"The pipeline loop crashed unexpectedly. Check server logs for details.",
+            source="pipeline", session_id=sid,
+        )
 
     # Finalize
     if pipeline["status"] == "running":

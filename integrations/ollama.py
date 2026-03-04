@@ -5,7 +5,7 @@ Setup:
   1. Install Ollama: https://ollama.com/download
   2. Pull a model:  ollama pull qwen3:4b
   3. Set OLLAMA_MODEL=qwen3:4b in .env  (optional — defaults to qwen3:4b)
-  4. Restart Helm HQ — Ollama appears in the AI selector automatically.
+  4. Restart RAPR AI — Ollama appears in the AI selector automatically.
 
 No API key required. Works fully offline.
 
@@ -45,7 +45,7 @@ def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
     Run a single non-interactive Ollama query and return the output.
 
     `ollama run MODEL "prompt"` exits automatically after generating the response,
-    which matches Helm HQ's one-shot subprocess model.
+    which matches RAPR AI's one-shot subprocess model.
 
     Args:
         prompt: The user prompt to send to the model.

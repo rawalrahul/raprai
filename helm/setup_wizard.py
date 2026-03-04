@@ -13,7 +13,7 @@ _SETUP_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Helm HQ — Setup</title>
+<title>RAPR AI — Setup</title>
 <link rel="icon" href="/static/logo.png" type="image/png">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -118,8 +118,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);
 
   <div class="card-header">
     <div class="logo-row">
-      <img src="/static/logo.png" alt="Helm HQ">
-      <span class="app-name">Helm HQ</span>
+      <img src="/static/logo.png" alt="RAPR AI">
+      <span class="app-name">RAPR AI</span>
       <span class="tag">— First-run Setup</span>
     </div>
     <div class="step-bar">
@@ -137,7 +137,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);
     <div class="step active" id="step0">
       <div class="step-title">Gemini <span class="free-tag">FREE</span> <span style="color:var(--muted);font-size:12px;font-weight:400">(optional)</span></div>
       <div class="step-desc">
-        <strong style="color:var(--text)">Google Gemini CLI</strong> is a free AI backend for Helm HQ.
+        <strong style="color:var(--text)">Google Gemini CLI</strong> is a free AI backend for RAPR AI.
         No paid subscription required — just a free API key from Google AI Studio.
         You can skip this if you're using Claude or another AI instead.
       </div>
@@ -163,7 +163,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);
     <div class="step" id="step1">
       <div class="step-title">Telegram Bot <span style="color:var(--muted);font-size:12px;font-weight:400">(optional)</span></div>
       <div class="step-desc">
-        Connect a Telegram bot to control Helm HQ remotely from your phone — launch sessions,
+        Connect a Telegram bot to control RAPR AI remotely from your phone — launch sessions,
         send prompts, and get AI responses via chat. You can skip this and configure it later
         by editing your <code>.env</code> file.
       </div>
@@ -259,7 +259,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);
     <div class="step" id="step3">
       <div class="step-title">Set a PIN 🔒</div>
       <div class="step-desc">
-        Helm HQ is accessible from any browser that can reach your machine.
+        RAPR AI is accessible from any browser that can reach your machine.
         Set a PIN so only you can log in — it will be required every time the
         app is opened in a new browser session.
       </div>
@@ -288,12 +288,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);
       <div class="step-title">You're all set! 🎉</div>
       <div class="step-desc">
         Here's a summary of what's configured. You can always update settings later by editing
-        your <code>.env</code> file in the Helm HQ folder.
+        your <code>.env</code> file in the RAPR AI folder.
       </div>
       <div id="summary"></div>
       <div class="btn-row" style="margin-top:28px">
         <button class="btn btn-primary" style="width:100%;text-align:center;padding:11px" onclick="launch()">
-          Launch Helm HQ →
+          Launch RAPR AI →
         </button>
       </div>
     </div>

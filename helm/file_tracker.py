@@ -368,7 +368,25 @@ async def handle_diff(before: dict, after: dict, source: str, cwd: str,
         names = ", ".join(pathlib.Path(fp).name for fp in diff["deleted"][:6])
         if len(diff["deleted"]) > 6:
             names += f" +{len(diff['deleted']) - 6} more"
-        await push_message("system", f"🗑️ Deleted: {names}", source=source, session_id=session_id)
+        await push_message(
+            "system",
+            f"🗑️ **Files deleted:** {names}\n"
+            f"⚠️ An AI deleted {len(diff['deleted'])} file(s). "
+            f"Check the output above to confirm this was intended.",
+            source=source, session_id=session_id,
+        )
+        # Also alert on Telegram
+        if _st.telegram_app and _st.telegram_chat_id:
+            try:
+                await _st.telegram_app.bot.send_message(
+                    chat_id=_st.telegram_chat_id,
+                    text=f"🗑️ **File deletion detected**\n\n"
+                         f"Deleted: {names}\n\n"
+                         f"Session: {session_id or 'unknown'}",
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                logger.warning("Deletion Telegram notify failed: %s", e)
 
 
 _handle_diff = handle_diff  # legacy alias

@@ -429,3 +429,42 @@ async def pipeline_callback(update, context):
             parse_mode="Markdown",
             reply_markup=pipeline_controls_keyboard(pipeline_id, pl["status"]),
         )
+
+
+async def approval_callback(update, context):
+    """Handle appr:approve:<id> and appr:deny:<id> inline keyboard buttons."""
+    import helm.approval as _appr
+
+    query = update.callback_query
+    user_id = query.from_user.id
+    if not ALLOWED_USER_IDS or user_id not in ALLOWED_USER_IDS:
+        await query.answer("Not authorized.", show_alert=True)
+        return
+    await query.answer()
+
+    parts = query.data.split(":")
+    verb = parts[1] if len(parts) > 1 else ""
+    req_id = parts[2] if len(parts) > 2 else ""
+
+    if verb not in ("approve", "deny"):
+        await query.edit_message_text("Unknown approval action.")
+        return
+
+    status = "approved" if verb == "approve" else "denied"
+    ok = _appr.resolve(req_id, status, source="telegram")
+
+    if ok:
+        # Broadcast resolution to Web UI
+        req = _st.approval_queue.get(req_id)
+        if req:
+            await _appr.broadcast_resolution(req)
+
+        icon = "✅" if status == "approved" else "❌"
+        await query.edit_message_text(
+            f"{icon} Action **{status}** (via Telegram).",
+            parse_mode="Markdown",
+        )
+    else:
+        await query.edit_message_text(
+            "⚠️ This approval request was already resolved or expired."
+        )

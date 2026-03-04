@@ -9,16 +9,22 @@ import re
 
 
 def build_claude_cmd(prompt: str, has_history: bool,
-                     model: str | None = None) -> list[str]:
+                     model: str | None = None,
+                     auto_approve: bool = False) -> list[str]:
     """Build the command-line arguments to invoke the Claude CLI.
 
     Uses --output-format json to get structured output including token counts.
+    auto_approve: if True, adds --dangerously-skip-permissions so Claude
+                  won't pause for file/command approvals (required for
+                  non-interactive pipeline steps and background sessions).
     """
     cmd = ["claude"]
     if model:
         cmd.extend(["--model", model])
     if has_history:
         cmd.append("--continue")
+    if auto_approve:
+        cmd.append("--dangerously-skip-permissions")
     cmd.extend(["--output-format", "json", "-p", prompt])
     return cmd
 

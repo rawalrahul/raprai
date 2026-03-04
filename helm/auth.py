@@ -1,5 +1,5 @@
 """
-helm/auth.py — PIN-based authentication for Helm HQ.
+helm/auth.py — PIN-based authentication for RAPR AI.
 
 Provides:
   - PIN hashing (SHA-256 + random salt, stored in .env)
@@ -166,7 +166,7 @@ LOGIN_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Helm HQ — Login</title>
+<title>RAPR AI — Login</title>
 <link rel="icon" href="/static/logo.png" type="image/png">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -214,8 +214,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);
   <div class="card">
     <div class="card-head">
       <div class="logo-row">
-        <img src="/static/logo.png" alt="Helm HQ">
-        <span class="app">Helm HQ</span>
+        <img src="/static/logo.png" alt="RAPR AI">
+        <span class="app">RAPR AI</span>
       </div>
       <div class="subtitle">Enter your PIN to continue</div>
     </div>

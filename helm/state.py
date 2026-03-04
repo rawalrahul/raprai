@@ -1,5 +1,5 @@
 """
-helm/state.py — All mutable global state for the Helm HQ process.
+helm/state.py — All mutable global state for the RAPR AI process.
 
 Every other module imports this module object and accesses variables via
 ``import helm.state as _st; _st.focused_id = ...`` so that scalar rebindings
@@ -106,3 +106,9 @@ pipeline_templates: dict[str, dict] = {}  # template_id -> Template dict
 # ---------------------------------------------------------------------------
 
 default_models: dict[str, str] = {}      # ai_key -> default model name
+
+# ---------------------------------------------------------------------------
+# Approval queue (for destructive action approvals via UI + Telegram)
+# ---------------------------------------------------------------------------
+
+approval_queue: dict[str, dict] = {}     # approval_id -> request dict

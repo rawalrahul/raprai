@@ -21,7 +21,7 @@ from .models import make_pipeline, make_step, compute_edges, validate_dag
 # ---------------------------------------------------------------------------
 
 _PLANNER_PROMPT_TEMPLATE = """\
-You are a task planner for a multi-AI orchestration system called Helm HQ.
+You are a task planner for a multi-AI orchestration system called RAPR AI.
 
 Your job: decompose the user's complex request into a structured set of subtasks \
 that can be assigned to different AIs and executed in sequence or in parallel.
@@ -143,17 +143,35 @@ async def _call_planner_ai(planner_ai: str, prompt: str, cwd: str) -> str:
     from helm.ai_runner.core import run_ai_popen
     import helm.state as _st
 
+    logger.info("Calling planner AI: %s (cwd=%s, prompt_len=%d)",
+                planner_ai, cwd, len(prompt))
+
     if planner_ai == "claude":
-        from helm.ai_runner.claude import build_claude_cmd, parse_claude_json_output
-        cmd = build_claude_cmd(prompt, has_history=False)
-        raw = await asyncio.to_thread(run_ai_popen, cmd, cwd, "claude", {})
-        parsed = parse_claude_json_output(raw)
-        return parsed["text"]
+        try:
+            from helm.ai_runner.claude import build_claude_cmd, parse_claude_json_output
+            # Planner runs non-interactively — no human to approve permissions
+            cmd = build_claude_cmd(prompt, has_history=False, auto_approve=True)
+            raw = await asyncio.to_thread(run_ai_popen, cmd, cwd, "claude", {})
+            if not raw or not raw.strip():
+                logger.error("Claude planner returned empty output — "
+                             "is Claude CLI installed and authenticated?")
+                return ""
+            parsed = parse_claude_json_output(raw)
+            return parsed["text"]
+        except Exception as exc:
+            logger.error("Claude planner call failed: %s", exc, exc_info=True)
+            raise RuntimeError(
+                f"Claude planner failed: {exc}. "
+                f"Check that Claude CLI is installed (`claude --version`) "
+                f"and authenticated."
+            ) from exc
 
     elif planner_ai == "ollama":
         import urllib.request
+        model = _get_ollama_model()
+        logger.info("Ollama planner using model: %s", model)
         payload = {
-            "model": _get_ollama_model(),
+            "model": model,
             "messages": [
                 {"role": "system", "content": "You are a task planner. Output ONLY valid JSON."},
                 {"role": "user", "content": prompt},
@@ -169,18 +187,39 @@ async def _call_planner_ai(planner_ai: str, prompt: str, cwd: str) -> str:
             )
             with urllib.request.urlopen(req, timeout=120) as resp:
                 data = json.loads(resp.read())
-            return (data.get("message", {}).get("content") or "").strip()
+            result = (data.get("message", {}).get("content") or "").strip()
+            if not result:
+                logger.error("Ollama planner returned empty content (model=%s)", model)
+            return result
+        except urllib.error.URLError as exc:
+            logger.error("Ollama planner unreachable: %s — is `ollama serve` running?", exc)
+            raise RuntimeError(
+                f"Cannot reach Ollama at localhost:11434 — is `ollama serve` running? ({exc})"
+            ) from exc
         except Exception as exc:
-            logger.error("Ollama planner call failed: %s", exc)
-            return ""
+            logger.error("Ollama planner call failed (model=%s): %s", model, exc, exc_info=True)
+            raise RuntimeError(f"Ollama planner error (model={model}): {exc}") from exc
 
     elif planner_ai in _st.integrations:
-        integration = _st.integrations[planner_ai]
-        cmd = integration["build_command"](prompt, model=None)
-        raw = await asyncio.to_thread(run_ai_popen, cmd, cwd, planner_ai, {})
-        return raw
+        try:
+            integration = _st.integrations[planner_ai]
+            cmd = integration["build_command"](prompt, model=None)
+            raw = await asyncio.to_thread(run_ai_popen, cmd, cwd, planner_ai, {})
+            if not raw or not raw.strip():
+                logger.error("%s planner returned empty output", planner_ai)
+            return raw
+        except Exception as exc:
+            logger.error("%s planner call failed: %s", planner_ai, exc, exc_info=True)
+            raise RuntimeError(
+                f"{planner_ai} planner failed: {exc}. "
+                f"Check that {planner_ai} CLI is installed and configured."
+            ) from exc
 
-    return ""
+    logger.error("Unknown planner AI: %s — no handler found", planner_ai)
+    raise RuntimeError(
+        f"Unknown planner AI '{planner_ai}'. "
+        f"Set PIPELINE_PLANNER_AI to one of: claude, ollama, gemini, codex"
+    )
 
 
 def _parse_planner_json(raw: str) -> Optional[dict]:
@@ -312,7 +351,23 @@ async def plan_pipeline(
     5. Return Pipeline dict with status="awaiting_approval"
     """
     available = discover_available_ais()
+    if not available:
+        raise RuntimeError(
+            "No AIs available. Install at least one: "
+            "Claude CLI, Ollama, Gemini CLI, or Codex CLI."
+        )
+
     actual_planner = _pick_planner_ai(planner_ai, available)
+    if actual_planner != planner_ai:
+        logger.warning(
+            "Preferred planner '%s' not available — falling back to '%s'",
+            planner_ai, actual_planner,
+        )
+
+    logger.info(
+        "Planning pipeline: planner=%s, available_ais=%s, prompt_len=%d",
+        actual_planner, available, len(prompt),
+    )
 
     ollama_model = _get_ollama_model()
     ai_desc = _build_ai_descriptions(available, ollama_model)

@@ -34,7 +34,12 @@ async def ws_endpoint(websocket: WebSocket):
     if _auth.pin_is_set():
         token = websocket.cookies.get(_auth.COOKIE_NAME)
         if not _auth.is_valid_token(token):
-            await websocket.close(code=4401)
+            logger.warning(
+                "WS auth rejected — PIN is set but client cookie is %s. "
+                "Client should re-login at /login to get a fresh auth cookie.",
+                "missing" if not token else "expired/invalid",
+            )
+            await websocket.close(code=4401, reason="auth_required")
             return
     await websocket.accept()
     _st.ws_clients.add(websocket)

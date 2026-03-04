@@ -20,7 +20,7 @@ def authorized_only(func):
             await update.message.reply_text(
                 "⛔ Bot is locked — no authorised users are configured.\n\n"
                 "Add your Telegram user ID to ALLOWED_USER_IDS in your .env file, "
-                "then restart Helm HQ."
+                "then restart RAPR AI."
             )
             logger.error(
                 "SECURITY: Blocked user %d — ALLOWED_USER_IDS is empty. "

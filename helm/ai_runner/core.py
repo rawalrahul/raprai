@@ -372,43 +372,59 @@ async def process_message(text: str, source: str = "web",
             return msg
 
         planner_ai = os.environ.get("PIPELINE_PLANNER_AI", "claude")
+        pipeline_cwd = sess.get("cwd") or _st.last_cwd or "."
         await push_message(
             "system",
             f"🧠 Planning pipeline via **{planner_ai}**…",
             source=source, session_id=sid,
         )
 
-        from helm.pipeline.planner import plan_pipeline as _plan_pipeline
-        pipeline = await _plan_pipeline(
-            prompt=pipeline_prompt,
-            session_id=sid,
-            cwd=cwd,
-            planner_ai=planner_ai,
-        )
-        _st.pipelines[pipeline["id"]] = pipeline
-
-        from helm.pipeline.executor import broadcast_pipeline_update
-        await broadcast_pipeline_update(pipeline)
-
-        # Build a readable summary for chat
-        step_lines = []
-        for i, s in enumerate(pipeline["steps"], 1):
-            deps = ""
-            if s["depends_on"]:
-                deps = f" (after {', '.join(s['depends_on'])})"
-            step_lines.append(
-                f"  {i}. **{s['title']}** → {s['assigned_ai']}{deps}"
+        try:
+            from helm.pipeline.planner import plan_pipeline as _plan_pipeline
+            pipeline = await _plan_pipeline(
+                prompt=pipeline_prompt,
+                session_id=sid,
+                cwd=pipeline_cwd,
+                planner_ai=planner_ai,
             )
-        steps_text = "\n".join(step_lines)
+            _st.pipelines[pipeline["id"]] = pipeline
 
-        msg = (
-            f"📋 **Pipeline plan ready** — {len(pipeline['steps'])} steps\n\n"
-            f"{steps_text}\n\n"
-            f"Review the pipeline graph above. Click **Execute** to start, "
-            f"or edit AI assignments before running."
-        )
-        await push_message("system", msg, source=source, session_id=sid)
-        return msg
+            from helm.pipeline.executor import broadcast_pipeline_update
+            await broadcast_pipeline_update(pipeline)
+
+            # Build a readable summary for chat
+            step_lines = []
+            for i, s in enumerate(pipeline["steps"], 1):
+                deps = ""
+                if s["depends_on"]:
+                    deps = f" (after {', '.join(s['depends_on'])})"
+                step_lines.append(
+                    f"  {i}. **{s['title']}** → {s['assigned_ai']}{deps}"
+                )
+            steps_text = "\n".join(step_lines)
+
+            msg = (
+                f"📋 **Pipeline plan ready** — {len(pipeline['steps'])} steps\n\n"
+                f"{steps_text}\n\n"
+                f"Review the pipeline graph above. Click **Execute** to start, "
+                f"or edit AI assignments before running."
+            )
+            await push_message("system", msg, source=source, session_id=sid)
+            return msg
+
+        except Exception as pipe_err:
+            logger.error("Pipeline planning failed: %s", pipe_err, exc_info=True)
+            err_msg = (
+                f"❌ **Pipeline planning failed**\n\n"
+                f"**Planner AI:** {planner_ai}\n"
+                f"**Error:** `{str(pipe_err)[:300]}`\n\n"
+                f"Possible fixes:\n"
+                f"• Check that **{planner_ai}** is installed and running\n"
+                f"• Try a different planner AI in Settings → Pipeline → Planner AI\n"
+                f"• Run the task directly (without `/pipeline`) with the current AI"
+            )
+            await push_message("system", err_msg, source=source, session_id=sid)
+            return err_msg
 
     # ── Auto-suggest pipeline for complex tasks ───────────────────────────
     if os.environ.get("PIPELINE_AUTO_SUGGEST", "1") == "1":
@@ -600,7 +616,13 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         await push_thinking(True, "claude", session_id=sid)
         has_history = len(sess["claude_msgs"]) > 0
         enriched_text = inject_skill_prefix(safe_text, ai="claude")
-        cmd = build_claude_cmd(enriched_text, has_history, model=sess.get("model"))
+        # Always auto-approve CLI permissions — Helm's own destructive-action
+        # detection (file deletion alerts, pipeline step approval) provides safety.
+        cmd = build_claude_cmd(
+            enriched_text, has_history,
+            model=sess.get("model"),
+            auto_approve=True,
+        )
         sess["claude_msgs"].append(text)
         before = await asyncio.to_thread(snapshot_dir, cwd)
         raw_output = await asyncio.to_thread(run_ai_popen, cmd, cwd, "claude", sess)

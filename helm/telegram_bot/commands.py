@@ -40,7 +40,7 @@ async def tg_start(update, context):
     """Welcome message — show session list or prompt to create first session."""
     if _st.sessions:
         await update.message.reply_text(
-            "👋 *Helm HQ* — Multi-Session Mode\n\n"
+            "👋 *RAPR AI* — Multi-Session Mode\n\n"
             "Tap a session to focus it, or create a new one.\n"
             f"Web UI: http://localhost:{WEB_PORT}",
             parse_mode="Markdown",
@@ -48,7 +48,7 @@ async def tg_start(update, context):
         )
     else:
         await update.message.reply_text(
-            "👋 *Helm HQ* — Multi-Session Mode\n\n"
+            "👋 *RAPR AI* — Multi-Session Mode\n\n"
             "No sessions yet. Create your first session:\n"
             f"Web UI: http://localhost:{WEB_PORT}",
             parse_mode="Markdown",
@@ -64,7 +64,7 @@ async def tg_menu(update, context):
     if fs:
         ai_label = fs["emoji"] + " " + (fs["ai"] or "Shell")
         await update.message.reply_text(
-            f"*Helm HQ — {fs['name']}*\n"
+            f"*RAPR AI — {fs['name']}*\n"
             f"AI: {ai_label}  ·  Status: {fs['status']}\n"
             f"📂 `{fs['cwd']}`",
             parse_mode="Markdown",
@@ -72,7 +72,7 @@ async def tg_menu(update, context):
         )
     else:
         await update.message.reply_text(
-            "*Helm HQ — Sessions*\nNo session focused. Pick one:",
+            "*RAPR AI — Sessions*\nNo session focused. Pick one:",
             parse_mode="Markdown",
             reply_markup=sessions_keyboard(),
         )
@@ -830,7 +830,12 @@ async def tg_text(update, context):
                 )
                 return
         except Exception as exc:
-            logger.warning("Auto-pipeline detection failed: %s — falling back to normal", exc)
+            logger.error("Auto-pipeline detection failed: %s", exc, exc_info=True)
+            await update.message.reply_text(
+                f"⚠️ Pipeline planning failed: `{str(exc)[:150]}`\n"
+                f"Falling back to direct AI execution.",
+                parse_mode="Markdown",
+            )
 
     # --- Focused session is active -> forward message ---
     if _st.pending_tg_context:

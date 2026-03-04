@@ -33,7 +33,7 @@ from .commands import (
 )
 
 # Callbacks (inline keyboard callbacks)
-from .callbacks import action_callback, pipeline_callback
+from .callbacks import action_callback, pipeline_callback, approval_callback
 
 # Also export browse_callback from browse module for backward compat
 # (already imported above from .browse)
@@ -97,4 +97,5 @@ __all__ = [
     # Callbacks
     "action_callback",
     "pipeline_callback",
+    "approval_callback",
 ]
