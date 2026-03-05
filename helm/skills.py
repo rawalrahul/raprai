@@ -820,6 +820,89 @@ def create_skill(name: str, description: str, content: str) -> bool:
     return True
 
 
+def claude_generate_skill(prompt: str, ai: str, error_output: str = "") -> Optional[str]:
+    """
+    Invoke Claude CLI to generate a high-quality SKILL.md for a task the AI failed.
+
+    This is the "self-healing" path: when a non-Claude AI encounters a task it
+    cannot handle and no skill exists, Claude is asked to create a reusable skill
+    so the original AI can retry (and future tasks succeed immediately).
+
+    Returns the skill name on success, None on failure or if Claude CLI unavailable.
+    """
+    import shutil
+    import subprocess as sp
+
+    if not shutil.which("claude"):
+        logger.warning("claude_generate_skill: 'claude' CLI not found — skipping")
+        return None
+
+    skill_name = _skill_name_from_prompt(prompt)
+    task_type = _detect_task_type(prompt)
+
+    # Don't overwrite existing skills
+    if skill_name in _registry:
+        logger.info("claude_generate_skill: skill '%s' already exists — skipping", skill_name)
+        return skill_name
+
+    display_task = task_type.replace("_", " ").title()
+
+    claude_prompt = textwrap.dedent(f"""\
+        You are a skill author for RAPR AI, a multi-AI orchestration platform.
+        An AI ({ai}) failed the following user task. Create a reusable SKILL.md
+        that will help ANY AI model (including small local models like qwen2.5-coder:7b)
+        succeed at this type of task in the future.
+
+        ## Failed task
+        {prompt[:1500]}
+
+        ## Error output
+        {error_output[:1000] if error_output else "(no error output)"}
+
+        ## Task type detected
+        {display_task}
+
+        ## Requirements for the SKILL.md
+        - Write clear, step-by-step instructions the AI should follow
+        - Include complete Python code templates with all imports
+        - Code must be self-contained (install deps inline with pip)
+        - Include error handling patterns
+        - Include quality checklist at the end
+        - Target AI: {ai} (but make it usable by any AI)
+        - Keep it under 200 lines
+        - Do NOT include YAML frontmatter — just the Markdown body
+
+        Output ONLY the Markdown content for the SKILL.md file. No preamble, no explanation.
+    """)
+
+    try:
+        result = sp.run(
+            ["claude", "-p", claude_prompt, "--output-format", "text"],
+            capture_output=True, text=True, timeout=120,
+            env={**os.environ, "CLAUDE_AUTO_APPROVE": "1"},
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            logger.warning("claude_generate_skill: Claude returned code=%d, output=%d chars",
+                           result.returncode, len(result.stdout or ""))
+            return None
+
+        content = result.stdout.strip()
+        description = f"AI-generated skill for {display_task.lower()} tasks (created by Claude for {ai})."
+        success = create_skill(skill_name, description, content)
+        if success:
+            logger.info("claude_generate_skill: created high-quality skill '%s' via Claude CLI",
+                        skill_name)
+            return skill_name
+        return None
+
+    except sp.TimeoutExpired:
+        logger.warning("claude_generate_skill: Claude CLI timed out (120s)")
+        return None
+    except Exception as exc:
+        logger.warning("claude_generate_skill: unexpected error — %s", exc)
+        return None
+
+
 def auto_create_skill_template(prompt: str, ai: str, output: str = "") -> Optional[str]:
     """
     Auto-generate and save a SKILL.md for the detected task type.

@@ -19,7 +19,10 @@ from helm.broadcast import push_message, push_state, push_thinking
 from helm.config import CLAUDE_TIMEOUT, INTEGRATION_TIMEOUT, logger
 from helm.history import save_cwd_to_log
 from helm.session_mgr import focused_session, record_usage_task
-from helm.skills import inject_skill_prefix, detect_skill, auto_create_skill_template
+from helm.skills import (
+    inject_skill_prefix, detect_skill, auto_create_skill_template,
+    claude_generate_skill,
+)
 from helm.plugins import inject_plugin_context
 
 from .claude import build_claude_cmd, parse_claude_json_output
@@ -603,6 +606,101 @@ _process_message = process_message  # legacy alias
 
 
 # ---------------------------------------------------------------------------
+# Self-Healing Skill Generation
+# ---------------------------------------------------------------------------
+
+# Track which (prompt_hash, ai) pairs have already attempted self-healing
+# to prevent infinite retry loops.
+_heal_attempts: set[str] = set()
+
+
+async def _self_heal_with_skill(ai: str, sess: dict, text: str, safe_text: str,
+                                 source: str, sid: str, error_output: str) -> Optional[str]:
+    """
+    Self-healing skill generation: when an AI fails a task and no matching
+    skill existed, invoke Claude to create a high-quality skill, then retry
+    the original task with the new skill injected.
+
+    Returns the successful retry output, or None if healing failed/skipped.
+    """
+    # Prevent infinite loops — only attempt once per prompt+ai combo
+    heal_key = f"{hash(text[:200])}::{ai}"
+    if heal_key in _heal_attempts:
+        logger.info("_self_heal_with_skill: already attempted for this prompt+ai — skipping")
+        return None
+    _heal_attempts.add(heal_key)
+
+    # Cap the set size to prevent memory leaks in long-running servers
+    if len(_heal_attempts) > 500:
+        _heal_attempts.clear()
+
+    await push_message(
+        "system",
+        f"🔧 **Self-healing:** {ai} couldn't complete this task. "
+        f"Asking Claude to create a skill for it…",
+        source=source, session_id=sid,
+    )
+
+    # Invoke Claude in a background thread to generate the skill
+    skill_name = await asyncio.to_thread(
+        claude_generate_skill, text, ai, error_output
+    )
+
+    if not skill_name:
+        await push_message(
+            "system",
+            "⚠️ Could not auto-generate a skill (Claude CLI unavailable or timed out). "
+            "Try switching to Claude or retry manually.",
+            source=source, session_id=sid,
+        )
+        return None
+
+    await push_message(
+        "system",
+        f"✅ **New skill created:** `{skill_name}` — retrying your task with it…",
+        source=source, session_id=sid,
+    )
+
+    # Retry: re-inject the newly created skill into the prompt
+    enriched_text = inject_skill_prefix(safe_text, ai=ai)
+    enriched_text = inject_plugin_context(enriched_text)
+
+    if ai == "ollama":
+        from .ollama import _run_ollama_agent
+        # Reset ollama messages so skill gets injected into system prompt
+        sess.pop("ollama_messages", None)
+        await push_thinking(True, ai, session_id=sid)
+        retry_output = await _run_ollama_agent(sess, safe_text, source, sid)
+        await push_thinking(False, session_id=sid)
+        if not _is_failure(retry_output):
+            await push_message("assistant", retry_output, ai=ai, source=source, session_id=sid)
+            return retry_output
+    elif ai in _st.integrations:
+        from helm.file_tracker import snapshot_dir, handle_diff
+        cwd = sess["cwd"]
+        integration = _st.integrations[ai]
+        use_stdin = integration.get("stdin_prompt", False)
+        cmd = integration["build_command"](enriched_text, model=sess.get("model"))
+        await push_thinking(True, ai, session_id=sid)
+        before = await asyncio.to_thread(snapshot_dir, cwd)
+        retry_output = await asyncio.to_thread(
+            run_ai_popen, cmd, cwd, ai, sess, INTEGRATION_TIMEOUT,
+            stdin_text=enriched_text if use_stdin else None,
+        )
+        after = await asyncio.to_thread(snapshot_dir, cwd)
+        await push_thinking(False, session_id=sid)
+        if not _is_failure(retry_output):
+            await push_message("assistant", retry_output, ai=ai, source=source, session_id=sid)
+            await handle_diff(before, after, source, cwd, session_id=sid)
+            return retry_output
+
+    # Retry also failed — return None to let normal error flow continue
+    logger.info("_self_heal_with_skill: retry with skill '%s' also failed for ai=%s",
+                skill_name, ai)
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Error Recovery — dispatch with retry + fallback AI switching
 # ---------------------------------------------------------------------------
 
@@ -658,10 +756,22 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
     elif ai == "ollama":
         from .ollama import _run_ollama_agent
         await push_thinking(True, ai, session_id=sid)
+        skill_matched = detect_skill(text)
         output = await _run_ollama_agent(sess, safe_text, source, sid)
         await push_thinking(False, session_id=sid)
         if not _is_failure(output):
             await push_message("assistant", output, ai=ai, source=source, session_id=sid)
+            if not skill_matched:
+                asyncio.create_task(
+                    asyncio.to_thread(auto_create_skill_template, text, "ollama", output)
+                )
+        else:
+            # Self-healing: AI failed and no skill existed → ask Claude to create one
+            if not skill_matched:
+                healed = await _self_heal_with_skill(ai, sess, text, safe_text,
+                                                     source, sid, output)
+                if healed:
+                    return healed
         return output
 
     elif ai in _st.integrations:
@@ -694,6 +804,13 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
                 asyncio.create_task(
                     asyncio.to_thread(auto_create_skill_template, text, ai, output)
                 )
+        else:
+            # Self-healing: AI failed and no skill existed → ask Claude to create one
+            if not skill_matched:
+                healed = await _self_heal_with_skill(ai, sess, text, safe_text,
+                                                     source, sid, output)
+                if healed:
+                    return healed
         return output
 
     else:

@@ -70,47 +70,62 @@ _OLLAMA_TOOLS = [
             "name": "create_presentation",
             "description": (
                 "Create a professional, beautifully-styled PowerPoint presentation (.pptx) "
-                "with dark themed slides, accent bars, and polished visuals. "
+                "with themed slides, accent bars, cards, and polished visuals. "
                 "YOU MUST USE THIS TOOL for any presentation / slide / ppt request. "
-                "Provide the slide content and this tool handles all the styling."
+                "Provide the slide content and this tool handles all the styling. "
+                "Use VARIED slide types for engaging presentations — don't repeat the same type."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "filename": {
                         "type": "string",
-                        "description": "Output filename, e.g. 'AGI_vs_AI_Agents.pptx'",
+                        "description": "Output filename, e.g. 'AGI_Presentation.pptx'",
                     },
                     "title": {"type": "string", "description": "Presentation title for the title slide"},
                     "subtitle": {"type": "string", "description": "Subtitle or tagline for the title slide"},
+                    "theme": {
+                        "type": "string",
+                        "description": "Visual theme: 'dark' (default, blue/cyan on dark), 'corporate' (navy/gold), 'light' (clean white/blue), 'forest' (green/gold on dark green)",
+                    },
                     "slides": {
                         "type": "array",
                         "description": (
                             "Array of slide objects. Each slide has a 'type' and content fields. "
-                            "Types: 'content' (title + bullets), 'two_column' (title + left/right lists), "
-                            "'stat' (big number + label), 'section' (section divider). "
-                            "Aim for 8-12 slides with varied types."
+                            "Available types and their fields:\n"
+                            "- 'content': title + bullets (array of strings)\n"
+                            "- 'two_column': title + left_title + left_items + right_title + right_items\n"
+                            "- 'stat': stat_value (big number) + stat_label + context\n"
+                            "- 'section': number (int) + title (section divider)\n"
+                            "- 'timeline': title + steps (array of strings or {title, description})\n"
+                            "- 'comparison': title + option_a + option_a_points + option_b + option_b_points\n"
+                            "- 'quote': quote (text) + author\n"
+                            "- 'cards': title + cards (array of strings or {title, description}, max 4)\n"
+                            "- 'table': title + headers (array) + rows (array of arrays)\n"
+                            "- 'closing': title + subtitle (thank you / contact slide)\n"
+                            "Aim for 8-12 slides. Mix at least 4 different types for variety."
                         ),
                         "items": {
                             "type": "object",
                             "properties": {
                                 "type": {
                                     "type": "string",
-                                    "description": "Slide type: 'content', 'two_column', 'stat', or 'section'",
+                                    "description": "Slide type: content, two_column, stat, section, timeline, comparison, quote, cards, table, closing",
                                 },
-                                "title": {"type": "string", "description": "Slide title (for content/two_column)"},
-                                "bullets": {
-                                    "type": "array", "items": {"type": "string"},
-                                    "description": "Bullet points (for content slides)",
-                                },
-                                "left_title": {"type": "string", "description": "Left column title (two_column)"},
-                                "left_items": {"type": "array", "items": {"type": "string"}},
-                                "right_title": {"type": "string", "description": "Right column title (two_column)"},
-                                "right_items": {"type": "array", "items": {"type": "string"}},
-                                "stat_value": {"type": "string", "description": "Big number/stat (stat slide)"},
-                                "stat_label": {"type": "string", "description": "Label below stat"},
-                                "context": {"type": "string", "description": "Context line (stat slide)"},
-                                "number": {"type": "integer", "description": "Section number (section slide)"},
+                                "title": {"type": "string", "description": "Slide title"},
+                                "subtitle": {"type": "string", "description": "Slide subtitle (closing)"},
+                                "bullets": {"type": "array", "items": {"type": "string"}, "description": "Bullet points (content)"},
+                                "left_title": {"type": "string"}, "left_items": {"type": "array", "items": {"type": "string"}},
+                                "right_title": {"type": "string"}, "right_items": {"type": "array", "items": {"type": "string"}},
+                                "stat_value": {"type": "string", "description": "Big number (stat)"}, "stat_label": {"type": "string"}, "context": {"type": "string"},
+                                "number": {"type": "integer", "description": "Section number"},
+                                "steps": {"type": "array", "description": "Timeline steps (strings or {title, description})"},
+                                "option_a": {"type": "string"}, "option_a_points": {"type": "array", "items": {"type": "string"}},
+                                "option_b": {"type": "string"}, "option_b_points": {"type": "array", "items": {"type": "string"}},
+                                "quote": {"type": "string"}, "author": {"type": "string"},
+                                "cards": {"type": "array", "description": "Card items (strings or {title, description}), max 4"},
+                                "headers": {"type": "array", "items": {"type": "string"}, "description": "Table headers"},
+                                "rows": {"type": "array", "description": "Table rows (array of arrays)"},
                             },
                             "required": ["type"],
                         },
@@ -126,7 +141,7 @@ _OLLAMA_TOOLS = [
             "name": "create_pdf",
             "description": (
                 "Create a professional styled PDF document with headers, footers, "
-                "tables, callout boxes, and polished typography. "
+                "tables, callout boxes, key-value pairs, and polished typography. "
                 "YOU MUST USE THIS TOOL for any PDF creation request."
             ),
             "parameters": {
@@ -137,26 +152,29 @@ _OLLAMA_TOOLS = [
                     "subtitle": {"type": "string", "description": "Subtitle or byline"},
                     "sections": {
                         "type": "array",
-                        "description": "Array of sections. Each has heading + content (paragraphs, bullets, table, callout).",
+                        "description": (
+                            "Array of sections. Each has heading + content fields:\n"
+                            "- paragraphs: array of body text strings\n"
+                            "- bullets: array of bullet point strings\n"
+                            "- numbered_items: array of numbered list items\n"
+                            "- callout: highlighted note text (+ callout_label)\n"
+                            "- key_value_pairs: array of [key, value] pairs for info tables\n"
+                            "- table_headers + table_rows: data table\n"
+                            "- page_break: boolean to insert page break after"
+                        ),
                         "items": {
                             "type": "object",
                             "properties": {
                                 "heading": {"type": "string", "description": "Section heading"},
-                                "paragraphs": {
-                                    "type": "array", "items": {"type": "string"},
-                                    "description": "Body paragraphs",
-                                },
-                                "bullets": {
-                                    "type": "array", "items": {"type": "string"},
-                                    "description": "Bullet points",
-                                },
+                                "paragraphs": {"type": "array", "items": {"type": "string"}},
+                                "bullets": {"type": "array", "items": {"type": "string"}},
+                                "numbered_items": {"type": "array", "items": {"type": "string"}, "description": "Auto-numbered list"},
                                 "callout": {"type": "string", "description": "Highlighted callout text"},
+                                "callout_label": {"type": "string", "description": "Label for callout, e.g. 'Important', 'Tip'"},
+                                "key_value_pairs": {"type": "array", "description": "Array of [key, value] pairs", "items": {"type": "array"}},
                                 "table_headers": {"type": "array", "items": {"type": "string"}},
-                                "table_rows": {
-                                    "type": "array",
-                                    "items": {"type": "array", "items": {"type": "string"}},
-                                },
-                                "page_break": {"type": "boolean", "description": "Insert page break after section"},
+                                "table_rows": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+                                "page_break": {"type": "boolean"},
                             },
                             "required": ["heading"],
                         },
@@ -172,7 +190,7 @@ _OLLAMA_TOOLS = [
             "name": "create_document",
             "description": (
                 "Create a professional styled Word document (.docx) with proper headings, "
-                "bullet points, tables, and formatting. "
+                "bullet points, numbered lists, tables, callouts, and formatting. "
                 "YOU MUST USE THIS TOOL for any Word document / .docx request."
             ),
             "parameters": {
@@ -182,18 +200,26 @@ _OLLAMA_TOOLS = [
                     "title": {"type": "string", "description": "Document title"},
                     "sections": {
                         "type": "array",
-                        "description": "Array of sections with heading + content.",
+                        "description": (
+                            "Array of sections. Each has heading + content fields:\n"
+                            "- paragraphs: array of body text strings\n"
+                            "- bullets: array of bullet point strings\n"
+                            "- numbered_items: array of numbered list items\n"
+                            "- callout: indented highlighted text with accent border\n"
+                            "- key_value_pairs: array of [key, value] pairs for info tables\n"
+                            "- table_headers + table_rows: data table"
+                        ),
                         "items": {
                             "type": "object",
                             "properties": {
                                 "heading": {"type": "string", "description": "Section heading"},
                                 "paragraphs": {"type": "array", "items": {"type": "string"}},
                                 "bullets": {"type": "array", "items": {"type": "string"}},
+                                "numbered_items": {"type": "array", "items": {"type": "string"}},
+                                "callout": {"type": "string", "description": "Highlighted callout text with accent border"},
+                                "key_value_pairs": {"type": "array", "description": "Array of [key, value] pairs", "items": {"type": "array"}},
                                 "table_headers": {"type": "array", "items": {"type": "string"}},
-                                "table_rows": {
-                                    "type": "array",
-                                    "items": {"type": "array", "items": {"type": "string"}},
-                                },
+                                "table_rows": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
                             },
                             "required": ["heading"],
                         },
@@ -405,10 +431,11 @@ async def _execute_ollama_tool(name: str, args: dict, cwd: str) -> str:
                 filename += ".pptx"
             title    = args.get("title", "Presentation")
             subtitle = args.get("subtitle", "")
+            theme    = args.get("theme", "dark")
             slides   = args.get("slides", [])
             if not slides:
                 return "Error: 'slides' list is required with at least one slide."
-            code = _generate_pptx_code(filename, title, subtitle, slides)
+            code = _generate_pptx_code(filename, title, subtitle, slides, theme=theme)
             result = await asyncio.to_thread(
                 subprocess.run,
                 [sys.executable, "-c", code],
@@ -537,20 +564,26 @@ def _ollama_system_prompt(cwd: str, skill_content: str = "") -> str:
         f"Working directory: {cwd}\n\n"
         "RULES:\n"
         "• For PowerPoint presentations → ALWAYS use the create_presentation tool. "
-        "Provide a title, subtitle, and a list of slides. Each slide needs a type "
-        "(content, two_column, stat, section), a title, and appropriate data. "
-        "Aim for 8-12 slides with varied types.\n"
+        "Provide a title, subtitle, theme, and a list of slides. "
+        "Available slide types: content, two_column, stat, section, timeline, "
+        "comparison, quote, cards, table, closing. "
+        "IMPORTANT: Use at least 4 DIFFERENT slide types for variety. "
+        "Aim for 8-12 slides. Always end with a 'closing' slide. "
+        "Themes: 'dark' (default), 'corporate', 'light', 'forest'.\n"
         "• For PDF documents → ALWAYS use the create_pdf tool. "
-        "Provide a title, subtitle, and sections with headings, body text, bullets, and tables.\n"
+        "Provide a title, subtitle, and sections with headings, paragraphs, bullets, "
+        "numbered_items, callouts, key_value_pairs, and tables.\n"
         "• For Word documents → ALWAYS use the create_document tool. "
-        "Provide a title and sections with headings, body text, bullets, and tables.\n"
+        "Provide a title and sections with headings, paragraphs, bullets, "
+        "numbered_items, callouts, key_value_pairs, and tables.\n"
         "• Do NOT use execute_python for presentations, PDFs, or Word docs. "
         "Use the dedicated tools above instead.\n"
         "• For other code tasks → use execute_python.\n"
         "• For plain text, Markdown, JSON, CSV → use write_file.\n"
         "• To inspect files → use list_directory or read_file.\n"
         "• Always confirm at the end what was created, with the exact file name.\n"
-        "• QUALITY: produce detailed, professional content. Never produce stubs.\n"
+        "• QUALITY: produce detailed, professional content. Never produce stubs. "
+        "Write full sentences and paragraphs, not placeholder text.\n"
     )
 
     if skill_content:
