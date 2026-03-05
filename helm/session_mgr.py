@@ -372,13 +372,15 @@ _usage_for_ai = usage_for_ai  # legacy alias
 
 def sessions_state_payload() -> list[dict]:
     """Serialisable list of all sessions (no terminal objects)."""
+    from helm.context_manager import context_info_for_session
     return [
         {"id": s["id"], "name": s["name"], "ai": s["ai"], "cwd": s["cwd"],
          "history_id": path_to_id(s["cwd"]),
          "status": s["status"], "emoji": s["emoji"], "color": s["color"],
          "busy": s.get("busy", False), "task_start": s.get("task_start"),
          "usage": usage_for_ai(s.get("ai")),
-         "model": s.get("model")}
+         "model": s.get("model"),
+         "context": context_info_for_session(s)}
         for s in _st.sessions.values()
     ]
 

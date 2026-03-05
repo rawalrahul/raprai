@@ -297,6 +297,16 @@ async def handle_web_command(command: str, ws: WebSocket):
                                session_id=sess["id"])
         return
 
+    # --- compact (context window compaction) ---
+    if command == "compact":
+        sess = focused_session()
+        if sess:
+            from helm.context_manager import force_compact
+            result = await force_compact(sess, source="web")
+            await push_message("system", result, source="web", session_id=sess["id"])
+            await push_state()
+        return
+
     # --- schedule_list ---
     if command == "schedule_list":
         await ws.send_text(json.dumps({

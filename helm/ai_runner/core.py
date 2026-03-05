@@ -24,6 +24,7 @@ from helm.skills import (
     claude_generate_skill,
 )
 from helm.plugins import inject_plugin_context
+from helm.context_manager import update_token_count, check_and_compact
 
 from .claude import build_claude_cmd, parse_claude_json_output
 from .helpers import tg_progress_notify
@@ -595,6 +596,20 @@ async def process_message(text: str, source: str = "web",
         # Audit: log any destructive file commands in the AI output
         if output:
             _log_deletion_warning(actual_ai, sid or "", output)
+        # --- Context Window Management ---
+        # Update token count and auto-compact if needed
+        if sess:
+            update_token_count(
+                sess,
+                input_tokens=_tok_in or 0,
+                output_tokens=_tok_out or 0,
+                prompt_text=text,
+                output_text=output,
+            )
+            try:
+                await check_and_compact(sess, source=source)
+            except Exception as _ctx_err:
+                logger.warning("Context compaction failed: %s", _ctx_err)
         sess["busy"]       = False
         sess["task_start"] = None
         await push_state()  # flip session back to idle
