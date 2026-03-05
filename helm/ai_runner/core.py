@@ -189,6 +189,12 @@ _SAFETY_PREAMBLE = (
     "os.remove, os.unlink, pathlib.Path.unlink, rimraf, Remove-Item, etc. "
     "Always list the exact files/folders you intend to delete and wait for the "
     "user to say 'yes' before proceeding. If in doubt, DO NOT delete.\n\n"
+    "[IMPORTANT — UNCLEAR REQUESTS]\n"
+    "If the user's message is unclear, garbled, incomplete, or does not "
+    "describe a concrete task you can act on, DO NOT attempt to execute "
+    "code or guess what the user wants. Instead, reply with a short, "
+    "friendly message asking the user to repeat or clarify their request. "
+    "Only proceed with action when you clearly understand the task.\n\n"
 )
 
 _DESTRUCTIVE_PATTERNS = re.compile(
@@ -629,6 +635,73 @@ _process_message = process_message  # legacy alias
 # to prevent infinite retry loops.
 _heal_attempts: set[str] = set()
 
+# Lightweight coherence check — reject gibberish before wasting Claude
+# credits on skill generation.  We look for a minimum number of common
+# English words (verbs, nouns, prepositions, articles, etc.) that indicate
+# the user expressed an *actionable* intent.  The threshold is deliberately
+# low so that short but valid commands like "create a pdf" still pass.
+_COMMON_WORDS = frozenset(
+    # determiners / pronouns / prepositions / conjunctions
+    "a an the this that these those my your our their its "
+    "i me you we he she it they us him her them "
+    "in on at to for from by with of about into through after "
+    "and or but if so then because when while "
+    # common verbs / action words
+    "make create build write send read open close delete remove add edit "
+    "update fix change set get find search show list run start stop check "
+    "help generate convert move copy paste upload download install save "
+    "do can could would should will please tell explain summarize analyze "
+    "is are was were be been am has have had go went "
+    "need want like use try look give take put let "
+    .split()
+)
+
+
+def _is_coherent_task(text: str) -> bool:
+    """
+    Return True if *text* looks like a coherent user request rather than
+    garbled transcription noise.
+
+    Heuristics:
+      1. Must have at least 2 words.
+      2. At least 30 % of words (min 1) must be recognised common English
+         words — gibberish transcriptions almost never hit this bar.
+    """
+    words = re.findall(r"[a-zA-Z]{2,}", text.lower())
+    if len(words) < 2:
+        return False
+    recognised = sum(1 for w in words if w in _COMMON_WORDS)
+    ratio = recognised / len(words) if words else 0
+    return recognised >= 1 and ratio >= 0.30
+
+
+# Action verbs / task indicators that signal the user wants something *done*.
+_ACTION_VERBS = frozenset(
+    "make create build write send read open close delete remove add edit "
+    "update fix change set get find search show list run start stop check "
+    "help generate convert move copy paste upload download install save "
+    "deploy push pull merge commit test debug configure setup launch "
+    "summarize analyze explain translate format compile clean reset restart "
+    "schedule cancel rename replace monitor track fetch parse connect "
+    "export import sync share publish draft compose design sort filter "
+    "compare calculate resize crop extract fill optimize review migrate "
+    "backup restore enable disable prepare plan organize research "
+    "tell give need want can could please try do"
+    .split()
+)
+
+
+def _has_actionable_intent(text: str) -> bool:
+    """
+    Return True if *text* contains at least one action verb or task-like
+    keyword, suggesting the user wants a concrete action performed.
+
+    This filters out messages that are coherent English but not tasks,
+    e.g. "nice weather today" or "committed breakout session".
+    """
+    words = set(re.findall(r"[a-zA-Z]{2,}", text.lower()))
+    return bool(words & _ACTION_VERBS)
+
 
 async def _self_heal_with_skill(ai: str, sess: dict, text: str, safe_text: str,
                                  source: str, sid: str, error_output: str) -> Optional[str]:
@@ -639,6 +712,35 @@ async def _self_heal_with_skill(ai: str, sess: dict, text: str, safe_text: str,
 
     Returns the successful retry output, or None if healing failed/skipped.
     """
+    # Guard 1: skip self-healing for gibberish / incoherent input (e.g. bad
+    # voice transcriptions).  Only create skills for real, actionable tasks.
+    if not _is_coherent_task(text):
+        logger.info("_self_heal_with_skill: input text appears incoherent — skipping "
+                     "(text=%r)", text[:120])
+        await push_message(
+            "system",
+            "🤔 I couldn't understand that request. Could you please repeat "
+            "or rephrase what you'd like me to do?",
+            source=source, session_id=sid,
+        )
+        return None
+
+    # Guard 2: even if coherent, the message must contain a clear actionable
+    # intent (a verb / command) before we spend Claude credits on skill
+    # creation.  Phrases like "hello" or "nice weather" are coherent but
+    # not tasks.
+    if not _has_actionable_intent(text):
+        logger.info("_self_heal_with_skill: no actionable intent detected — asking "
+                     "user to clarify (text=%r)", text[:120])
+        await push_message(
+            "system",
+            f"⚠️ {ai} wasn't able to complete this. I'm not sure what task "
+            "you'd like me to do — could you describe it more clearly so I "
+            "can help?",
+            source=source, session_id=sid,
+        )
+        return None
+
     # Prevent infinite loops — only attempt once per prompt+ai combo
     heal_key = f"{hash(text[:200])}::{ai}"
     if heal_key in _heal_attempts:
@@ -763,7 +865,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         if not _is_failure(output):
             await push_message("assistant", output, ai="claude", source=source, session_id=sid)
             await handle_diff(before, after, source, cwd, session_id=sid)
-            if not detect_skill(text):
+            if not detect_skill(text) and _is_coherent_task(text):
                 asyncio.create_task(
                     asyncio.to_thread(auto_create_skill_template, text, "claude", output)
                 )
@@ -777,7 +879,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         await push_thinking(False, session_id=sid)
         if not _is_failure(output):
             await push_message("assistant", output, ai=ai, source=source, session_id=sid)
-            if not skill_matched:
+            if not skill_matched and _is_coherent_task(text):
                 asyncio.create_task(
                     asyncio.to_thread(auto_create_skill_template, text, "ollama", output)
                 )
@@ -816,7 +918,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         if not _is_failure(output):
             await push_message("assistant", output, ai=ai, source=source, session_id=sid)
             await handle_diff(before, after, source, cwd, session_id=sid)
-            if not skill_matched:
+            if not skill_matched and _is_coherent_task(text):
                 asyncio.create_task(
                     asyncio.to_thread(auto_create_skill_template, text, ai, output)
                 )
