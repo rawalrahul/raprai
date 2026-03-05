@@ -234,6 +234,10 @@ def check_connected(plugin_info: dict) -> bool:
     auth = plugin_info.get("auth", {})
     auth_type = auth.get("type", "")
 
+    # No-auth plugins (local tools like MS Office): always connected
+    if auth_type == "none":
+        return True
+
     # Token-type plugins: check token_env or any of the multi-tokens
     if auth_type == "token":
         # Single token
