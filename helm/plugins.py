@@ -47,8 +47,8 @@ def load_plugins() -> None:
     _registry.clear()
 
     # Locate plugins directory
-    here = pathlib.Path(__file__).parent
-    _plugins_dir = here / "plugins"
+    from helm.paths import HELM_DIR
+    _plugins_dir = HELM_DIR / "plugins"
     if not _plugins_dir.exists():
         logger.info("Plugins: directory %s not found — skipping", _plugins_dir)
         return

@@ -12,7 +12,13 @@ import sys
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# In bundled mode, .env lives next to the .exe (not inside the bundle)
+from helm.paths import user_data_dir as _udd
+_env_path = _udd() / ".env"
+if _env_path.exists():
+    load_dotenv(_env_path)
+else:
+    load_dotenv()  # fallback: search from cwd
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -64,7 +70,12 @@ INTEGRATION_TIMEOUT = float(os.environ.get("INTEGRATION_TIMEOUT", "180"))  # 3 m
 _DEFAULT_CWD = os.environ.get("SESSION_CWD", os.getcwd())
 WEB_PORT     = int(os.environ.get("WEB_PORT", "8000"))
 WEB_HOST     = os.environ.get("WEB_HOST", "127.0.0.1")
-CHAT_LOG_DIR = pathlib.Path(os.environ.get("CHAT_LOG_DIR", "chat_logs"))
+# In bundled mode, chat_logs/ lives next to the .exe for persistence
+_chat_log_env = os.environ.get("CHAT_LOG_DIR", "")
+if _chat_log_env:
+    CHAT_LOG_DIR = pathlib.Path(_chat_log_env)
+else:
+    CHAT_LOG_DIR = _udd() / "chat_logs"
 
 # ---------------------------------------------------------------------------
 # PIN auth (values populated by helm/auth.py after first setup)

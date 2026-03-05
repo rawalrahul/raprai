@@ -207,7 +207,8 @@ def _log_deletion_warning(ai: str, session_id: str, output: str):
     matches = _DESTRUCTIVE_PATTERNS.findall(output)
     if not matches:
         return
-    log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "deletion_log.json")
+    from helm.paths import user_data_dir
+    log_path = str(user_data_dir() / "deletion_log.json")
     entry = {
         "timestamp": datetime.now().isoformat(),
         "ai": ai,

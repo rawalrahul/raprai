@@ -10,11 +10,12 @@ import pathlib
 
 import helm.state as _st
 from helm.config import logger
+from helm.paths import resolve
 
 
 def load_integrations() -> None:
     """Scan integrations/ folder and register every non-underscore .py file."""
-    folder = pathlib.Path(__file__).parent.parent / "integrations"
+    folder = resolve("integrations")
     if not folder.exists():
         logger.info("No integrations/ folder found — skipping plugin load.")
         return

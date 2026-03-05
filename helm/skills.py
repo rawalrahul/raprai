@@ -111,8 +111,11 @@ def _candidate_paths() -> list[pathlib.Path]:
                 _add(pathlib.Path(part))
 
     # 2. Auto-discover: walk upward collecting ALL .skills/skills directories
-    here   = pathlib.Path(__file__).parent.parent  # helm/ → project root
+    from helm.paths import PROJECT_ROOT, user_data_dir
+    here   = user_data_dir()  # writable root (exe dir when bundled)
     search = here
+    # Also check the bundle root (for skills shipped with the installer)
+    _add((PROJECT_ROOT / ".skills" / "skills").resolve())
     for _ in range(6):
         probe = search / ".skills" / "skills"
         if probe.exists():
@@ -793,8 +796,8 @@ def create_skill(name: str, description: str, content: str) -> bool:
 
     if _primary_skills_dir is None:
         # Try to find/create a default path
-        here = pathlib.Path(__file__).parent.parent
-        fallback = here / ".skills" / "skills"
+        from helm.paths import user_data_dir
+        fallback = user_data_dir() / ".skills" / "skills"
         try:
             fallback.mkdir(parents=True, exist_ok=True)
             _primary_skills_dir = fallback
