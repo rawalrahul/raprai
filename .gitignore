@@ -32,4 +32,6 @@ desktop.ini
 
 # Claude Code internals
 .claude/
-.claude/ 
+
+# Skills (managed externally)
+.skills/

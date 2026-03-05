@@ -20,6 +20,7 @@ from typing import Optional
 
 import helm.state as _st
 from helm.config import CHAT_LOG_DIR, HISTORY_ID_RE, logger
+from helm.paths import user_data_dir as _udd
 
 # ---------------------------------------------------------------------------
 # Config helpers — read live from os.environ so Settings UI changes take
@@ -77,15 +78,30 @@ _PENDING_SIGNALS = [
 ]
 
 
-def scan_pending_tasks(max_logs: int = 10) -> list[dict]:
+def scan_pending_tasks(max_logs: int = 10, max_age_hours: float = 0) -> list[dict]:
     """
     Scan the most recent N chat logs for messages containing pending-task signals.
+
+    Args:
+        max_logs: Maximum number of log files to scan (most recent first).
+        max_age_hours: Only consider messages newer than this many hours.
+                       0 means use the heartbeat interval as the window
+                       (default: 2× the interval so nothing slips through
+                       the cracks when the system is off for a while).
 
     Returns a list of dicts:
         {"history_id": str, "folder": str, "ai": str, "snippet": str, "ts": float}
     """
     if not CHAT_LOG_DIR.exists():
         return []
+
+    # Time-window: only surface messages from the last 2× heartbeat interval
+    # (e.g. 48 hours for a 24h interval).  This prevents ancient "todo" matches
+    # from resurfacing on every check-in.
+    if max_age_hours > 0:
+        cutoff_ts = time.time() - (max_age_hours * 3600)
+    else:
+        cutoff_ts = time.time() - (_interval() * 2)
 
     log_files = sorted(
         [f for f in CHAT_LOG_DIR.glob("*.jsonl") if HISTORY_ID_RE.fullmatch(f.stem)],
@@ -95,6 +111,11 @@ def scan_pending_tasks(max_logs: int = 10) -> list[dict]:
 
     pending = []
     for log_file in log_files:
+        # Skip files that haven't been modified since the cutoff — no
+        # recent messages could possibly be inside.
+        if log_file.stat().st_mtime < cutoff_ts:
+            continue
+
         hid = log_file.stem
         try:
             lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -119,6 +140,12 @@ def scan_pending_tasks(max_logs: int = 10) -> list[dict]:
             if rec.get("type") == "message":
                 if rec.get("ai"):
                     last_ai = rec["ai"]
+
+                # --- Age filter: skip messages older than the cutoff ---
+                msg_ts = rec.get("ts", 0)
+                if msg_ts and msg_ts < cutoff_ts:
+                    continue
+
                 content = (rec.get("content") or "").lower()
                 # Check both user and assistant messages for pending signals
                 for signal in _PENDING_SIGNALS:
@@ -129,7 +156,7 @@ def scan_pending_tasks(max_logs: int = 10) -> list[dict]:
                             "folder": folder or hid,
                             "ai": last_ai,
                             "snippet": snippet,
-                            "ts": rec.get("ts", 0),
+                            "ts": msg_ts,
                             "signal": signal,
                         })
                         break  # one match per message is enough
@@ -264,6 +291,29 @@ async def heartbeat_callback(update, context):
 
 
 # ---------------------------------------------------------------------------
+# Persistent last-heartbeat timestamp — survives restarts
+# ---------------------------------------------------------------------------
+
+_HEARTBEAT_TS_FILE = _udd() / ".heartbeat_last"
+
+
+def _load_last_heartbeat() -> float:
+    """Load the last heartbeat timestamp from disk (0.0 if missing/corrupt)."""
+    try:
+        return float(_HEARTBEAT_TS_FILE.read_text().strip())
+    except Exception:
+        return 0.0
+
+
+def _save_last_heartbeat(ts: float):
+    """Persist the last heartbeat timestamp to disk."""
+    try:
+        _HEARTBEAT_TS_FILE.write_text(str(ts))
+    except Exception as exc:
+        logger.warning("Heartbeat: could not save timestamp: %s", exc)
+
+
+# ---------------------------------------------------------------------------
 # Main heartbeat runner — launched as asyncio.create_task at startup
 # ---------------------------------------------------------------------------
 
@@ -273,9 +323,13 @@ async def heartbeat_runner():
     """Background loop: sleep for HEARTBEAT_INTERVAL, then scan and notify."""
     global _last_heartbeat
 
+    # Restore last heartbeat timestamp from disk so we don't fire
+    # immediately after every restart.
+    _last_heartbeat = _load_last_heartbeat()
+
     # Wait 60s after startup before first check
     await asyncio.sleep(60)
-    logger.info("Heartbeat runner started (interval=%ss)", _interval())
+    logger.info("Heartbeat runner started (interval=%ss, last_heartbeat=%.0f)", _interval(), _last_heartbeat)
 
     while True:
         try:
@@ -296,6 +350,7 @@ async def heartbeat_runner():
                 await asyncio.sleep(interval - elapsed)
 
             _last_heartbeat = time.time()
+            _save_last_heartbeat(_last_heartbeat)
 
             # Skip if user is currently active (any session busy or used recently)
             active = any(
