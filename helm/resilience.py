@@ -352,6 +352,13 @@ async def graceful_shutdown():
     if stopped:
         logger.info("Stopped %d active AI process(es)", stopped)
 
+    # Stop cloud backup scheduler
+    try:
+        from helm.cloud_backup.scheduler import stop_scheduler
+        await stop_scheduler()
+    except Exception as e:
+        logger.error("Error stopping backup scheduler: %s", e)
+
     # Close database connections
     try:
         from helm.db import close_all

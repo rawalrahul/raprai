@@ -156,11 +156,48 @@ def v4_add_memories_table(conn: sqlite3.Connection):
     conn.commit()
 
 
+def v5_add_cloud_backup_tables(conn: sqlite3.Connection):
+    """Version 5: Add cloud backup configuration and job history tables."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS cloud_backup_config (
+            provider      TEXT PRIMARY KEY,
+            enabled       INTEGER NOT NULL DEFAULT 0,
+            frequency     TEXT NOT NULL DEFAULT 'daily',
+            scheduled_hour INTEGER DEFAULT 2,
+            scheduled_weekday INTEGER DEFAULT 0,
+            remote_folder TEXT DEFAULT '',
+            last_backup_at TEXT,
+            next_backup_at TEXT,
+            created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS cloud_backup_jobs (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider      TEXT NOT NULL,
+            job_type      TEXT NOT NULL DEFAULT 'manual',
+            status        TEXT NOT NULL DEFAULT 'pending',
+            started_at    TEXT NOT NULL DEFAULT (datetime('now')),
+            completed_at  TEXT,
+            error_message TEXT,
+            backup_size   INTEGER,
+            remote_id     TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_backup_jobs_provider
+            ON cloud_backup_jobs(provider);
+        CREATE INDEX IF NOT EXISTS idx_backup_jobs_status
+            ON cloud_backup_jobs(status);
+    """)
+    conn.commit()
+
+
 MIGRATIONS: list[tuple[int, str, callable]] = [
     (1, "Initial schema", v1_initial),
     (2, "Add FTS5 full-text search", v2_add_content_fts),
     (3, "Add RAPR Packages tracking", v3_add_helmpack_tables),
     (4, "Add shared AI memory", v4_add_memories_table),
+    (5, "Add cloud backup", v5_add_cloud_backup_tables),
 ]
 
 

@@ -251,6 +251,13 @@ async def _main():
     asyncio.create_task(heartbeat_runner())
     asyncio.create_task(_open_browser())
 
+    # Start cloud backup scheduler (checks every 5 min for due backups)
+    try:
+        from helm.cloud_backup.scheduler import start_scheduler
+        asyncio.create_task(start_scheduler())
+    except Exception as exc:
+        logger.warning("Cloud backup scheduler start failed: %s", exc)
+
     # Start AI subprocess watchdog (detects dead processes, notifies users)
     from helm.resilience import ai_watchdog
     asyncio.create_task(ai_watchdog())

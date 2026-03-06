@@ -30,6 +30,7 @@ from .mcp_routes import router as mcp_router
 from .context_routes import router as context_router
 from .packages_routes import router as packages_router
 from .memory_routes import router as memory_router
+from .backup_routes import router as backup_router
 
 # Include all routers in the app
 app.include_router(auth_router)
@@ -47,6 +48,7 @@ app.include_router(mcp_router)
 app.include_router(context_router)
 app.include_router(packages_router)
 app.include_router(memory_router)
+app.include_router(backup_router)
 
 # Re-export model fetchers so they can be imported as: from helm.web_routes import _fetch_claude_models
 from .helpers import (
