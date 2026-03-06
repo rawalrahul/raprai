@@ -287,7 +287,10 @@ async def get_step_detail(pipeline_id: str, step_id: str):
 
 @router.get("/api/pipeline/templates")
 async def list_templates():
-    """List all saved pipeline templates."""
+    """List all saved pipeline templates (from DB + in-memory)."""
+    # Load from DB into state if not already loaded
+    _load_pipeline_templates_from_db()
+
     items = []
     for tpl in sorted(
         _st.pipeline_templates.values(),
@@ -325,6 +328,7 @@ async def save_template(pipeline_id: str, request: Request):
 
     tpl = make_template(name, pl, description=body.get("description", ""))
     _st.pipeline_templates[tpl["id"]] = tpl
+    _save_pipeline_template_to_db(tpl)
 
     return JSONResponse({"ok": True, "template": {
         "id": tpl["id"],
@@ -373,6 +377,7 @@ async def delete_template(template_id: str):
     if template_id not in _st.pipeline_templates:
         return JSONResponse({"error": "Template not found"}, status_code=404)
     del _st.pipeline_templates[template_id]
+    _delete_pipeline_template_from_db(template_id)
     return JSONResponse({"ok": True})
 
 
@@ -389,3 +394,68 @@ async def get_pipeline_cost(pipeline_id: str):
 
     cost = estimate_pipeline_cost(pl)
     return JSONResponse({"cost": cost})
+
+
+# ---------------------------------------------------------------------------
+# Pipeline template DB helpers
+# ---------------------------------------------------------------------------
+
+def _save_pipeline_template_to_db(tpl: dict) -> None:
+    """Persist a pipeline template to SQLite."""
+    import json
+    try:
+        from helm.db import get_db
+        db = get_db()
+        db.execute(
+            """INSERT OR REPLACE INTO pipeline_templates
+               (id, name, description, planner_ai, steps_template,
+                use_count, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                tpl["id"],
+                tpl["name"],
+                tpl.get("description", ""),
+                tpl.get("planner_ai", ""),
+                json.dumps(tpl.get("steps_template", []), ensure_ascii=False),
+                tpl.get("use_count", 0),
+                tpl.get("created_at", 0),
+            ),
+        )
+        db.commit()
+    except Exception as e:
+        logger.warning("Could not save pipeline template to DB: %s", e)
+
+
+def _load_pipeline_templates_from_db() -> None:
+    """Load pipeline templates from SQLite into state (if not already loaded)."""
+    import json
+    if _st.pipeline_templates:
+        return  # Already loaded
+    try:
+        from helm.db import get_db
+        db = get_db()
+        rows = db.execute("SELECT * FROM pipeline_templates").fetchall()
+        for row in rows:
+            tpl = {
+                "id": row["id"],
+                "name": row["name"],
+                "description": row["description"] or "",
+                "planner_ai": row["planner_ai"] or "",
+                "steps_template": json.loads(row["steps_template"]) if row["steps_template"] else [],
+                "use_count": row["use_count"],
+                "created_at": row["created_at"],
+            }
+            _st.pipeline_templates[tpl["id"]] = tpl
+    except Exception as e:
+        logger.warning("Could not load pipeline templates from DB: %s", e)
+
+
+def _delete_pipeline_template_from_db(template_id: str) -> None:
+    """Delete a pipeline template from SQLite."""
+    try:
+        from helm.db import get_db
+        db = get_db()
+        db.execute("DELETE FROM pipeline_templates WHERE id = ?", (template_id,))
+        db.commit()
+    except Exception as e:
+        logger.warning("Could not delete pipeline template from DB: %s", e)

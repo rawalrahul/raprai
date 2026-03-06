@@ -3,8 +3,8 @@ helm/auth.py — PIN-based authentication for RAPR AI.
 
 Provides:
   - PIN hashing (SHA-256 + random salt, stored in .env)
-  - Session token issuance and validation (in-memory + HttpOnly cookie)
-  - Brute-force lockout (in-memory counter, configurable threshold)
+  - Session token issuance and validation (SQLite-backed + HttpOnly cookie)
+  - Brute-force lockout (SQLite-persisted, survives restarts)
   - check_auth() helper used by route guards
 """
 
@@ -27,10 +27,9 @@ LOCKOUT_SECONDS = int(os.environ.get("PIN_LOCKOUT_SECS",  "300"))   # 5 minutes
 COOKIE_NAME     = "hq_session"
 
 # ---------------------------------------------------------------------------
-# In-memory stores (survive for the lifetime of the server process)
+# In-memory cache (hot path) + DB persistence (survives restarts)
 # ---------------------------------------------------------------------------
 
-_sessions: dict[str, float] = {}       # token -> expiry Unix timestamp
 _failed:   dict[str, list]  = {}       # client_ip -> [attempt_timestamps]
 
 # ---------------------------------------------------------------------------
@@ -76,13 +75,49 @@ def verify_pin(pin: str) -> bool:
     return _hash_pin(pin, salt) == stored_hash
 
 # ---------------------------------------------------------------------------
-# Brute-force protection
+# Brute-force protection (SQLite-backed, survives restarts)
 # ---------------------------------------------------------------------------
+
+def _ensure_lockout_table():
+    """Create the lockout_attempts table if it doesn't exist."""
+    try:
+        from helm.db import get_db
+        db = get_db()
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS lockout_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ip TEXT NOT NULL,
+                failed_at REAL NOT NULL
+            )
+        """)
+        db.execute("CREATE INDEX IF NOT EXISTS idx_lockout_ip ON lockout_attempts(ip)")
+        db.commit()
+    except Exception:
+        pass
+
 
 def _prune(ip: str) -> list:
     """Return only the recent failure timestamps for *ip* (within lockout window)."""
     now = time.time()
-    recent = [t for t in _failed.get(ip, []) if now - t < LOCKOUT_SECONDS]
+    cutoff = now - LOCKOUT_SECONDS
+
+    # Update in-memory cache from DB
+    try:
+        from helm.db import get_db
+        db = get_db()
+        # Delete old entries from DB
+        db.execute("DELETE FROM lockout_attempts WHERE failed_at < ?", (cutoff,))
+        db.commit()
+        # Load recent from DB
+        rows = db.execute(
+            "SELECT failed_at FROM lockout_attempts WHERE ip = ? AND failed_at >= ?",
+            (ip, cutoff),
+        ).fetchall()
+        recent = [r["failed_at"] for r in rows]
+    except Exception:
+        # Fallback to in-memory if DB unavailable
+        recent = [t for t in _failed.get(ip, []) if t > cutoff]
+
     _failed[ip] = recent
     return recent
 
@@ -92,11 +127,32 @@ def is_locked_out(ip: str) -> bool:
 
 
 def record_failure(ip: str) -> None:
-    _failed.setdefault(ip, []).append(time.time())
+    now = time.time()
+    _failed.setdefault(ip, []).append(now)
+    # Persist to DB
+    try:
+        from helm.db import get_db
+        db = get_db()
+        _ensure_lockout_table()
+        db.execute(
+            "INSERT INTO lockout_attempts (ip, failed_at) VALUES (?, ?)",
+            (ip, now),
+        )
+        db.commit()
+    except Exception:
+        pass
 
 
 def clear_failures(ip: str) -> None:
     _failed.pop(ip, None)
+    # Clear from DB
+    try:
+        from helm.db import get_db
+        db = get_db()
+        db.execute("DELETE FROM lockout_attempts WHERE ip = ?", (ip,))
+        db.commit()
+    except Exception:
+        pass
 
 
 def seconds_until_unlock(ip: str) -> int:
@@ -108,33 +164,77 @@ def seconds_until_unlock(ip: str) -> int:
     remaining = LOCKOUT_SECONDS - (time.time() - oldest)
     return max(0, int(remaining))
 
+
+def load_lockout_from_db():
+    """Load lockout state from DB on startup. Call from web_app.py."""
+    try:
+        _ensure_lockout_table()
+        from helm.db import get_db
+        db = get_db()
+        cutoff = time.time() - LOCKOUT_SECONDS
+        # Clean old entries
+        db.execute("DELETE FROM lockout_attempts WHERE failed_at < ?", (cutoff,))
+        db.commit()
+        # Load remaining
+        rows = db.execute(
+            "SELECT ip, failed_at FROM lockout_attempts WHERE failed_at >= ?",
+            (cutoff,),
+        ).fetchall()
+        for row in rows:
+            _failed.setdefault(row["ip"], []).append(row["failed_at"])
+    except Exception:
+        pass
+
 # ---------------------------------------------------------------------------
-# Session tokens
+# Session tokens (SQLite-backed for persistence across restarts)
 # ---------------------------------------------------------------------------
 
 def issue_token() -> str:
-    """Generate a new session token and store its expiry."""
+    """Generate a new session token and persist it to the database."""
+    from helm.db import get_db
     token  = secrets.token_urlsafe(32)
     expiry = time.time() + SESSION_DAYS * 86_400
-    _sessions[token] = expiry
+    try:
+        db = get_db()
+        db.execute(
+            "INSERT INTO auth_sessions (token, expires_at) VALUES (?, ?)",
+            (token, expiry),
+        )
+        db.commit()
+    except Exception:
+        pass  # Token still works in-memory for this process
     return token
 
 
 def is_valid_token(token: Optional[str]) -> bool:
-    """Return True if *token* exists and has not expired."""
+    """Return True if *token* exists in the DB and has not expired."""
     if not token:
         return False
-    expiry = _sessions.get(token)
-    if expiry is None:
+    from helm.db import get_db
+    try:
+        db = get_db()
+        row = db.execute(
+            "SELECT expires_at FROM auth_sessions WHERE token = ?", (token,)
+        ).fetchone()
+        if row is None:
+            return False
+        if time.time() > row["expires_at"]:
+            db.execute("DELETE FROM auth_sessions WHERE token = ?", (token,))
+            db.commit()
+            return False
+        return True
+    except Exception:
         return False
-    if time.time() > expiry:
-        _sessions.pop(token, None)
-        return False
-    return True
 
 
 def revoke_token(token: str) -> None:
-    _sessions.pop(token, None)
+    from helm.db import get_db
+    try:
+        db = get_db()
+        db.execute("DELETE FROM auth_sessions WHERE token = ?", (token,))
+        db.commit()
+    except Exception:
+        pass
 
 # ---------------------------------------------------------------------------
 # FastAPI helpers

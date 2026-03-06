@@ -59,3 +59,17 @@ def user_data_dir() -> pathlib.Path:
     if is_bundled():
         return pathlib.Path(sys.executable).parent
     return PROJECT_ROOT
+
+
+def helmpack_cache_dir() -> pathlib.Path:
+    """Return the directory for cached marketplace data (catalogs, downloads)."""
+    d = user_data_dir() / "helmpack_cache"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def helmpack_staging_dir() -> pathlib.Path:
+    """Return the directory for temporary package extraction during install."""
+    d = user_data_dir() / "helmpack_staging"
+    d.mkdir(parents=True, exist_ok=True)
+    return d

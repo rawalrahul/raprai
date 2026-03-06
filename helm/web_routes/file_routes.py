@@ -105,10 +105,9 @@ async def diagnostics_export():
             except Exception:
                 pass
 
-    # Sanitise: make sure no secrets leak
-    for key in ("TELEGRAM_BOT_TOKEN", "PIN_HASH", "PIN_SALT", "WEBHOOK_TOKEN",
-                "GEMINI_API_KEY", "OPENAI_API_KEY"):
-        diag.pop(key, None)
+    # Deep-sanitise: make sure no secrets leak in any field or log line
+    from helm.security import sanitize_diagnostics
+    diag = sanitize_diagnostics(diag)
 
     payload = json.dumps(diag, indent=2, default=str)
     return Response(
@@ -128,18 +127,45 @@ async def diagnostics_export():
 async def upload_file(file: UploadFile = File(...)):
     """Save an uploaded file to the active session's CWD."""
     from helm.config import _DEFAULT_CWD
+    from helm.security import validate_upload, MAX_UPLOAD_SIZE
+
+    filename = file.filename or f"upload_{int(_time.time())}"
+
+    # Read data with size limit enforcement
+    try:
+        data = await file.read()
+    except Exception as exc:
+        return JSONResponse({"error": f"Failed to read upload: {exc}"}, status_code=400)
+
+    # Validate file type and size
+    error = validate_upload(filename, len(data))
+    if error:
+        return JSONResponse({"error": error}, status_code=400)
+
+    if len(data) > MAX_UPLOAD_SIZE:
+        return JSONResponse(
+            {"error": f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024*1024)} MB."},
+            status_code=413,
+        )
 
     sid = _st.focused_id
     sess = _st.sessions.get(sid) if sid else None
     cwd = sess.get("cwd", _DEFAULT_CWD) if sess else _DEFAULT_CWD
 
-    filename = file.filename or f"upload_{int(_time.time())}"
-    save_path = os.path.join(cwd, filename)
+    # Sanitize filename — prevent path traversal
+    safe_name = os.path.basename(filename)
+    if not safe_name or safe_name.startswith("."):
+        safe_name = f"upload_{int(_time.time())}"
+    save_path = os.path.join(cwd, safe_name)
+
+    # Prevent writing outside CWD
+    resolved = os.path.realpath(save_path)
+    if not resolved.startswith(os.path.realpath(cwd)):
+        return JSONResponse({"error": "Invalid upload path"}, status_code=400)
 
     try:
-        data = await file.read()
         with open(save_path, "wb") as f:
             f.write(data)
-        return JSONResponse({"filename": filename, "path": save_path, "size": len(data)})
+        return JSONResponse({"filename": safe_name, "path": save_path, "size": len(data)})
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)

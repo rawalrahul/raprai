@@ -125,6 +125,11 @@ def _candidate_paths() -> list[pathlib.Path]:
     return candidates
 
 
+def reload_registry() -> None:
+    """Convenience wrapper for hot-reload after helmpack install/uninstall."""
+    scan_skills()
+
+
 def scan_skills(skills_bases=None) -> dict[str, dict]:
     """
     Scan all skills directories and populate the merged registry.

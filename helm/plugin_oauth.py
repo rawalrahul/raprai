@@ -21,14 +21,85 @@ import os
 import secrets
 import base64
 import json
+import time
 from urllib.parse import urlencode
 
 import requests as http_requests
 
 from helm.config import logger
 
-# In-memory store for pending OAuth flows: state -> {plugin_id, code_verifier, ...}
+# In-memory cache for pending OAuth flows: state -> {plugin_id, code_verifier, ...}
+# Also persisted to SQLite for resilience across restarts.
 _pending_flows: dict[str, dict] = {}
+
+
+def _ensure_oauth_table():
+    """Create the oauth_pending_flows table if it doesn't exist."""
+    try:
+        from helm.db import get_db
+        db = get_db()
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS oauth_pending_flows (
+                state TEXT PRIMARY KEY,
+                flow_data TEXT NOT NULL,
+                created_at REAL NOT NULL
+            )
+        """)
+        db.commit()
+    except Exception:
+        pass
+
+
+def _persist_flow(state: str, flow_data: dict):
+    """Save a pending OAuth flow to SQLite."""
+    try:
+        _ensure_oauth_table()
+        from helm.db import get_db
+        db = get_db()
+        db.execute(
+            "INSERT OR REPLACE INTO oauth_pending_flows (state, flow_data, created_at) VALUES (?, ?, ?)",
+            (state, json.dumps(flow_data), time.time()),
+        )
+        db.commit()
+    except Exception:
+        pass
+
+
+def _pop_flow(state: str) -> dict | None:
+    """Pop a pending flow from memory + DB. Returns None if not found."""
+    flow = _pending_flows.pop(state, None)
+    # Also try DB
+    try:
+        from helm.db import get_db
+        db = get_db()
+        row = db.execute(
+            "SELECT flow_data FROM oauth_pending_flows WHERE state = ?", (state,)
+        ).fetchone()
+        db.execute("DELETE FROM oauth_pending_flows WHERE state = ?", (state,))
+        db.commit()
+        if row and not flow:
+            flow = json.loads(row["flow_data"])
+    except Exception:
+        pass
+    return flow
+
+
+def _cleanup_stale_flows():
+    """Remove OAuth flows older than 15 minutes."""
+    cutoff = time.time() - 900  # 15 minutes
+    # Clean memory
+    stale = [s for s, f in _pending_flows.items()
+             if f.get("_created_at", 0) < cutoff]
+    for s in stale:
+        _pending_flows.pop(s, None)
+    # Clean DB
+    try:
+        from helm.db import get_db
+        db = get_db()
+        db.execute("DELETE FROM oauth_pending_flows WHERE created_at < ?", (cutoff,))
+        db.commit()
+    except Exception:
+        pass
 
 
 def get_callback_url() -> str:
@@ -115,8 +186,11 @@ def start_oauth(plugin_info: dict) -> dict:
     if extra:
         params.update(extra)
 
-    # Store pending flow
+    # Store pending flow (memory + DB)
+    flow_data["_created_at"] = time.time()
     _pending_flows[state] = flow_data
+    _persist_flow(state, flow_data)
+    _cleanup_stale_flows()
 
     url = f"{authorize_url}?{urlencode(params)}"
     logger.info("OAuth: starting flow for %s (state=%s...)", plugin_id, state[:8])
@@ -150,7 +224,7 @@ def handle_callback(code: str, state: str) -> dict:
 
     Returns: {"ok": True, "plugin_id": "...", "connected": True}
     """
-    flow = _pending_flows.pop(state, None)
+    flow = _pop_flow(state)
     if not flow:
         return {"error": "Invalid or expired state. Please try connecting again."}
 

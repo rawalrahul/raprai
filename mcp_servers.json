@@ -17,7 +17,7 @@
       "SLACK_BOT_TOKEN": "",
       "SLACK_TEAM_ID": ""
     },
-    "enabled": true
+    "enabled": false
   },
   "notion": {
     "command": "npx -y @notionhq/notion-mcp-server",
@@ -38,6 +38,6 @@
     "env": {
       "POSTGRES_URL": ""
     },
-    "enabled": true
+    "enabled": false
   }
 }

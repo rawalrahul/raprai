@@ -124,12 +124,12 @@ def _find_cli(name: str) -> bool:
             _find_cli_cache[name] = True
             return True
 
-    # 3 — shell probe: ask cmd.exe / sh exactly like the user's terminal would.
+    # 3 — subprocess probe: run `<name> --version` directly (no shell).
     #     Timeout reduced to 3s to avoid blocking the caller too long.
     try:
         r = subprocess.run(
-            f"{name} --version",
-            shell=True,
+            [name, "--version"],
+            shell=False,
             capture_output=True,
             timeout=3,
             text=True,

@@ -1,10 +1,12 @@
 """
-helm/history.py — JSONL-based chat history: read, write, cache, migrate, search.
+helm/history.py — SQLite-backed chat history: read, write, cache, search.
 
-All history is stored in CHAT_LOG_DIR/{path_id}.jsonl where
-    path_id = "p_" + md5(normalized_path)[:12]
+All history is stored in helmhq.db in the `messages` and `chat_names` tables.
 
-A sidecar chat_names.json maps path_id → human-readable display name.
+The `history_id` is a stable hash of the normalised CWD path:
+    history_id = "p_" + md5(normalized_path)[:12]
+
+Legacy JSONL data is auto-imported by helm/db.py on first startup.
 """
 
 import json
@@ -38,71 +40,68 @@ _path_to_id = path_to_id
 
 
 # ---------------------------------------------------------------------------
-# Chat names sidecar
+# Chat names
 # ---------------------------------------------------------------------------
 
 def load_chat_names() -> dict:
-    """Load chat_names.json → {path_id: display_name}."""
-    names_file = CHAT_LOG_DIR / "chat_names.json"
-    if names_file.exists():
-        try:
-            return json.loads(names_file.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {}
+    """Load all chat names → {history_id: display_name}."""
+    from helm.db import get_db
+    try:
+        rows = get_db().execute("SELECT history_id, name FROM chat_names").fetchall()
+        return {row["history_id"]: row["name"] for row in rows}
+    except Exception:
+        return {}
 
 
 _load_chat_names = load_chat_names  # legacy alias
 
 
 def save_chat_name(date: str, name: str) -> None:
-    """Persist (or clear) a custom display name for a session path_id."""
-    CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
-    names_file = CHAT_LOG_DIR / "chat_names.json"
-    names = load_chat_names()
+    """Persist (or clear) a custom display name for a session history_id."""
+    from helm.db import get_db
+    db = get_db()
     name = name.strip()
     if name:
-        names[date] = name
+        db.execute(
+            "INSERT OR REPLACE INTO chat_names (history_id, name, updated_at) "
+            "VALUES (?, ?, datetime('now'))",
+            (date, name),
+        )
     else:
-        names.pop(date, None)
-    names_file.write_text(json.dumps(names, ensure_ascii=False, indent=2), encoding="utf-8")
+        db.execute("DELETE FROM chat_names WHERE history_id = ?", (date,))
+    db.commit()
 
 
 _save_chat_name = save_chat_name  # legacy alias
 
 
 def get_session_display_name(date_str: str) -> str:
-    """Return the best human-readable name for a session path_id.
+    """Return the best human-readable name for a session history_id.
 
     Priority:
-      1. Custom / auto-saved folder name from chat_names.json
-      2. Folder name extracted from the first CWD record in the log file
-      3. The raw path_id as a last resort
+      1. Custom / auto-saved folder name from chat_names table
+      2. Folder name extracted from the first CWD record in messages
+      3. The raw history_id as a last resort
     """
-    names = load_chat_names()
-    if names.get(date_str):
-        return names[date_str]
+    from helm.db import get_db
+    db = get_db()
 
-    log_file = CHAT_LOG_DIR / f"{date_str}.jsonl"
-    if log_file.exists():
-        try:
-            with log_file.open("r", encoding="utf-8", errors="replace") as fh:
-                head = fh.read(2048)
-            for raw in head.splitlines():
-                raw = raw.strip()
-                if not raw:
-                    continue
-                try:
-                    rec = json.loads(raw)
-                except Exception:
-                    continue
-                if rec.get("type") == "cwd" and rec.get("path"):
-                    folder = pathlib.Path(rec["path"]).name or ""
-                    if folder and folder not in (".", "~", "/"):
-                        return folder
-                    break
-        except Exception:
-            pass
+    # 1. Check chat_names
+    row = db.execute(
+        "SELECT name FROM chat_names WHERE history_id = ?", (date_str,)
+    ).fetchone()
+    if row and row["name"]:
+        return row["name"]
+
+    # 2. Check first CWD record in messages
+    row = db.execute(
+        "SELECT path FROM messages WHERE history_id = ? AND type = 'cwd' AND path IS NOT NULL LIMIT 1",
+        (date_str,),
+    ).fetchone()
+    if row and row["path"]:
+        folder = pathlib.Path(row["path"]).name or ""
+        if folder and folder not in (".", "~", "/"):
+            return folder
 
     return date_str
 
@@ -138,24 +137,38 @@ _is_valid_history_id = is_valid_history_id  # legacy alias
 # ---------------------------------------------------------------------------
 
 def get_history_messages(hid: str) -> list[dict]:
-    """Retrieve all messages from a log file by ID."""
-    log_file = CHAT_LOG_DIR / f"{hid}.jsonl"
-    if not log_file.exists():
-        return []
+    """Retrieve all messages from the database by history_id."""
+    from helm.db import get_db
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM messages WHERE history_id = ? AND type = 'message' ORDER BY id",
+        (hid,),
+    ).fetchall()
+
     messages = []
-    try:
-        for line in log_file.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
+    for row in rows:
+        msg = {
+            "type": "message",
+            "role": row["role"],
+            "content": row["content"],
+            "ai": row["ai"],
+            "session_id": row["session_id"],
+            "session_name": row["session_name"],
+            "session_emoji": row["session_emoji"],
+            "timestamp": row["timestamp"],
+            "ts": row["ts"],
+        }
+        # Merge any extra fields
+        if row["extra"]:
             try:
-                rec = json.loads(line)
-                if rec.get("type") == "message":
-                    messages.append(rec)
+                extra = json.loads(row["extra"])
+                msg.update(extra)
             except Exception:
                 pass
-    except Exception:
-        pass
+        # Remove None values to match legacy format
+        msg = {k: v for k, v in msg.items() if v is not None}
+        messages.append(msg)
+
     return messages
 
 
@@ -180,87 +193,126 @@ def _resolve_session_cwd(session_id: Optional[str]) -> str:
 
 
 def save_message_to_log(msg: dict, session_id: Optional[str] = None):
-    """Append a message to the path-based JSONL log file in CHAT_LOG_DIR."""
+    """Insert a message into the SQLite database."""
+    from helm.db import get_db
     try:
-        CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
         cwd = _resolve_session_cwd(session_id)
+        history_id = path_to_id(cwd)
 
-        path_id  = path_to_id(cwd)
-        log_file = CHAT_LOG_DIR / f"{path_id}.jsonl"
-        with log_file.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+        # Separate known fields from extra
+        known_keys = {"type", "role", "content", "ai", "session_id",
+                      "session_name", "session_emoji", "timestamp", "ts"}
+        extra = {k: v for k, v in msg.items() if k not in known_keys}
+
+        db = get_db()
+        db.execute(
+            """INSERT INTO messages
+               (history_id, type, role, content, ai, session_id,
+                session_name, session_emoji, timestamp, ts, extra)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                history_id,
+                msg.get("type", "message"),
+                msg.get("role"),
+                msg.get("content"),
+                msg.get("ai"),
+                msg.get("session_id") or session_id,
+                msg.get("session_name"),
+                msg.get("session_emoji"),
+                msg.get("timestamp") or ts(),
+                msg.get("ts"),
+                json.dumps(extra, ensure_ascii=False) if extra else None,
+            ),
+        )
+        db.commit()
     except Exception as e:
-        logger.warning("Could not save message to log: %s", e)
+        logger.warning("Could not save message to DB: %s", e)
 
 
 _save_message_to_log = save_message_to_log  # legacy alias
 
 
 def save_cwd_to_log(path: str, session_id: Optional[str] = None):
-    """Persist the current working directory as a record in the JSONL log.
+    """Persist the current working directory as a record in the database.
 
     Also auto-names the session after the folder if no name has been set yet.
 
-    The JSONL record is only written when a real session is active for this path.
+    The record is only written when a real session is active for this path.
     This prevents orphan history entries created by folder browsing without
-    an active session — the root cause of the duplicate-chat bug.
+    an active session.
     """
+    from helm.db import get_db
     try:
-        CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
-        path_id = path_to_id(path)
-        # Only write the JSONL record when a live session is tracking this path.
+        history_id = path_to_id(path)
+        # Only write the record when a live session is tracking this path.
         if session_id and session_id in _st.sessions:
-            log_file = CHAT_LOG_DIR / f"{path_id}.jsonl"
-            with log_file.open("a", encoding="utf-8") as f:
-                f.write(json.dumps({"type": "cwd", "path": path, "timestamp": ts()},
-                                   ensure_ascii=False) + "\n")
+            db = get_db()
+            db.execute(
+                """INSERT INTO messages
+                   (history_id, type, path, timestamp)
+                   VALUES (?, 'cwd', ?, ?)""",
+                (history_id, path, ts()),
+            )
+            db.commit()
+
         # Always update the display name for this path (pre-populates it for later).
         existing = load_chat_names()
-        if not existing.get(path_id):
+        if not existing.get(history_id):
             folder_name = pathlib.Path(path).name or path
             if folder_name and folder_name not in (".", "~", "/"):
-                save_chat_name(path_id, folder_name)
+                save_chat_name(history_id, folder_name)
     except Exception as e:
-        logger.warning("Could not save CWD to log: %s", e)
+        logger.warning("Could not save CWD to DB: %s", e)
 
 
 _save_cwd_to_log = save_cwd_to_log  # legacy alias
 
 
 def save_ai_to_log(model: Optional[str], session_id: Optional[str] = None):
-    """Persist the active AI model as a record in the path-based JSONL log."""
+    """Persist the active AI model as a record in the database."""
+    from helm.db import get_db
     try:
-        CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
         cwd = _resolve_session_cwd(session_id)
-
-        path_id  = path_to_id(cwd)
-        log_file = CHAT_LOG_DIR / f"{path_id}.jsonl"
-        with log_file.open("a", encoding="utf-8") as f:
-            f.write(json.dumps({"type": "ai", "model": model, "timestamp": ts()},
-                               ensure_ascii=False) + "\n")
+        history_id = path_to_id(cwd)
+        db = get_db()
+        db.execute(
+            """INSERT INTO messages
+               (history_id, type, model, timestamp)
+               VALUES (?, 'ai', ?, ?)""",
+            (history_id, model, ts()),
+        )
+        db.commit()
     except Exception as e:
-        logger.warning("Could not save AI to log: %s", e)
+        logger.warning("Could not save AI to DB: %s", e)
 
 
 _save_ai_to_log = save_ai_to_log  # legacy alias
 
 
 def save_last_state():
-    """Persist all session state to last_state.json for resume fallback."""
+    """Persist all session state to the database for resume fallback."""
+    from helm.db import get_db
     try:
-        CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
-        state_file = CHAT_LOG_DIR / "last_state.json"
         sessions_data = {}
         volatile_keys = {"terminal", "session_started", "total_task_seconds",
                          "task_count", "changes"}
         for sid, sess in _st.sessions.items():
             sessions_data[sid] = {k: v for k, v in sess.items() if k not in volatile_keys}
-        with state_file.open("w", encoding="utf-8") as f:
-            json.dump(
-                {"sessions": sessions_data, "focused_id": _st.focused_id,
-                 "counter": _st.session_counter, "timestamp": ts()},
-                f, ensure_ascii=False,
+
+        db = get_db()
+        state = {
+            "sessions": sessions_data,
+            "focused_id": _st.focused_id,
+            "counter": _st.session_counter,
+            "timestamp": ts(),
+        }
+        for key, value in state.items():
+            db.execute(
+                "INSERT OR REPLACE INTO session_state (key, value, updated_at) "
+                "VALUES (?, ?, datetime('now'))",
+                (key, json.dumps(value, ensure_ascii=False)),
             )
+        db.commit()
     except Exception as e:
         logger.warning("Could not save last state: %s", e)
 
@@ -269,139 +321,130 @@ _save_last_state = save_last_state  # legacy alias
 
 
 # ---------------------------------------------------------------------------
-# History cache — fast scan + background rebuild
+# History cache — fast query from SQLite
 # ---------------------------------------------------------------------------
 
-def scan_log_fast(log_file: pathlib.Path) -> dict:
-    """Read the first 2 KB and last 4 KB of a log file to extract metadata quickly."""
-    hid = log_file.stem
-    try:
-        size  = log_file.stat().st_size
-        mtime = log_file.stat().st_mtime
-        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-            head_raw   = f.read(min(2048, size))
-            head_lines = head_raw.splitlines()
-            first_cwd: str = ""
-            for line in head_lines:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except Exception:
-                    continue
-                if rec.get("type") == "cwd" and rec.get("path"):
-                    folder = pathlib.Path(rec["path"]).name or ""
-                    if folder and folder not in (".", "~", "/"):
-                        first_cwd = folder
-                    break
+def scan_log_fast(history_id_or_path) -> dict:
+    """Query metadata for a single history_id from the database.
 
-            if size > 4096:
-                f.seek(size - 4096)
-                f.readline()
-                tail_lines = f.readlines()
-            else:
-                tail_lines = head_lines
+    Accepts either a history_id string or a pathlib.Path (for backward compat
+    with code that passed a log file path — we extract the stem).
+    """
+    if isinstance(history_id_or_path, pathlib.Path):
+        history_id = history_id_or_path.stem
+    else:
+        history_id = str(history_id_or_path)
+
+    from helm.db import get_db
+    db = get_db()
+
+    try:
+        # Count messages
+        row = db.execute(
+            "SELECT COUNT(*) as cnt FROM messages WHERE history_id = ? AND type = 'message'",
+            (history_id,),
+        ).fetchone()
+        count = row["cnt"] if row else 0
+
+        # Get first CWD
+        cwd_row = db.execute(
+            "SELECT path FROM messages WHERE history_id = ? AND type = 'cwd' AND path IS NOT NULL LIMIT 1",
+            (history_id,),
+        ).fetchone()
+        first_cwd = ""
+        if cwd_row and cwd_row["path"]:
+            folder = pathlib.Path(cwd_row["path"]).name or ""
+            if folder and folder not in (".", "~", "/"):
+                first_cwd = folder
+
+        # Get latest assistant message info (preview, ai, ts)
+        last_row = db.execute(
+            """SELECT content, ai, ts FROM messages
+               WHERE history_id = ? AND type = 'message' AND role = 'assistant'
+               ORDER BY id DESC LIMIT 1""",
+            (history_id,),
+        ).fetchone()
 
         preview = ""
         last_ai = ""
-        last_ts: Optional[float] = None
-        count_tail = 0
-        for line in tail_lines:
-            line = line.strip() if isinstance(line, str) else line
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except Exception:
-                continue
-            if rec.get("type") == "message":
-                count_tail += 1
-                if rec.get("role") == "assistant":
-                    txt = rec.get("content", "")
-                    if txt:
-                        preview = txt[:100].replace("\n", " ")
-                if rec.get("ai"):
-                    last_ai = rec["ai"]
-                if rec.get("ts"):
-                    last_ts = rec["ts"]
+        last_ts = None
+
+        if last_row:
+            if last_row["content"]:
+                preview = last_row["content"][:100].replace("\n", " ")
+            last_ai = last_row["ai"] or ""
+            last_ts = last_row["ts"]
+
+        # If no assistant message, get any last AI
+        if not last_ai:
+            ai_row = db.execute(
+                """SELECT ai FROM messages
+                   WHERE history_id = ? AND type = 'message' AND ai IS NOT NULL
+                   ORDER BY id DESC LIMIT 1""",
+                (history_id,),
+            ).fetchone()
+            if ai_row:
+                last_ai = ai_row["ai"] or ""
+
         return {
-            "date": hid, "count": count_tail if size <= 4096 else max(1, size // 200),
-            "name": "", "preview": preview, "ai": last_ai,
-            "ts": last_ts, "mtime": mtime,
+            "date": history_id,
+            "count": count,
+            "name": "",
+            "preview": preview,
+            "ai": last_ai,
+            "ts": last_ts,
             "default_name": first_cwd,
         }
     except Exception:
-        return {"date": hid, "count": 0, "name": "", "preview": "", "ai": "",
-                "ts": None, "mtime": 0, "default_name": ""}
+        return {
+            "date": history_id, "count": 0, "name": "", "preview": "",
+            "ai": "", "ts": None, "default_name": "",
+        }
 
 
 _scan_log_fast = scan_log_fast  # legacy alias
 
 
 def migrate_history_to_paths():
-    """Find old date-based JSONL files and append them to path-based logs."""
-    try:
-        date_re  = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-        old_logs = [f for f in CHAT_LOG_DIR.glob("*.jsonl") if date_re.fullmatch(f.stem)]
-        if not old_logs:
-            return
-
-        logger.info("Migrating %d old chat logs to path-based storage...", len(old_logs))
-        names = load_chat_names()
-
-        for f in old_logs:
-            date_str = f.stem
-            try:
-                content   = f.read_text(encoding="utf-8", errors="replace")
-                first_cwd = ""
-                for line in content.splitlines():
-                    try:
-                        rec = json.loads(line)
-                        if rec.get("type") == "cwd" and rec.get("path"):
-                            first_cwd = rec["path"]
-                            break
-                    except Exception:
-                        continue
-
-                if first_cwd:
-                    pid    = path_to_id(first_cwd)
-                    target = CHAT_LOG_DIR / f"{pid}.jsonl"
-                    with target.open("a", encoding="utf-8") as out:
-                        out.write(content)
-                    if date_str in names and pid not in names:
-                        save_chat_name(pid, names[date_str])
-
-                f.unlink()
-                save_chat_name(date_str, "")
-            except Exception as e:
-                logger.warning("Failed to migrate log %s: %s", f.name, e)
-    except Exception as e:
-        logger.warning("History migration error: %s", e)
+    """Legacy stub — migration is now handled by db._import_legacy_data()."""
+    pass
 
 
 _migrate_history_to_paths = migrate_history_to_paths  # legacy alias
 
 
 def rebuild_hist_cache_sync() -> list:
-    """Synchronous cache rebuild — run in a thread pool."""
-    if not CHAT_LOG_DIR.exists():
-        _st.hist_cache    = []
+    """Rebuild the history cache from SQLite."""
+    from helm.db import get_db
+    db = get_db()
+
+    try:
+        # Get all unique history_ids that have messages
+        rows = db.execute(
+            """SELECT DISTINCT history_id FROM messages
+               WHERE type = 'message'
+               ORDER BY id DESC"""
+        ).fetchall()
+
+        history_ids = [row["history_id"] for row in rows]
+        sessions = [scan_log_fast(hid) for hid in history_ids]
+
+        # Sort by latest message ts (or count as fallback)
+        sessions.sort(key=lambda s: s.get("ts") or 0, reverse=True)
+
+        names = load_chat_names()
+        for s in sessions:
+            s["name"] = names.get(s["date"], "") or s.pop("default_name", "")
+
+        _st.hist_cache = sessions
         _st.hist_cache_ts = time.time()
-        return _st.hist_cache
+        return sessions
 
-    migrate_history_to_paths()
-
-    log_files = [f for f in CHAT_LOG_DIR.glob("*.jsonl") if HISTORY_ID_RE.fullmatch(f.stem)]
-    sessions  = [scan_log_fast(f) for f in log_files]
-    sessions.sort(key=lambda s: s.get("mtime", 0), reverse=True)
-    names = load_chat_names()
-    for s in sessions:
-        s["name"] = names.get(s["date"], "") or s.pop("default_name", "")
-        s.pop("mtime", None)
-    _st.hist_cache    = sessions
-    _st.hist_cache_ts = time.time()
-    return sessions
+    except Exception as e:
+        logger.warning("Failed to rebuild history cache: %s", e)
+        _st.hist_cache = []
+        _st.hist_cache_ts = time.time()
+        return []
 
 
 _rebuild_hist_cache_sync = rebuild_hist_cache_sync  # legacy alias

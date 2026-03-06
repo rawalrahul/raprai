@@ -85,6 +85,51 @@ class MCPManager:
                 prefixed = f"{server_id}_{real_name}"
                 self._tool_map[prefixed] = (server_id, real_name)
 
+    async def reload_servers(self, config_path: Optional[str] = None) -> None:
+        """Reload MCP configuration: stop removed servers, start new ones.
+
+        Compares running servers against the current config file and
+        reconciles the difference without restarting unchanged servers.
+        """
+        from .config import load_config
+        config = load_config(config_path)
+
+        current_ids = set(self._clients.keys())
+        desired_ids = {sid for sid, cfg in config.items() if cfg["enabled"]}
+
+        # Stop servers that were removed or disabled
+        to_stop = current_ids - desired_ids
+        for sid in to_stop:
+            client = self._clients.pop(sid, None)
+            if client:
+                try:
+                    await client.stop()
+                    logger.info("MCP '%s': stopped (removed from config)", sid)
+                except Exception as exc:
+                    logger.warning("MCP '%s': stop error during reload: %s", sid, exc)
+
+        # Start new servers
+        to_start = desired_ids - current_ids
+        tasks = []
+        for sid in to_start:
+            cfg = config[sid]
+            client = MCPClient(
+                server_id=sid,
+                command=cfg["command"],
+                env=cfg["env"],
+            )
+            self._clients[sid] = client
+            tasks.append(self._start_client(sid, client))
+
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            succeeded = sum(1 for r in results if r is True)
+            logger.info("MCP reload: %d/%d new servers started", succeeded, len(tasks))
+
+        # Rebuild tool map
+        self._rebuild_tool_map()
+        logger.info("MCP reload complete: %d servers active", len(self._clients))
+
     async def shutdown(self):
         """Stop all MCP servers."""
         for server_id, client in self._clients.items():

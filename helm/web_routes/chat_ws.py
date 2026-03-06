@@ -81,7 +81,8 @@ async def ws_endpoint(websocket: WebSocket):
                 content = data.get("content", "").strip()
                 if not content:
                     continue
-                _dispatch_sid = _st.focused_id
+                # Allow client to target a specific session (e.g. voice auto-send)
+                _dispatch_sid = data.get("session_id") or _st.focused_id
 
                 async def _fire_and_forward(
                     _text: str = content,

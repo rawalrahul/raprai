@@ -1,5 +1,7 @@
 """
 helm/web_routes/history_routes.py — History list, search, export, delete, rename endpoints.
+
+All data is now read from/written to the SQLite database via helm/db.py.
 """
 
 import asyncio
@@ -37,103 +39,169 @@ async def history_list(force: bool = False):
 
 @router.get("/history/search")
 async def history_search(q: str = ""):
-    """Full-text search across all chat log files."""
+    """Full-text search across all chat messages in the database."""
+    from helm.db import get_db
+
     q = q.strip()
     if len(q) < 2:
         return JSONResponse([])
 
-    lq = q.lower()
+    db = get_db()
     names = load_chat_names()
     results: list[dict] = []
 
-    if not CHAT_LOG_DIR.exists():
-        return JSONResponse([])
-
-    log_files = sorted(
-        [f for f in CHAT_LOG_DIR.glob("*.jsonl") if HISTORY_ID_RE.fullmatch(f.stem)],
-        reverse=True,
-    )
-
-    for log_file in log_files:
-        date_str = log_file.stem
-        snippet = ""
-        match_count = 0
-        last_ai = ""
-        last_ts = None
-
+    try:
+        # Try FTS5 first (if migration v2 succeeded)
         try:
-            for raw_line in log_file.read_text(encoding="utf-8", errors="replace").splitlines():
-                raw_line = raw_line.strip()
-                if not raw_line:
+            fts_rows = db.execute(
+                """SELECT history_id, snippet(messages_fts, 0, '', '', '...', 30) as snippet
+                   FROM messages_fts
+                   WHERE content MATCH ?
+                   ORDER BY rank
+                   LIMIT 20""",
+                (q,),
+            ).fetchall()
+
+            seen_hids = set()
+            for row in fts_rows:
+                hid = row["history_id"]
+                if hid in seen_hids:
                     continue
-                try:
-                    rec = json.loads(raw_line)
-                except Exception:
-                    continue
-                if rec.get("type") != "message":
-                    if rec.get("ai"):
-                        last_ai = rec["ai"]
-                    continue
-                content: str = rec.get("content", "")
-                if rec.get("ai"):
-                    last_ai = rec["ai"]
-                if rec.get("ts"):
-                    last_ts = rec["ts"]
-                idx = content.lower().find(lq)
-                if idx != -1:
-                    match_count += 1
-                    if not snippet:
-                        start = max(0, idx - 60)
-                        end   = min(len(content), idx + len(q) + 60)
-                        excerpt = content[start:end].replace("\n", " ").strip()
-                        if start > 0:
-                            excerpt = "..." + excerpt
-                        if end < len(content):
-                            excerpt = excerpt + "..."
-                        snippet = excerpt
+                seen_hids.add(hid)
+
+                # Get additional metadata
+                meta = db.execute(
+                    """SELECT ai, ts FROM messages
+                       WHERE history_id = ? AND type = 'message'
+                       ORDER BY id DESC LIMIT 1""",
+                    (hid,),
+                ).fetchone()
+
+                count_row = db.execute(
+                    """SELECT COUNT(*) as cnt FROM messages_fts
+                       WHERE history_id = ? AND content MATCH ?""",
+                    (hid, q),
+                ).fetchone()
+
+                results.append({
+                    "date": hid,
+                    "name": names.get(hid, ""),
+                    "snippet": row["snippet"],
+                    "match_count": count_row["cnt"] if count_row else 1,
+                    "ai": meta["ai"] if meta else "",
+                    "ts": meta["ts"] if meta else None,
+                })
+
+            return JSONResponse(results)
+
         except Exception:
-            continue
+            # FTS5 not available — fall back to LIKE search
+            pass
 
-        if match_count > 0:
+        # Fallback: LIKE search
+        lq = f"%{q}%"
+        rows = db.execute(
+            """SELECT DISTINCT history_id FROM messages
+               WHERE type = 'message' AND content LIKE ?
+               LIMIT 20""",
+            (lq,),
+        ).fetchall()
+
+        for row in rows:
+            hid = row["history_id"]
+
+            # Get a snippet
+            snippet_row = db.execute(
+                """SELECT content FROM messages
+                   WHERE history_id = ? AND type = 'message' AND content LIKE ?
+                   LIMIT 1""",
+                (hid, lq),
+            ).fetchone()
+            snippet = ""
+            if snippet_row and snippet_row["content"]:
+                content = snippet_row["content"]
+                idx = content.lower().find(q.lower())
+                if idx >= 0:
+                    start = max(0, idx - 60)
+                    end = min(len(content), idx + len(q) + 60)
+                    excerpt = content[start:end].replace("\n", " ").strip()
+                    if start > 0:
+                        excerpt = "..." + excerpt
+                    if end < len(content):
+                        excerpt = excerpt + "..."
+                    snippet = excerpt
+
+            # Count matches
+            count_row = db.execute(
+                """SELECT COUNT(*) as cnt FROM messages
+                   WHERE history_id = ? AND type = 'message' AND content LIKE ?""",
+                (hid, lq),
+            ).fetchone()
+
+            # Last AI and ts
+            meta = db.execute(
+                """SELECT ai, ts FROM messages
+                   WHERE history_id = ? AND type = 'message'
+                   ORDER BY id DESC LIMIT 1""",
+                (hid,),
+            ).fetchone()
+
             results.append({
-                "date": date_str,
-                "name": names.get(date_str, ""),
+                "date": hid,
+                "name": names.get(hid, ""),
                 "snippet": snippet,
-                "match_count": match_count,
-                "ai": last_ai,
-                "ts": last_ts,
+                "match_count": count_row["cnt"] if count_row else 1,
+                "ai": meta["ai"] if meta else "",
+                "ts": meta["ts"] if meta else None,
             })
-            if len(results) >= 20:
-                break
 
-    return JSONResponse(results)
+        return JSONResponse(results)
+
+    except Exception as e:
+        logger.warning("History search error: %s", e)
+        return JSONResponse([])
 
 
 @router.get("/history/{date}")
 async def history_get(date: str):
     """Return all messages for a given date or path ID."""
+    from helm.db import get_db
+
     if not is_valid_history_id(date):
         return JSONResponse({"error": "Invalid ID format."}, status_code=400)
-    log_file = CHAT_LOG_DIR / f"{date}.jsonl"
-    if not log_file.exists():
+
+    db = get_db()
+
+    # Check if this history_id exists
+    exists = db.execute(
+        "SELECT COUNT(*) as cnt FROM messages WHERE history_id = ?", (date,)
+    ).fetchone()
+    if not exists or exists["cnt"] == 0:
         return JSONResponse({"error": "Not found"}, status_code=404)
-    messages = []
+
+    messages = get_history_messages(date)
+
+    # Get last CWD and AI
     last_cwd = None
+    cwd_row = db.execute(
+        """SELECT path FROM messages
+           WHERE history_id = ? AND type = 'cwd' AND path IS NOT NULL
+           ORDER BY id DESC LIMIT 1""",
+        (date,),
+    ).fetchone()
+    if cwd_row:
+        last_cwd = cwd_row["path"]
+
     last_ai = ""
-    for line in log_file.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            rec = json.loads(line)
-            if rec.get("type") == "cwd":
-                last_cwd = rec["path"]
-            elif rec.get("type") == "message":
-                messages.append(rec)
-                if rec.get("ai"):
-                    last_ai = rec["ai"]
-        except Exception:
-            pass
+    ai_row = db.execute(
+        """SELECT ai FROM messages
+           WHERE history_id = ? AND type = 'message' AND ai IS NOT NULL
+           ORDER BY id DESC LIMIT 1""",
+        (date,),
+    ).fetchone()
+    if ai_row:
+        last_ai = ai_row["ai"] or ""
+
     return JSONResponse({"messages": messages, "cwd": last_cwd, "ai": last_ai})
 
 
@@ -143,26 +211,12 @@ async def history_resume(date: str):
     if not is_valid_history_id(date):
         return JSONResponse({"error": "Invalid ID format."}, status_code=400)
 
-    log_file = CHAT_LOG_DIR / f"{date}.jsonl"
-    if not log_file.exists():
-        return JSONResponse({"error": "Not found"}, status_code=404)
-
-    messages = []
-    try:
-        for line in log_file.read_text(encoding="utf-8").splitlines():
-            try:
-                rec = json.loads(line)
-                if rec.get("role") in ("user", "assistant"):
-                    messages.append(rec)
-            except Exception:
-                continue
-    except Exception:
-        pass
-
+    messages = get_history_messages(date)
     if not messages:
         return JSONResponse({"context": ""})
 
-    turns = messages[-10:]
+    # Filter to user/assistant messages
+    turns = [m for m in messages if m.get("role") in ("user", "assistant")][-10:]
     lines_ctx = []
     for m in turns:
         role = "User" if m["role"] == "user" else (m.get("ai") or "AI").title()
@@ -182,14 +236,24 @@ async def history_resume(date: str):
 
 @router.delete("/history/{date}")
 async def history_delete(date: str):
-    """Delete the log file for a given ID."""
+    """Delete all records for a given history ID."""
+    from helm.db import get_db
+
     if not is_valid_history_id(date):
         return JSONResponse({"error": "Invalid ID format."}, status_code=400)
-    log_file = CHAT_LOG_DIR / f"{date}.jsonl"
-    if not log_file.exists():
+
+    db = get_db()
+
+    # Check exists
+    exists = db.execute(
+        "SELECT COUNT(*) as cnt FROM messages WHERE history_id = ?", (date,)
+    ).fetchone()
+    if not exists or exists["cnt"] == 0:
         return JSONResponse({"error": "Not found"}, status_code=404)
+
     try:
-        log_file.unlink()
+        db.execute("DELETE FROM messages WHERE history_id = ?", (date,))
+        db.commit()
         save_chat_name(date, "")  # remove custom name entry if any
         _st.hist_cache_ts = 0    # invalidate cache
         return JSONResponse({"ok": True})
@@ -208,9 +272,15 @@ async def history_rename(date: str, request: Request):
         name = (body.get("name") or "").strip()
     except Exception:
         return JSONResponse({"error": "Invalid JSON"}, status_code=400)
-    log_file = CHAT_LOG_DIR / f"{date}.jsonl"
-    if not log_file.exists():
+
+    from helm.db import get_db
+    db = get_db()
+    exists = db.execute(
+        "SELECT COUNT(*) as cnt FROM messages WHERE history_id = ?", (date,)
+    ).fetchone()
+    if not exists or exists["cnt"] == 0:
         return JSONResponse({"error": "Not found"}, status_code=404)
+
     save_chat_name(date, name)
     _st.hist_cache_ts = 0  # invalidate cache
     return JSONResponse({"ok": True, "name": name})
@@ -218,12 +288,7 @@ async def history_rename(date: str, request: Request):
 
 @router.get("/history/{hid}/export")
 async def history_export(hid: str, format: str = "md"):
-    """Export chat history in Markdown, text, or JSON format.
-
-    Args:
-        hid: History ID (date or path ID)
-        format: Export format — 'md' (default), 'txt', or 'json'
-    """
+    """Export chat history in Markdown, text, or JSON format."""
     if not is_valid_history_id(hid):
         return JSONResponse({"error": "Invalid ID format."}, status_code=400)
 
@@ -235,16 +300,14 @@ async def history_export(hid: str, format: str = "md"):
             break
 
     messages = get_history_messages(hid)
-    if not messages and not CHAT_LOG_DIR.joinpath(f"{hid}.jsonl").exists():
+    if not messages:
         return JSONResponse({"error": "Not found"}, status_code=404)
 
     if format == "json":
-        # Raw JSON export
         content = json.dumps(messages, ensure_ascii=False, indent=2)
         media_type = "application/json"
         filename = f"chat_{hid}.json"
     elif format == "txt":
-        # Plain text format
         lines = []
         for msg in messages:
             role = "User" if msg.get("role") == "user" else msg.get("ai") or ai_name
@@ -254,7 +317,6 @@ async def history_export(hid: str, format: str = "md"):
         media_type = "text/plain"
         filename = f"chat_{hid}.txt"
     else:
-        # Markdown format (default)
         lines = []
         for msg in messages:
             if msg.get("role") == "user":
@@ -274,18 +336,27 @@ async def history_export(hid: str, format: str = "md"):
 
 
 # ---------------------------------------------------------------------------
-# Session Templates
+# Session Templates (SQLite-backed)
 # ---------------------------------------------------------------------------
 
 @router.get("/templates")
 async def list_templates():
     """Return list of saved session templates."""
-    templates_file = CHAT_LOG_DIR / "templates.json"
-    if not templates_file.exists():
-        return JSONResponse([])
+    from helm.db import get_db
     try:
-        templates = json.loads(templates_file.read_text(encoding="utf-8"))
-        return JSONResponse(list(templates.values()) if isinstance(templates, dict) else templates)
+        db = get_db()
+        rows = db.execute("SELECT * FROM session_templates ORDER BY timestamp DESC").fetchall()
+        templates = []
+        for row in rows:
+            templates.append({
+                "name": row["name"],
+                "ai": row["ai"],
+                "cwd": row["cwd"],
+                "model": row["model"],
+                "prompt": row["prompt"],
+                "timestamp": row["timestamp"],
+            })
+        return JSONResponse(templates)
     except Exception as e:
         logger.warning("Failed to load templates: %s", e)
         return JSONResponse([])
@@ -294,6 +365,7 @@ async def list_templates():
 @router.post("/templates")
 async def create_template(request: Request):
     """Save a new session template."""
+    from helm.db import get_db
     from helm.history import ts
     try:
         body = await request.json()
@@ -310,17 +382,17 @@ async def create_template(request: Request):
             "timestamp": ts(),
         }
 
-        CHAT_LOG_DIR.mkdir(parents=True, exist_ok=True)
-        templates_file = CHAT_LOG_DIR / "templates.json"
-        templates = {}
-        if templates_file.exists():
-            try:
-                templates = json.loads(templates_file.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-
-        templates[name] = template
-        templates_file.write_text(json.dumps(templates, ensure_ascii=False, indent=2), encoding="utf-8")
+        db = get_db()
+        db.execute(
+            """INSERT OR REPLACE INTO session_templates
+               (name, ai, cwd, model, prompt, timestamp)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                template["name"], template["ai"], template["cwd"],
+                template["model"], template["prompt"], template["timestamp"],
+            ),
+        )
+        db.commit()
         return JSONResponse({"ok": True, "template": template})
     except Exception as e:
         logger.error("Failed to save template: %s", e)
@@ -333,17 +405,14 @@ async def delete_template(name: str):
     if not name or "/" in name or "\\" in name:
         return JSONResponse({"error": "Invalid template name"}, status_code=400)
 
+    from helm.db import get_db
     try:
-        templates_file = CHAT_LOG_DIR / "templates.json"
-        if not templates_file.exists():
+        db = get_db()
+        row = db.execute("SELECT name FROM session_templates WHERE name = ?", (name,)).fetchone()
+        if not row:
             return JSONResponse({"error": "Not found"}, status_code=404)
-
-        templates = json.loads(templates_file.read_text(encoding="utf-8"))
-        if name not in templates:
-            return JSONResponse({"error": "Not found"}, status_code=404)
-
-        del templates[name]
-        templates_file.write_text(json.dumps(templates, ensure_ascii=False, indent=2), encoding="utf-8")
+        db.execute("DELETE FROM session_templates WHERE name = ?", (name,))
+        db.commit()
         return JSONResponse({"ok": True})
     except Exception as e:
         logger.error("Failed to delete template: %s", e)

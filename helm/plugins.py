@@ -134,6 +134,11 @@ def set_plugin_enabled(plugin_id: str, enabled: bool) -> None:
 # Prompt injection
 # ---------------------------------------------------------------------------
 
+def reload_registry() -> None:
+    """Convenience wrapper for hot-reload after helmpack install/uninstall."""
+    load_plugins()
+
+
 def inject_plugin_context(prompt: str) -> str:
     """Prepend enabled plugin instructions to the prompt.
 

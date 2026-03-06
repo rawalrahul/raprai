@@ -28,6 +28,7 @@ from .approval_routes import router as approval_router
 from .plugins_routes import router as plugins_router
 from .mcp_routes import router as mcp_router
 from .context_routes import router as context_router
+from .helmpack_routes import router as helmpack_router
 
 # Include all routers in the app
 app.include_router(auth_router)
@@ -43,6 +44,7 @@ app.include_router(approval_router)
 app.include_router(plugins_router)
 app.include_router(mcp_router)
 app.include_router(context_router)
+app.include_router(helmpack_router)
 
 # Re-export model fetchers so they can be imported as: from helm.web_routes import _fetch_claude_models
 from .helpers import (

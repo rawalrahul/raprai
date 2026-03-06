@@ -306,9 +306,9 @@ async def handle_diff(before: dict, after: dict, source: str, cwd: str,
             size_bytes = 0
             size_kb = 0
 
-        # Track in generated files log
+        # Track in generated files log (in-memory + SQLite)
         sess = _st.sessions.get(session_id) if session_id else None
-        _st.generated_files.append({
+        file_record = {
             "path": str(path),
             "name": path.name,
             "ext": ext,
@@ -318,10 +318,28 @@ async def handle_diff(before: dict, after: dict, source: str, cwd: str,
             "session_name": sess.get("name", "") if sess else "",
             "cwd": cwd,
             "ts": time.time(),
-        })
-        # Keep only last 200 entries
+        }
+        _st.generated_files.append(file_record)
+        # Keep only last 200 entries in memory
         if len(_st.generated_files) > 200:
             _st.generated_files[:] = _st.generated_files[-200:]
+        # Persist to SQLite
+        try:
+            from helm.db import get_db
+            db = get_db()
+            db.execute(
+                """INSERT INTO generated_files
+                   (path, name, ext, size, ai, session_id, session_name, ts)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    str(path), path.name, ext, size_bytes,
+                    file_record["ai"], file_record["session_id"],
+                    file_record["session_name"], file_record["ts"],
+                ),
+            )
+            db.commit()
+        except Exception:
+            pass
 
         await push_message(
             "system",

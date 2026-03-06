@@ -133,6 +133,13 @@ def usage_reset_if_needed() -> None:
         _st.usage_period_start = now
         _st.usage_stats        = {}
         _st.usage_exact        = {}
+        # Clear persisted usage stats on period reset
+        try:
+            from helm.db import get_db
+            get_db().execute("DELETE FROM usage_stats")
+            get_db().commit()
+        except Exception:
+            pass
 
 
 _usage_reset_if_needed = usage_reset_if_needed  # legacy alias
@@ -256,8 +263,66 @@ def record_usage_task(ai_key: Optional[str], elapsed_seconds: float,
                 "updated_at":  time.time(),
             }
 
+    # Persist to SQLite
+    _flush_usage_to_db(key, st)
+
 
 _record_usage_task = record_usage_task  # legacy alias
+
+
+def _flush_usage_to_db(ai_key: str, st: dict) -> None:
+    """Persist usage stats for a single AI to the database."""
+    try:
+        from helm.db import get_db
+        db = get_db()
+        db.execute(
+            """INSERT OR REPLACE INTO usage_stats
+               (ai_key, tasks, seconds, chars_in, chars_out, tokens_in,
+                tokens_out, tokens_source, last_used, period_start)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                ai_key,
+                st.get("tasks", 0),
+                st.get("seconds", 0.0),
+                st.get("chars_in", 0),
+                st.get("chars_out", 0),
+                st.get("tokens_in", 0),
+                st.get("tokens_out", 0),
+                st.get("tokens_source", "estimate"),
+                st.get("last_used", 0.0),
+                _st.usage_period_start,
+            ),
+        )
+        db.commit()
+    except Exception:
+        pass  # Non-critical — in-memory stats still work
+
+
+def load_usage_from_db() -> None:
+    """Restore usage stats from the database on startup."""
+    try:
+        from helm.db import get_db
+        from helm.config import USAGE_PERIOD_SECONDS
+        db = get_db()
+        rows = db.execute("SELECT * FROM usage_stats").fetchall()
+        now = time.time()
+        for row in rows:
+            period_start = row["period_start"]
+            # Only restore if the period hasn't expired
+            if now - period_start < USAGE_PERIOD_SECONDS:
+                _st.usage_stats[row["ai_key"]] = {
+                    "tasks": row["tasks"],
+                    "seconds": row["seconds"],
+                    "chars_in": row["chars_in"],
+                    "chars_out": row["chars_out"],
+                    "tokens_in": row["tokens_in"],
+                    "tokens_out": row["tokens_out"],
+                    "tokens_source": row["tokens_source"],
+                    "last_used": row["last_used"],
+                }
+                _st.usage_period_start = period_start
+    except Exception:
+        pass  # Non-critical
 
 
 def fmt_reset_eta() -> str:

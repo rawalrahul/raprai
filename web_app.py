@@ -23,6 +23,36 @@ import helm.state as _st
 
 
 async def _main():
+    # Set up crash logging FIRST — everything after this is logged to file
+    from helm.resilience import setup_crash_logging
+    setup_crash_logging()
+
+    # Check database integrity before initializing
+    from helm.resilience import check_db_integrity
+    db_ok = check_db_integrity()
+    if not db_ok:
+        logger.warning("Database was corrupt — a fresh database will be created.")
+
+    # Initialize SQLite database (create tables, run migrations, import legacy data)
+    from helm.db import init_db
+    init_db()
+
+    # Install security middleware (rate limiting, CSRF, security headers)
+    from helm.security import install_security
+    install_security(app)
+
+    # Install global exception handlers (catches unhandled errors, logs to crash file)
+    from helm.resilience import install_exception_handlers
+    install_exception_handlers(app)
+
+    # Load persisted brute-force lockout state
+    from helm.auth import load_lockout_from_db
+    load_lockout_from_db()
+
+    # Log startup health summary (disk space, OS info)
+    from helm.resilience import log_startup_health
+    log_startup_health()
+
     # Load AI integration plugins from integrations/ folder
     load_integrations()
 
@@ -39,6 +69,10 @@ async def _main():
     # automatically receive relevant skill instructions injected into
     # their prompts at dispatch time.
     scan_skills()
+
+    # Restore persisted usage stats from database
+    from helm.session_mgr import load_usage_from_db
+    load_usage_from_db()
 
     # Load Helm-level plugins (helm/plugins/ directory)
     from helm.plugins import load_plugins
@@ -157,16 +191,20 @@ async def _main():
         tg.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, tg_text))
 
 
+    # --- Resolve port conflicts ---
+    from helm.resilience import find_free_port
+    actual_port = find_free_port(WEB_HOST, WEB_PORT)
+
     # --- Build uvicorn server ---
     config = uvicorn.Config(
         app,
         host=WEB_HOST,
-        port=WEB_PORT,
+        port=actual_port,
         log_level="info",
     )
     server = uvicorn.Server(config)
 
-    url = f"http://{'localhost' if WEB_HOST in ('0.0.0.0', '127.0.0.1') else WEB_HOST}:{WEB_PORT}"
+    url = f"http://{'localhost' if WEB_HOST in ('0.0.0.0', '127.0.0.1') else WEB_HOST}:{actual_port}"
     logger.info("Starting web UI at %s", url)
 
     async def _open_browser():
@@ -178,6 +216,10 @@ async def _main():
     asyncio.create_task(cron_runner())
     asyncio.create_task(heartbeat_runner())
     asyncio.create_task(_open_browser())
+
+    # Start AI subprocess watchdog (detects dead processes, notifies users)
+    from helm.resilience import ai_watchdog
+    asyncio.create_task(ai_watchdog())
 
     if _st.telegram_app:
         from telegram import Update
@@ -196,7 +238,24 @@ def main():
     try:
         asyncio.run(_main())
     except KeyboardInterrupt:
-        logger.info("Shutting down.")
+        logger.info("Shutting down (Ctrl+C).")
+    except Exception as exc:
+        logger.critical("Fatal error: %s", exc, exc_info=True)
+    finally:
+        # Graceful shutdown — stop AI processes, close DB, flush logs
+        try:
+            import asyncio as _aio
+            loop = _aio.new_event_loop()
+            from helm.resilience import graceful_shutdown
+            loop.run_until_complete(graceful_shutdown())
+            loop.close()
+        except Exception:
+            # Fallback: at least close DB connections
+            try:
+                from helm.db import close_all
+                close_all()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
