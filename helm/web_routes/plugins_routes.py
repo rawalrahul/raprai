@@ -15,9 +15,11 @@ Endpoints:
 import html as html_mod
 import os
 
+import requests as http_requests
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 
+from helm.config import logger
 from helm.plugins import list_plugins, set_plugin_enabled, _registry
 from helm.plugin_oauth import (
     start_oauth, start_oauth_provider, handle_callback,
@@ -71,6 +73,69 @@ async def connect_page(plugin_id: str):
     return HTMLResponse(_connect_page(info))
 
 
+def _validate_token(info: dict, token_value: str) -> dict:
+    """Validate a token against the plugin's validate config.
+
+    Returns {"ok": True} or {"ok": False, "error": "..."}.
+    Skips validation (returns ok) if no validate config is defined.
+    """
+    validate = info.get("validate")
+    if not validate:
+        return {"ok": True}
+
+    url = validate.get("url", "")
+    if not url:
+        return {"ok": True}
+
+    # Build headers with token substitution
+    headers = {}
+    for k, v in validate.get("headers", {}).items():
+        headers[k] = v.replace("{token}", token_value)
+
+    method = validate.get("method", "GET").upper()
+    body = validate.get("body", "")
+
+    try:
+        if method == "POST":
+            resp = http_requests.post(url, headers=headers,
+                                      data=body.replace("{token}", token_value)
+                                      if body else None,
+                                      timeout=10)
+        else:
+            resp = http_requests.get(url, headers=headers, timeout=10)
+
+        # Check expected status
+        expect = validate.get("expect_status", 200)
+        if isinstance(expect, list):
+            valid_statuses = expect
+        else:
+            valid_statuses = [expect]
+
+        if resp.status_code in valid_statuses:
+            return {"ok": True}
+
+        # Token rejected
+        if resp.status_code == 401:
+            return {"ok": False, "error": "Invalid token — authentication failed (401)"}
+        elif resp.status_code == 403:
+            return {"ok": False, "error": "Token rejected — insufficient permissions (403)"}
+        else:
+            return {"ok": False,
+                    "error": f"Token validation failed (HTTP {resp.status_code})"}
+
+    except http_requests.exceptions.ConnectionError:
+        return {"ok": False,
+                "error": "Could not reach the API — check your network connection"}
+    except http_requests.exceptions.Timeout:
+        return {"ok": False,
+                "error": "API request timed out — try again later"}
+    except Exception as exc:
+        logger.warning("Token validation error for %s: %s",
+                       info.get("id", "?"), exc)
+        # Don't block saving on unexpected validation errors
+        return {"ok": True}
+
+
 @router.post("/plugins/{plugin_id}/save-token")
 async def save_token(plugin_id: str, request: Request):
     """Save a token pasted by the user. Body: {"token_env": "...", "value": "..."}"""
@@ -99,6 +164,14 @@ async def save_token(plugin_id: str, request: Request):
 
     if token_env not in valid_envs:
         return JSONResponse({"error": f"Invalid token_env for this plugin"}, status_code=400)
+
+    # Validate the token against the API before saving
+    validation = _validate_token(info, value)
+    if not validation["ok"]:
+        return JSONResponse({
+            "error": validation["error"],
+            "validation_failed": True,
+        }, status_code=400)
 
     # Save to .env and os.environ
     from helm.web_routes.app import update_env
@@ -326,7 +399,7 @@ async function saveTokens() {{
   const btn = document.getElementById('btn-save');
   const msg = document.getElementById('msg');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>Saving...';
+  btn.innerHTML = '<span class="spinner"></span>Validating...';
   msg.className = 'msg';
 
   const inputs = document.querySelectorAll('.input-row input');

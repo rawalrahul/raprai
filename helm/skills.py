@@ -155,21 +155,26 @@ def scan_skills(skills_bases=None) -> dict[str, dict]:
             break
 
     # ── Load skills; first occurrence wins (higher-priority path) ───────────
-    # Scans up to 2 levels deep: skills_base/*/SKILL.md  AND
-    # skills_base/*/*/SKILL.md  (covers grouped skills like document-skills/pptx/).
+    # Scans up to 2 levels deep and supports TWO layouts:
+    #   A) skills_base/skill-name/SKILL.md          (directory-based)
+    #   B) skills_base/category/some-skill.md        (standalone .md files with frontmatter)
+    # Also: skills_base/category/skill-name/SKILL.md  (grouped directory-based)
     new_registry: dict[str, dict] = {}
     total_found = 0
 
-    def _load_skill(skill_dir: pathlib.Path, skills_base: pathlib.Path) -> bool:
-        """Try to register the skill in skill_dir. Returns True on success."""
+    def _register_skill_file(skill_file: pathlib.Path, skills_base: pathlib.Path,
+                             fallback_name: str = "") -> bool:
+        """Register a single skill from a .md file. Returns True on success."""
         nonlocal total_found
-        skill_md = skill_dir / "SKILL.md"
-        if not skill_md.exists():
+        if not skill_file.exists():
             return False
         try:
-            raw  = skill_md.read_text(encoding="utf-8", errors="replace")
+            raw  = skill_file.read_text(encoding="utf-8", errors="replace")
             meta, body = _parse_frontmatter(raw)
-            name = meta.get("name", skill_dir.name)
+            if not meta:
+                # No valid frontmatter — not a skill file, skip silently
+                return False
+            name = meta.get("name", fallback_name or skill_file.stem)
 
             if name in new_registry:
                 # Already loaded from a higher-priority directory — skip.
@@ -182,39 +187,52 @@ def scan_skills(skills_bases=None) -> dict[str, dict]:
                 "description": description,
                 "keywords":    keywords,
                 "content":     body,
-                "path":        str(skill_md),
+                "path":        str(skill_file),
                 "source_dir":  str(skills_base),
             }
             total_found += 1
             return True
         except Exception as exc:
-            logger.warning("skills.py: failed to load %s — %s", skill_md, exc)
+            logger.warning("skills.py: failed to load %s — %s", skill_file, exc)
             return False
+
+    def _load_skill_dir(skill_dir: pathlib.Path, skills_base: pathlib.Path) -> bool:
+        """Try to register a skill from a SKILL.md inside skill_dir."""
+        return _register_skill_file(skill_dir / "SKILL.md", skills_base,
+                                    fallback_name=skill_dir.name)
 
     for skills_base in _skills_dirs:
         dir_found = 0
-        for skill_dir in sorted(skills_base.iterdir()):
-            if not skill_dir.is_dir():
+        for entry in sorted(skills_base.iterdir()):
+            if not entry.is_dir():
                 continue
-            # Level 1: skills_base/foo/SKILL.md
-            if _load_skill(skill_dir, skills_base):
-                dir_found += 1
-            else:
-                # Level 2: skills_base/foo/bar/SKILL.md
-                # (covers grouped directories like document-skills/pptx/)
-                # Cap at 50 entries to avoid scanning huge dirs like composio-skills (800+).
-                try:
-                    count = 0
-                    for sub_dir in skill_dir.iterdir():
-                        count += 1
-                        if count > 50:
-                            logger.debug("Skills: level-2 scan of %s capped at 50",
-                                         skill_dir.name)
-                            break
-                        if sub_dir.is_dir() and _load_skill(sub_dir, skills_base):
-                            dir_found += 1
-                except PermissionError:
-                    pass
+            # Level 1: skills_base/foo/SKILL.md  (directory-based skill)
+            _load_skill_dir(entry, skills_base)
+
+            # Level 2: always scan inside for both layouts:
+            #   - skills_base/category/bar/SKILL.md   (sub-directory skill)
+            #   - skills_base/category/bar.md          (standalone .md with frontmatter)
+            # Cap at 200 entries to avoid scanning huge dirs.
+            try:
+                count = 0
+                for sub_entry in sorted(entry.iterdir()):
+                    count += 1
+                    if count > 200:
+                        logger.debug("Skills: level-2 scan of %s capped at 200",
+                                     entry.name)
+                        break
+                    if sub_entry.is_dir():
+                        _load_skill_dir(sub_entry, skills_base)
+                    elif (sub_entry.suffix == ".md"
+                          and sub_entry.name not in ("README.md", "SKILL.md",
+                                                     "SKILLS_SUMMARY.txt")):
+                        # Standalone .md file with frontmatter
+                        _register_skill_file(sub_entry, skills_base)
+            except PermissionError:
+                pass
+
+        dir_found = sum(1 for n, i in new_registry.items()
+                        if i["source_dir"] == str(skills_base))
 
         logger.info("Skills: loaded %d skill(s) from %s", dir_found, skills_base)
 
@@ -315,6 +333,18 @@ _EXTRA_KEYWORDS: dict[str, list[str]] = {
     "webapp-testing":    ["test website", "qa", "selenium", "playwright",
                           "end to end test", "e2e test", "browser test"],
     "mcp-builder":       ["mcp server", "model context protocol", "mcp tool"],
+    # ── Communication ────────────────────────────────────────────────────
+    "email-composer":    ["email", "write an email", "draft email", "compose email",
+                          "send email", "email template", "follow up email"],
+    "blog-post-writer":  ["blog", "blog post", "write a blog", "write a post",
+                          "article", "content writing"],
+    "resume-cover-letter": ["resume", "cv", "cover letter", "job application",
+                          "curriculum vitae", "write a resume"],
+    "invoice-generator": ["invoice", "create invoice", "create an invoice",
+                          "generate invoice", "bill", "billing statement",
+                          "send invoice", "invoice template"],
+    "feedback-giver":    ["feedback", "give feedback", "performance review",
+                          "peer review", "constructive feedback"],
     # ── Business & productivity ────────────────────────────────────────────
     "invoice-organizer": ["invoice", "receipt", "billing", "expense",
                           "payment", "accounts payable"],
@@ -360,9 +390,15 @@ def _extract_keywords(name: str, description: str) -> list[str]:
     keywords: list[str] = [name.lower()]
 
     # 2. Split name on hyphens and add each meaningful part
-    for part in name.lower().split("-"):
-        if len(part) >= 3 and part not in _STOP_WORDS:
-            keywords.append(part)
+    name_parts = [p for p in name.lower().split("-") if len(p) >= 3 and p not in _STOP_WORDS]
+    for part in name_parts:
+        keywords.append(part)
+
+    # 2b. Generate multi-word phrases from consecutive name parts
+    #     e.g. "blog-post-writer" → "blog post", "post writer"
+    #     These are high-value signals when matched in the prompt.
+    for i in range(len(name_parts) - 1):
+        keywords.append(f"{name_parts[i]} {name_parts[i+1]}")
 
     # 3. File extensions mentioned in description — skip for visual/design skills.
     #    Require at least 3 chars after the dot to avoid false positives like ".io".
@@ -421,11 +457,27 @@ def set_skill_enabled(skill: str, ai: str, enabled: bool) -> None:
 _AI_PREFIXES = ("ollama-", "gemini-", "codex-", "claude-", "openai-")
 
 
+def _kw_matches(keyword: str, prompt_lower: str) -> bool:
+    """Check if a keyword matches in the prompt using word-boundary-aware matching.
+
+    Multi-word keywords (e.g. 'blog post') use substring matching.
+    Single-word keywords use word-boundary matching to avoid false positives
+    like 'voice' matching 'invoice' or 'post' matching 'compost'.
+    """
+    if " " in keyword:
+        # Multi-word phrase — substring match is appropriate
+        return keyword in prompt_lower
+    # Single word — require word boundary (letter/digit boundary)
+    pattern = r'(?<![a-z0-9])' + re.escape(keyword) + r'(?![a-z0-9])'
+    return bool(re.search(pattern, prompt_lower))
+
+
 def detect_skill(prompt: str) -> Optional[str]:
     """
     Return the name of the best-matching *base* skill for the prompt, or None.
 
-    Scoring: each keyword that appears in the lowercased prompt adds 1 point.
+    Scoring: each keyword that appears in the prompt adds 1 point.
+    Multi-word keywords get +1 bonus (more specific = more valuable).
     The skill with the highest score wins.  Ties resolved alphabetically.
 
     AI-prefixed variants (e.g. "ollama-pptx") are excluded from scoring here;
@@ -442,7 +494,13 @@ def detect_skill(prompt: str) -> Optional[str]:
         # Skip AI-specific variants — resolved by inject_skill_prefix() instead
         if any(name.startswith(pfx) for pfx in _AI_PREFIXES):
             continue
-        score = sum(1 for kw in info["keywords"] if kw in pl)
+        score = 0
+        for kw in info["keywords"]:
+            if _kw_matches(kw, pl):
+                score += 1
+                # Multi-word keywords are more specific — bonus point
+                if " " in kw:
+                    score += 1
         # Bonus: skill name itself appearing in the prompt is a strong signal
         if name.lower() in pl or name.lower().replace("-", " ") in pl:
             score += 2

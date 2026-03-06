@@ -44,6 +44,32 @@ async def _main():
     from helm.plugins import load_plugins
     load_plugins()
 
+    # Auto-start MCP servers from mcp_servers.json
+    # We block here (up to 30s) so servers are ready before first AI query.
+    try:
+        import asyncio as _aio
+        from helm.mcp import get_manager as _get_mcp_mgr
+        _mcp_mgr = _get_mcp_mgr()
+
+        def _start_mcp():
+            loop = _aio.new_event_loop()
+            try:
+                loop.run_until_complete(_mcp_mgr.load_and_start())
+            finally:
+                loop.close()
+
+        import concurrent.futures as _cf
+        fut = _cf.ThreadPoolExecutor(max_workers=1).submit(_start_mcp)
+        try:
+            fut.result(timeout=30)   # block up to 30s for servers to start
+            logger.info("MCP servers ready")
+        except _cf.TimeoutError:
+            logger.warning("MCP auto-start: timed out after 30s (servers may still be starting)")
+        except Exception as exc:
+            logger.warning("MCP auto-start error: %s", exc)
+    except Exception as exc:
+        logger.warning("MCP auto-start skipped: %s", exc)
+
     # Warm history cache in background so first /history request is instant
     import concurrent.futures
     _thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)

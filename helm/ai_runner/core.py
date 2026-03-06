@@ -24,6 +24,7 @@ from helm.skills import (
     claude_generate_skill,
 )
 from helm.plugins import inject_plugin_context
+from helm.mcp.inject import inject_mcp_context
 from helm.context_manager import update_token_count, check_and_compact
 
 from .claude import build_claude_cmd, parse_claude_json_output
@@ -189,12 +190,6 @@ _SAFETY_PREAMBLE = (
     "os.remove, os.unlink, pathlib.Path.unlink, rimraf, Remove-Item, etc. "
     "Always list the exact files/folders you intend to delete and wait for the "
     "user to say 'yes' before proceeding. If in doubt, DO NOT delete.\n\n"
-    "[IMPORTANT — UNCLEAR REQUESTS]\n"
-    "If the user's message is unclear, garbled, incomplete, or does not "
-    "describe a concrete task you can act on, DO NOT attempt to execute "
-    "code or guess what the user wants. Instead, reply with a short, "
-    "friendly message asking the user to repeat or clarify their request. "
-    "Only proceed with action when you clearly understand the task.\n\n"
 )
 
 _DESTRUCTIVE_PATTERNS = re.compile(
@@ -459,18 +454,42 @@ async def process_message(text: str, source: str = "web",
         arg_lower = arg.lower()
         ai_key = sess.get("ai") or "shell"
 
-        # ── Non-Ollama AIs: model switching not supported (CLI + OAuth) ──────
-        _CLI_AIS = {"claude", "gemini", "codex", "openai"}
-        if ai_key in _CLI_AIS:
+        # ── Shell / OpenAI: model switching not supported ──────
+        if ai_key in ("shell", "openai"):
             msg = (
                 f"ℹ️ **Model switching is not available for {ai_key.title()}.**\n\n"
-                f"{ai_key.title()} runs as a CLI tool authenticated via OAuth — "
-                f"it uses the model assigned to your account by default.\n\n"
-                f"Model switching is available for **Ollama** sessions, which use "
-                f"a local REST API and let you choose from any locally installed model.\n\n"
-                f"To use a different Ollama model: create an Ollama session, then "
-                f"type `/model <name>` (e.g. `/model qwen2.5-coder:7b`)."
+                f"{ai_key.title()} does not support model switching via CLI."
             )
+            await push_message("system", msg, source=source, session_id=sid)
+            return msg
+
+        # ── Claude / Gemini / Codex: support --model flag ──────
+        if ai_key in ("claude", "gemini", "codex"):
+            if not arg or arg_lower in ("list", "ls", "show", "?"):
+                current_model = sess.get("model") or "(default)"
+                _model_hints = {
+                    "claude": "claude-sonnet-4-20250514, claude-opus-4-20250514, claude-haiku-3-5-20241022",
+                    "gemini": "gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash",
+                    "codex": "o4-mini, o3, gpt-4.1",
+                }
+                hints = _model_hints.get(ai_key, "")
+                msg = (
+                    f"**Current model:** `{current_model}`\n"
+                    f"**AI:** {ai_key.title()}\n\n"
+                    f"**Available models:** {hints}\n\n"
+                    f"To switch: `/model <name>` — To reset: `/model default`"
+                )
+                await push_message("system", msg, source=source, session_id=sid)
+                return msg
+            if arg_lower == "default":
+                sess["model"] = None
+                await push_state()
+                msg = f"✅ Model reset to default for {ai_key.title()}."
+                await push_message("system", msg, source=source, session_id=sid)
+                return msg
+            sess["model"] = arg
+            await push_state()
+            msg = f"✅ {ai_key.title()} model switched to `{arg}`."
             await push_message("system", msg, source=source, session_id=sid)
             return msg
 
@@ -834,32 +853,75 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         has_history = len(sess["claude_msgs"]) > 0
         enriched_text = inject_skill_prefix(safe_text, ai="claude")
         enriched_text = inject_plugin_context(enriched_text)
-        # Always auto-approve CLI permissions — Helm's own destructive-action
-        # detection (file deletion alerts, pipeline step approval) provides safety.
-        cmd = build_claude_cmd(
-            enriched_text, has_history,
-            model=sess.get("model"),
-            auto_approve=True,
-        )
-        sess["claude_msgs"].append(text)
-        before = await asyncio.to_thread(snapshot_dir, cwd)
-        raw_output = await asyncio.to_thread(run_ai_popen, cmd, cwd, "claude", sess)
-        after  = await asyncio.to_thread(snapshot_dir, cwd)
-        await push_thinking(False, session_id=sid)
 
-        # Parse Claude JSON output for token counts
-        parsed = parse_claude_json_output(raw_output)
-        output = parsed["text"]
-        if parsed.get("input_tokens") is not None or parsed.get("output_tokens") is not None:
-            sess["_last_tokens"] = {
-                "input": parsed.get("input_tokens", 0),
-                "output": parsed.get("output_tokens", 0),
-            }
-            if parsed.get("cost_usd") is not None:
-                sess["_last_cost_usd"] = parsed["cost_usd"]
-            logger.info("Claude tokens: %s in + %s out, cost=$%s",
-                        parsed.get("input_tokens"), parsed.get("output_tokens"),
-                        parsed.get("cost_usd"))
+        sess["claude_msgs"].append(text)
+
+        # Check if MCP tools are available — use agent loop if so
+        from helm.mcp import get_manager as _get_mcp_mgr
+        _mcp_mgr = _get_mcp_mgr()
+        _has_mcp = _mcp_mgr and _mcp_mgr.has_running_servers()
+
+        if _has_mcp:
+            # Inject MCP context ONLY when agent loop will process tool calls
+            enriched_text = inject_mcp_context(enriched_text, code_exec=False)
+            logger.info("Claude: MCP context injected, agent loop enabled (%d servers)",
+                        len(_mcp_mgr.list_servers()))
+
+            # Agent loop: AI can call MCP tools via <tool_call> tags
+            from .agent_loop import run_with_tools
+
+            async def _claude_run_fn(prompt: str) -> str:
+                cmd = build_claude_cmd(
+                    prompt, has_history,
+                    model=sess.get("model"),
+                    auto_approve=True,
+                )
+                raw = await asyncio.to_thread(run_ai_popen, cmd, cwd, "claude", sess)
+                parsed = parse_claude_json_output(raw)
+                # Track tokens from latest call
+                if parsed.get("input_tokens") is not None or parsed.get("output_tokens") is not None:
+                    sess["_last_tokens"] = {
+                        "input": parsed.get("input_tokens", 0),
+                        "output": parsed.get("output_tokens", 0),
+                    }
+                    if parsed.get("cost_usd") is not None:
+                        sess["_last_cost_usd"] = parsed["cost_usd"]
+                return parsed["text"]
+
+            before = await asyncio.to_thread(snapshot_dir, cwd)
+            output = await run_with_tools(
+                run_fn=_claude_run_fn,
+                initial_prompt=enriched_text,
+                cwd=cwd,
+                session_id=sid,
+                source=source,
+            )
+            after = await asyncio.to_thread(snapshot_dir, cwd)
+        else:
+            # Single-turn: no MCP tools available
+            cmd = build_claude_cmd(
+                enriched_text, has_history,
+                model=sess.get("model"),
+                auto_approve=True,
+            )
+            before = await asyncio.to_thread(snapshot_dir, cwd)
+            raw_output = await asyncio.to_thread(run_ai_popen, cmd, cwd, "claude", sess)
+            after  = await asyncio.to_thread(snapshot_dir, cwd)
+
+            parsed = parse_claude_json_output(raw_output)
+            output = parsed["text"]
+            if parsed.get("input_tokens") is not None or parsed.get("output_tokens") is not None:
+                sess["_last_tokens"] = {
+                    "input": parsed.get("input_tokens", 0),
+                    "output": parsed.get("output_tokens", 0),
+                }
+                if parsed.get("cost_usd") is not None:
+                    sess["_last_cost_usd"] = parsed["cost_usd"]
+                logger.info("Claude tokens: %s in + %s out, cost=$%s",
+                            parsed.get("input_tokens"), parsed.get("output_tokens"),
+                            parsed.get("cost_usd"))
+
+        await push_thinking(False, session_id=sid)
 
         # If successful, broadcast and handle file diff
         if not _is_failure(output):
@@ -884,6 +946,9 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
                     asyncio.to_thread(auto_create_skill_template, text, "ollama", output)
                 )
         else:
+            # Clear conversation history after a failed turn so the next
+            # request starts fresh — stale error context confuses the model.
+            sess.pop("ollama_messages", None)
             # Self-healing: AI failed and no skill existed → ask Claude to create one
             if not skill_matched:
                 healed = await _self_heal_with_skill(ai, sess, text, safe_text,
@@ -899,25 +964,81 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         enriched_text = inject_plugin_context(enriched_text)
         integration = _st.integrations[ai]
         use_stdin   = integration.get("stdin_prompt", False)
-        cmd    = integration["build_command"](enriched_text, model=sess.get("model"))
-        before = await asyncio.to_thread(snapshot_dir, cwd)
-        output = await asyncio.to_thread(
-            run_ai_popen, cmd, cwd, ai, sess, INTEGRATION_TIMEOUT,
-            stdin_text=enriched_text if use_stdin else None,
-        )
-        after  = await asyncio.to_thread(snapshot_dir, cwd)
-        await push_thinking(False, session_id=sid)
 
-        # Try to extract token counts from CLI output (Gemini, Codex, etc.)
-        cli_tokens = _extract_tokens_from_cli_output(output)
-        if cli_tokens:
-            sess["_last_tokens"] = cli_tokens
-            logger.info("%s tokens (parsed from CLI): %d in + %d out",
-                        ai, cli_tokens["input"], cli_tokens["output"])
+        # Pseudo-history for single-turn AIs: inject prior exchanges as context
+        _hist = sess.get("_integration_history", [])
+        if _hist:
+            hist_block = "[Prior conversation in this session]\n"
+            # Keep last 3 exchanges to avoid prompt bloat
+            for h in _hist[-3:]:
+                hist_block += f"User: {h['q'][:200]}\nAssistant: {h['a'][:300]}\n\n"
+            hist_block += "[Current request]\n"
+            enriched_text = hist_block + enriched_text
+
+        # Check if MCP tools are available — use agent loop if so
+        from helm.mcp import get_manager as _get_mcp_mgr2
+        _mcp_mgr2 = _get_mcp_mgr2()
+        _has_mcp2 = _mcp_mgr2 and _mcp_mgr2.has_running_servers()
+
+        if _has_mcp2:
+            # Inject MCP context ONLY when agent loop will process tool calls
+            # Code-executing AIs (Codex, Gemini) get HTTP API instructions
+            enriched_text = inject_mcp_context(enriched_text, code_exec=use_stdin)
+            logger.info("%s: MCP context injected (code_exec=%s), agent loop enabled", ai, use_stdin)
+
+            from .agent_loop import run_with_tools
+
+            async def _integration_run_fn(prompt: str) -> str:
+                cmd = integration["build_command"](prompt, model=sess.get("model"))
+                out = await asyncio.to_thread(
+                    run_ai_popen, cmd, cwd, ai, sess, INTEGRATION_TIMEOUT,
+                    stdin_text=prompt if use_stdin else None,
+                )
+                cli_tokens = _extract_tokens_from_cli_output(out)
+                if cli_tokens:
+                    sess["_last_tokens"] = cli_tokens
+                return out
+
+            before = await asyncio.to_thread(snapshot_dir, cwd)
+            output = await run_with_tools(
+                run_fn=_integration_run_fn,
+                initial_prompt=enriched_text,
+                cwd=cwd,
+                session_id=sid,
+                source=source,
+            )
+            after = await asyncio.to_thread(snapshot_dir, cwd)
+        else:
+            cmd    = integration["build_command"](enriched_text, model=sess.get("model"))
+            before = await asyncio.to_thread(snapshot_dir, cwd)
+            output = await asyncio.to_thread(
+                run_ai_popen, cmd, cwd, ai, sess, INTEGRATION_TIMEOUT,
+                stdin_text=enriched_text if use_stdin else None,
+            )
+            after  = await asyncio.to_thread(snapshot_dir, cwd)
+
+            # Try to extract token counts from CLI output (Gemini, Codex, etc.)
+            cli_tokens = _extract_tokens_from_cli_output(output)
+            if cli_tokens:
+                sess["_last_tokens"] = cli_tokens
+                logger.info("%s tokens (parsed from CLI): %d in + %d out",
+                            ai, cli_tokens["input"], cli_tokens["output"])
+
+        await push_thinking(False, session_id=sid)
 
         if not _is_failure(output):
             await push_message("assistant", output, ai=ai, source=source, session_id=sid)
             await handle_diff(before, after, source, cwd, session_id=sid)
+            # Store exchange in pseudo-history for single-turn AIs
+            if "_integration_history" not in sess:
+                sess["_integration_history"] = []
+            sess["_integration_history"].append({
+                "q": text[:500],
+                "a": output[:500],
+            })
+            # Cap history at 10 exchanges
+            if len(sess["_integration_history"]) > 10:
+                sess["_integration_history"] = sess["_integration_history"][-10:]
             if not skill_matched and _is_coherent_task(text):
                 asyncio.create_task(
                     asyncio.to_thread(auto_create_skill_template, text, ai, output)

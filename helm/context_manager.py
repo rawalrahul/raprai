@@ -132,14 +132,25 @@ def update_token_count(sess: dict, input_tokens: int = 0, output_tokens: int = 0
     If actual token counts are provided (from AI backend), use those.
     Otherwise estimate from text lengths.
 
+    For multi-turn AIs (Ollama, Claude), context_usage() recalculates from
+    their message lists anyway, so this mainly tracks the running total.
+    For single-turn AIs (Gemini, Codex), we ACCUMULATE so the context bar
+    shows cumulative session usage rather than just the last call.
+
     Returns the context state dict.
     """
     ctx = _ensure_context_state(sess)
+    ai = sess.get("ai") or "shell"
 
     if input_tokens > 0 or output_tokens > 0:
-        # Actual counts from AI backend — replace estimate
-        ctx["actual_tokens"] = input_tokens + output_tokens
-        ctx["total_tokens"] = input_tokens + output_tokens
+        this_call = input_tokens + output_tokens
+        ctx["actual_tokens"] = this_call
+        if ai in ("ollama", "claude"):
+            # Multi-turn: set total (recalculated from messages in context_usage)
+            ctx["total_tokens"] = this_call
+        else:
+            # Single-turn: accumulate across calls so UI bar grows
+            ctx["total_tokens"] = ctx.get("total_tokens", 0) + this_call
     else:
         # Estimate from text
         added = estimate_tokens(prompt_text) + estimate_tokens(output_text)
@@ -199,7 +210,8 @@ def _count_active_messages(sess: dict) -> int:
         return len(sess["ollama_messages"])
     if ai == "claude":
         return len(sess.get("claude_msgs", []))
-    return 0
+    # Single-turn AIs: use task_count as proxy for message count
+    return int(sess.get("task_count", 0))
 
 
 def _estimate_ollama_tokens(sess: dict) -> int:
@@ -471,7 +483,12 @@ async def force_compact(sess: dict, source: str = "web") -> str:
     sid = sess.get("id", "")
 
     if ai not in ("claude", "ollama"):
-        return "Context compaction is only available for Claude and Ollama sessions."
+        # Single-turn AIs don't have persistent context to compact,
+        # but we can reset the running token counter
+        ctx = _ensure_context_state(sess)
+        ctx["total_tokens"] = 0
+        ctx["warned"] = False
+        return "🗜️ Token counter reset. (Single-turn AIs don't maintain persistent context.)"
 
     before = context_usage(sess)
 

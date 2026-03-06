@@ -22,6 +22,20 @@ from helm.skills import inject_skill_prefix, detect_skill
 
 from .doc_generators import _generate_pptx_code, _generate_pdf_code, _generate_docx_code
 
+# MCP Manager (lazy import to avoid circular deps)
+_mcp_manager = None
+
+def _get_mcp_manager():
+    """Lazy-load the MCP Manager singleton."""
+    global _mcp_manager
+    if _mcp_manager is None:
+        try:
+            from helm.mcp import get_manager
+            _mcp_manager = get_manager()
+        except ImportError:
+            pass
+    return _mcp_manager
+
 
 _OLLAMA_URL = "http://localhost:11434/api/chat"
 
@@ -364,6 +378,26 @@ _OLLAMA_TOOLS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# MCP tools (dynamically added from all running MCP servers)
+# ---------------------------------------------------------------------------
+
+def _build_ollama_tools() -> list[dict]:
+    """Build the tools list, including MCP server tools if available."""
+    tools = list(_OLLAMA_TOOLS)  # copy base tools
+
+    # Add tools from all running MCP servers
+    mgr = _get_mcp_manager()
+    if mgr and mgr.has_running_servers():
+        mcp_tools = mgr.get_ollama_tool_defs()
+        tools.extend(mcp_tools)
+        logger.debug("Ollama tools: added %d MCP tools from %d servers",
+                      len(mcp_tools),
+                      len([s for s in mgr._clients.values() if s.is_running()]))
+
+    return tools
+
+
 async def _execute_ollama_tool(name: str, args: dict, cwd: str) -> str:
     """Dispatch and run a single Ollama tool call; return the result as a string."""
     try:
@@ -443,7 +477,13 @@ async def _execute_ollama_tool(name: str, args: dict, cwd: str) -> str:
             )
             if result.returncode != 0:
                 return f"Error creating presentation:\n{result.stderr.strip()}"
-            return f"✓ Created {filename} with {len(slides)+1} slides (title + {len(slides)} content slides)"
+            fpath = pathlib.Path(cwd) / filename
+            size  = fpath.stat().st_size if fpath.exists() else 0
+            return (
+                f"✓ Created {filename} ({size:,} bytes) with {len(slides)+1} slides "
+                f"(title + {len(slides)} content slides). "
+                f"Saved to: {fpath}"
+            )
 
         elif name == "create_pdf":
             filename = args.get("filename", "Document.pdf")
@@ -462,7 +502,9 @@ async def _execute_ollama_tool(name: str, args: dict, cwd: str) -> str:
             )
             if result.returncode != 0:
                 return f"Error creating PDF:\n{result.stderr.strip()}"
-            return f"✓ Created {filename} with {len(sections)} sections"
+            fpath = pathlib.Path(cwd) / filename
+            size  = fpath.stat().st_size if fpath.exists() else 0
+            return f"✓ Created {filename} ({size:,} bytes) with {len(sections)} sections. Saved to: {fpath}"
 
         elif name == "create_document":
             filename = args.get("filename", "Document.docx")
@@ -480,7 +522,14 @@ async def _execute_ollama_tool(name: str, args: dict, cwd: str) -> str:
             )
             if result.returncode != 0:
                 return f"Error creating document:\n{result.stderr.strip()}"
-            return f"✓ Created {filename} with {len(sections)} sections"
+            fpath = pathlib.Path(cwd) / filename
+            size  = fpath.stat().st_size if fpath.exists() else 0
+            return f"✓ Created {filename} ({size:,} bytes) with {len(sections)} sections. Saved to: {fpath}"
+
+        # Route MCP server tools (e.g. google_workspace_gmail_users_messages_list)
+        mgr = _get_mcp_manager()
+        if mgr and mgr.is_mcp_tool(name):
+            return await mgr.call_tool(name, args)
 
         return f"Unknown tool: {name}"
 
@@ -562,41 +611,22 @@ def _ollama_system_prompt(cwd: str, skill_content: str = "") -> str:
     base = (
         f"You are a capable AI assistant with tools to create and manage files.\n"
         f"Working directory: {cwd}\n\n"
-        "RULES:\n"
-        "• For PowerPoint presentations → ALWAYS use the create_presentation tool. "
-        "Provide a title, subtitle, theme, and a list of slides. "
-        "Available slide types: content, two_column, stat, section, timeline, "
-        "comparison, quote, cards, table, closing. "
-        "IMPORTANT: Use at least 4 DIFFERENT slide types for variety. "
-        "Aim for 8-12 slides. Always end with a 'closing' slide. "
-        "Themes: 'dark' (default), 'corporate', 'light', 'forest'.\n"
-        "• For PDF documents → ALWAYS use the create_pdf tool. "
-        "Provide a title, subtitle, and sections with headings, paragraphs, bullets, "
-        "numbered_items, callouts, key_value_pairs, and tables.\n"
-        "• For Word documents → ALWAYS use the create_document tool. "
-        "Provide a title and sections with headings, paragraphs, bullets, "
-        "numbered_items, callouts, key_value_pairs, and tables.\n"
-        "• Do NOT use execute_python for presentations, PDFs, or Word docs. "
-        "Use the dedicated tools above instead.\n"
-        "• For other code tasks → use execute_python.\n"
-        "• For plain text, Markdown, JSON, CSV → use write_file.\n"
-        "• To inspect files → use list_directory or read_file.\n"
-        "• Always confirm at the end what was created, with the exact file name.\n"
-        "• QUALITY: produce detailed, professional content. Never produce stubs. "
-        "Write full sentences and paragraphs, not placeholder text.\n"
+        "You have tools available — use whichever tool fits the task best. "
+        "Produce detailed, professional content. Never produce stubs or placeholders.\n"
     )
 
     if skill_content:
         base += (
-            "\n"
-            "═══ MANDATORY SKILL INSTRUCTIONS ═══\n"
-            "You MUST follow the code templates, helper functions, color palettes, "
-            "and patterns below EXACTLY. Copy the boilerplate code and adapt it "
-            "for the user's topic. Do NOT write your own code from scratch — "
-            "use these templates.\n\n"
+            "\nThe following skill guide applies to this task:\n\n"
             f"{skill_content}\n"
-            "═══ END SKILL ═══\n"
         )
+
+    # Add MCP server info if any servers are running
+    mgr = _get_mcp_manager()
+    if mgr and mgr.has_running_servers():
+        mcp_summary = mgr.get_system_prompt_summary()
+        if mcp_summary:
+            base += f"\n{mcp_summary}\n"
 
     return base
 
@@ -681,10 +711,11 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
     # A safety limit of 200 prevents true infinite loops from buggy models.
     _SAFETY_LIMIT = 200
     for _iteration in range(_SAFETY_LIMIT):
+        active_tools = _build_ollama_tools()
         payload = {
             "model":   model,
             "messages": sess["ollama_messages"],
-            "tools":   _OLLAMA_TOOLS,
+            "tools":   active_tools,
             "stream":  False,
         }
 
@@ -774,10 +805,17 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
                 "content": tool_result,
             })
 
-            await push_message(
-                "system", f"✅ `{tool_name}` — done",
-                source=source, session_id=sid,
-            )
+            # Show success or error to the user based on actual result
+            if tool_result.startswith("Error") or tool_result.startswith("Exit "):
+                await push_message(
+                    "system", f"❌ `{tool_name}` — failed",
+                    source=source, session_id=sid,
+                )
+            else:
+                await push_message(
+                    "system", f"✅ `{tool_name}` — done",
+                    source=source, session_id=sid,
+                )
 
     else:
         # Loop exhausted — force a final summary by calling the model

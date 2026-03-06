@@ -35,7 +35,9 @@ app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 # ---------------------------------------------------------------------------
 
 # Paths that are always public (no PIN required)
-_PUBLIC_PREFIXES = ("/login", "/setup", "/static")
+# /mcp/call and /mcp/servers are used by AI subprocesses (Codex, Gemini)
+# that don't have browser session cookies.
+_PUBLIC_PREFIXES = ("/login", "/setup", "/static", "/mcp/call", "/mcp/servers", "/health")
 
 
 class _AuthMiddleware(BaseHTTPMiddleware):
