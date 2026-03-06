@@ -11,15 +11,13 @@ Configurable via .env / Settings:
 """
 
 import asyncio
-import json
 import os
 import pathlib
 import time
-from datetime import datetime
 from typing import Optional
 
 import helm.state as _st
-from helm.config import CHAT_LOG_DIR, HISTORY_ID_RE, logger
+from helm.config import logger
 from helm.paths import user_data_dir as _udd
 
 # ---------------------------------------------------------------------------
@@ -80,86 +78,76 @@ _PENDING_SIGNALS = [
 
 def scan_pending_tasks(max_logs: int = 10, max_age_hours: float = 0) -> list[dict]:
     """
-    Scan the most recent N chat logs for messages containing pending-task signals.
+    Scan recent chat messages in SQLite for pending-task signals.
 
     Args:
-        max_logs: Maximum number of log files to scan (most recent first).
+        max_logs: Maximum number of distinct sessions to return.
         max_age_hours: Only consider messages newer than this many hours.
-                       0 means use the heartbeat interval as the window
-                       (default: 2× the interval so nothing slips through
-                       the cracks when the system is off for a while).
+                       0 means use 2× the heartbeat interval as the window.
 
     Returns a list of dicts:
         {"history_id": str, "folder": str, "ai": str, "snippet": str, "ts": float}
     """
-    if not CHAT_LOG_DIR.exists():
-        return []
+    from helm.db import get_db
 
     # Time-window: only surface messages from the last 2× heartbeat interval
-    # (e.g. 48 hours for a 24h interval).  This prevents ancient "todo" matches
-    # from resurfacing on every check-in.
     if max_age_hours > 0:
         cutoff_ts = time.time() - (max_age_hours * 3600)
     else:
         cutoff_ts = time.time() - (_interval() * 2)
 
-    log_files = sorted(
-        [f for f in CHAT_LOG_DIR.glob("*.jsonl") if HISTORY_ID_RE.fullmatch(f.stem)],
-        key=lambda f: f.stat().st_mtime,
-        reverse=True,
-    )[:max_logs]
+    try:
+        db = get_db()
+    except Exception:
+        return []
+
+    # Query recent messages from SQLite — keyword matching done in Python
+    rows = db.execute(
+        """SELECT history_id, content, ai, ts
+           FROM messages
+           WHERE type = 'message'
+             AND ts > ?
+           ORDER BY ts DESC
+           LIMIT 2000""",
+        (cutoff_ts,),
+    ).fetchall()
+
+    if not rows:
+        return []
+
+    # Get folder (CWD) info per history_id
+    history_ids = list(dict.fromkeys(r["history_id"] for r in rows))[:max_logs]
+    folder_map = {}
+    for hid in history_ids:
+        cwd_row = db.execute(
+            """SELECT path FROM messages
+               WHERE history_id = ? AND type = 'cwd' AND path IS NOT NULL
+               ORDER BY id DESC LIMIT 1""",
+            (hid,),
+        ).fetchone()
+        if cwd_row and cwd_row["path"]:
+            folder_map[hid] = pathlib.Path(cwd_row["path"]).name or cwd_row["path"]
 
     pending = []
-    for log_file in log_files:
-        # Skip files that haven't been modified since the cutoff — no
-        # recent messages could possibly be inside.
-        if log_file.stat().st_mtime < cutoff_ts:
+    hid_set = set(history_ids)
+    for row in rows:
+        hid = row["history_id"]
+        if hid not in hid_set:
             continue
 
-        hid = log_file.stem
-        try:
-            lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
-        except Exception:
-            continue
-
-        folder = ""
-        last_ai = ""
-
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except Exception:
-                continue
-
-            if rec.get("type") == "cwd" and rec.get("path"):
-                folder = pathlib.Path(rec["path"]).name or rec["path"]
-
-            if rec.get("type") == "message":
-                if rec.get("ai"):
-                    last_ai = rec["ai"]
-
-                # --- Age filter: skip messages older than the cutoff ---
-                msg_ts = rec.get("ts", 0)
-                if msg_ts and msg_ts < cutoff_ts:
-                    continue
-
-                content = (rec.get("content") or "").lower()
-                # Check both user and assistant messages for pending signals
-                for signal in _PENDING_SIGNALS:
-                    if signal.lower() in content:
-                        snippet = (rec.get("content") or "")[:150].replace("\n", " ")
-                        pending.append({
-                            "history_id": hid,
-                            "folder": folder or hid,
-                            "ai": last_ai,
-                            "snippet": snippet,
-                            "ts": msg_ts,
-                            "signal": signal,
-                        })
-                        break  # one match per message is enough
+        content = (row["content"] or "").lower()
+        for signal in _PENDING_SIGNALS:
+            if signal.lower() in content:
+                snippet = (row["content"] or "")[:150].replace("\n", " ")
+                pending.append({
+                    "history_id": hid,
+                    "folder": folder_map.get(hid, hid),
+                    "ai": row["ai"] or "",
+                    "snippet": snippet,
+                    "ts": row["ts"] or 0,
+                    "signal": signal,
+                })
+                break
 
     # Deduplicate — keep only the most recent match per history_id
     seen = {}

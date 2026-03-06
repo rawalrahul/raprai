@@ -9,7 +9,7 @@ import pathlib
 from typing import Optional
 
 import helm.state as _st
-from helm.config import ALLOWED_USER_IDS, CHAT_LOG_DIR, HISTORY_ID_RE
+from helm.config import ALLOWED_USER_IDS, HISTORY_ID_RE
 
 from .keyboards import (
     sessions_keyboard, session_controls_keyboard, new_session_keyboard,
@@ -271,19 +271,26 @@ async def action_callback(update, context):
     action = data.split(":", 1)[1] if ":" in data else data
 
     if action == "history":
-        if not CHAT_LOG_DIR.exists():
-            await query.answer("No chat history yet.", show_alert=True)
-            return
-        log_files = sorted(
-            [f for f in CHAT_LOG_DIR.glob("*.jsonl") if HISTORY_ID_RE.fullmatch(f.stem)],
-            reverse=True,
-        )[:20]
-        if not log_files:
+        from helm.db import get_db
+        try:
+            db = get_db()
+            hid_rows = db.execute(
+                """SELECT DISTINCT history_id FROM messages
+                   WHERE type = 'message'
+                   ORDER BY id DESC"""
+            ).fetchall()
+        except Exception:
+            hid_rows = []
+        # Filter to valid history IDs and limit to 20
+        history_ids = [
+            r["history_id"] for r in hid_rows
+            if HISTORY_ID_RE.fullmatch(r["history_id"])
+        ][:20]
+        if not history_ids:
             await query.answer("No chat history yet.", show_alert=True)
             return
         rows: list = []
-        for f in log_files:
-            date_str = f.stem
+        for date_str in history_ids:
             display = get_session_display_name(date_str)
             rows.append([InlineKeyboardButton(display, callback_data=f"action:resume_date:{date_str}")])
         rows.append([InlineKeyboardButton("← Back", callback_data="ms:list")])

@@ -283,28 +283,43 @@ def handle_callback(code: str, state: str) -> dict:
         logger.error("OAuth: no access_token in response for %s: %s", plugin_id, token_resp)
         return {"error": "No access token received from provider"}
 
-    # Store token in .env
+    # Store token in encrypted vault (+ .env for backward compat)
     token_env = auth.get("token_env", "")
     if token_env:
+        from helm.token_vault import store_token
         from helm.web_routes.app import update_env
-        update_env(token_env, access_token)
-        os.environ[token_env] = access_token
-        logger.info("OAuth: stored token for %s in %s", plugin_id, token_env)
+        store_token(token_env, access_token)
+        update_env(token_env, "vault-managed")   # placeholder so .env shows it's configured
+        logger.info("OAuth: stored encrypted token for %s in vault (%s)", plugin_id, token_env)
 
     # Store refresh token if present (Google, etc.)
     refresh_token = token_resp.get("refresh_token", "")
     refresh_env = auth.get("refresh_token_env", "")
     if refresh_token and refresh_env:
+        from helm.token_vault import store_token
         from helm.web_routes.app import update_env
-        update_env(refresh_env, refresh_token)
-        os.environ[refresh_env] = refresh_token
-        logger.info("OAuth: stored refresh token for %s in %s", plugin_id, refresh_env)
+        store_token(refresh_env, refresh_token)
+        update_env(refresh_env, "vault-managed")
+        logger.info("OAuth: stored encrypted refresh token for %s in vault (%s)", plugin_id, refresh_env)
 
     return {"ok": True, "plugin_id": plugin_id, "connected": True}
 
 
+def _has_token(env_key: str) -> bool:
+    """Check if a token exists (vault or os.environ), ignoring placeholders."""
+    val = os.environ.get(env_key, "")
+    if val and val != "vault-managed":
+        return True
+    # Try loading from vault (populates os.environ)
+    try:
+        from helm.token_vault import load_token
+        return bool(load_token(env_key))
+    except Exception:
+        return False
+
+
 def check_connected(plugin_info: dict) -> bool:
-    """Check if a plugin has a valid token stored."""
+    """Check if a plugin has a valid token stored (vault or env)."""
     auth = plugin_info.get("auth", {})
     auth_type = auth.get("type", "")
 
@@ -314,80 +329,61 @@ def check_connected(plugin_info: dict) -> bool:
 
     # Token-type plugins: check token_env or any of the multi-tokens
     if auth_type == "token":
-        # Single token
-        token_env = auth.get("token_env", "")
-        if token_env and os.environ.get(token_env, ""):
+        if _has_token(auth.get("token_env", "")):
             return True
-        # Multi-token (e.g., Linear/Jira, Zapier)
         for t in auth.get("tokens", []):
-            t_env = t.get("token_env", "")
-            if t_env and os.environ.get(t_env, ""):
+            if _has_token(t.get("token_env", "")):
                 return True
         return False
 
     # OAuth2 plugins: check token_env or fallback_token
     if auth_type == "oauth2":
-        token_env = auth.get("token_env", "")
-        if token_env and os.environ.get(token_env, ""):
+        if _has_token(auth.get("token_env", "")):
             return True
-        # Fallback token
         fb = auth.get("fallback_token", {})
-        fb_env = fb.get("token_env", "")
-        if fb_env and os.environ.get(fb_env, ""):
+        if _has_token(fb.get("token_env", "")):
             return True
         return False
 
     # Fallback: check all env_vars
     for env_var in plugin_info.get("env_vars", []):
-        if os.environ.get(env_var, ""):
+        if _has_token(env_var):
             return True
     return False
 
 
 def disconnect(plugin_info: dict) -> dict:
-    """Clear stored tokens for a plugin."""
+    """Clear stored tokens for a plugin (vault + .env)."""
     auth = plugin_info.get("auth", {})
     from helm.web_routes.app import update_env
+    from helm.token_vault import delete_token
 
     cleared = []
 
+    def _clear(env_key: str):
+        if not env_key or env_key in cleared:
+            return
+        delete_token(env_key)          # remove from encrypted vault
+        update_env(env_key, "")        # clear from .env
+        os.environ.pop(env_key, None)
+        cleared.append(env_key)
+
     # Clear main token
-    token_env = auth.get("token_env", "")
-    if token_env:
-        update_env(token_env, "")
-        os.environ.pop(token_env, None)
-        cleared.append(token_env)
+    _clear(auth.get("token_env", ""))
 
     # Clear multi-tokens (Linear/Jira, Zapier)
     for t in auth.get("tokens", []):
-        t_env = t.get("token_env", "")
-        if t_env:
-            update_env(t_env, "")
-            os.environ.pop(t_env, None)
-            cleared.append(t_env)
+        _clear(t.get("token_env", ""))
 
     # Clear fallback token
-    fb = auth.get("fallback_token", {})
-    fb_env = fb.get("token_env", "")
-    if fb_env and fb_env not in cleared:
-        update_env(fb_env, "")
-        os.environ.pop(fb_env, None)
-        cleared.append(fb_env)
+    _clear(auth.get("fallback_token", {}).get("token_env", ""))
 
     # Clear refresh token
-    refresh_env = auth.get("refresh_token_env", "")
-    if refresh_env:
-        update_env(refresh_env, "")
-        os.environ.pop(refresh_env, None)
-        cleared.append(refresh_env)
+    _clear(auth.get("refresh_token_env", ""))
 
     # Multi-provider tokens
     for prov in auth.get("providers", {}).values():
-        t_env = prov.get("token_env", "")
-        if t_env:
-            update_env(t_env, "")
-            os.environ.pop(t_env, None)
-            cleared.append(t_env)
+        _clear(prov.get("token_env", ""))
 
     plugin_id = plugin_info.get("id", "")
     logger.info("OAuth: disconnected %s (cleared: %s)", plugin_id, cleared)

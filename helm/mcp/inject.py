@@ -38,6 +38,13 @@ def inject_mcp_context(prompt: str, code_exec: bool = False) -> str:
 
     port = os.environ.get("WEB_PORT", "8000")
 
+    # Get the bearer token for MCP subprocess auth
+    try:
+        from helm.web_routes.app import MCP_BEARER_TOKEN
+        bearer = MCP_BEARER_TOKEN
+    except Exception:
+        bearer = ""
+
     if code_exec:
         # Compact HTTP API instruction for Codex/Gemini
         call_method = (
@@ -46,7 +53,7 @@ def inject_mcp_context(prompt: str, code_exec: bool = False) -> str:
             "import json, urllib.request\n"
             f"req = urllib.request.Request('http://127.0.0.1:{port}/mcp/call',\n"
             '  data=json.dumps({{"name":"TOOL","arguments":{{}}}}).encode(),\n'
-            '  headers={{"Content-Type":"application/json"}})\n'
+            f'  headers={{"Content-Type":"application/json","Authorization":"Bearer {bearer}"}})\n'
             'print(json.loads(urllib.request.urlopen(req,timeout=30).read())["result"])\n'
             "```\n"
         )

@@ -173,10 +173,11 @@ async def save_token(plugin_id: str, request: Request):
             "validation_failed": True,
         }, status_code=400)
 
-    # Save to .env and os.environ
+    # Save to encrypted vault (+ .env placeholder for backward compat)
+    from helm.token_vault import store_token
     from helm.web_routes.app import update_env
-    update_env(token_env, value)
-    os.environ[token_env] = value
+    store_token(token_env, value)
+    update_env(token_env, "vault-managed")
 
     # Auto-enable the plugin
     set_plugin_enabled(plugin_id, True)

@@ -10,6 +10,7 @@ Generalized from helm/gws_mcp.py to work with any MCP server.
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import threading
 import time
@@ -142,13 +143,19 @@ class MCPClient:
             logger.info("MCP '%s': starting — %s", self.server_id, " ".join(self.command))
 
             try:
-                # On Windows, always use shell=True so the shell can resolve
-                # commands like gws, npx, node, etc. from PATH (they're often
-                # installed as .cmd shims that only the shell can find).
-                use_shell = os.name == "nt"
+                # Resolve the executable fully so we never need shell=True.
+                # On Windows, .cmd/.bat shims (npx, node, etc.) are resolved
+                # via shutil.which which checks PATHEXT extensions.
+                resolved_cmd = list(self.command)
+                exe = shutil.which(resolved_cmd[0], path=proc_env.get("PATH"))
+                if exe:
+                    resolved_cmd[0] = exe
+                    logger.debug("MCP '%s': resolved %s → %s",
+                                 self.server_id, self.command[0], exe)
+
                 self._proc = await asyncio.to_thread(
                     lambda: subprocess.Popen(
-                        self.command,
+                        resolved_cmd,
                         stdin=subprocess.PIPE,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
@@ -156,7 +163,7 @@ class MCPClient:
                         encoding="utf-8",
                         errors="replace",
                         env=proc_env,
-                        shell=use_shell,
+                        shell=False,
                     )
                 )
             except FileNotFoundError:

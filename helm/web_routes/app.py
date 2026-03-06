@@ -4,6 +4,7 @@ helm/web_routes/app.py — FastAPI app initialization, CORS, middleware, and hea
 
 import os
 import pathlib
+import secrets
 import sys
 from typing import Optional
 
@@ -35,18 +36,51 @@ app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 # ---------------------------------------------------------------------------
 
 # Paths that are always public (no PIN required)
-# /mcp/call and /mcp/servers are used by AI subprocesses (Codex, Gemini)
-# that don't have browser session cookies.
-_PUBLIC_PREFIXES = ("/login", "/setup", "/static", "/mcp/call", "/mcp/servers", "/health")
+_PUBLIC_PREFIXES = ("/login", "/setup", "/static", "/health")
+
+# MCP endpoints are NOT fully public — they require localhost origin
+# and a bearer token that's auto-generated at startup.
+_MCP_PREFIXES = ("/mcp/call", "/mcp/servers")
+
+# Auto-generated bearer token for subprocess MCP calls (set at startup).
+# Also exported as env var so child processes (call_tool.py) can read it.
+MCP_BEARER_TOKEN: str = secrets.token_urlsafe(32)
+os.environ["MCP_BEARER_TOKEN"] = MCP_BEARER_TOKEN
+
+
+def _is_localhost(request: Request) -> bool:
+    """True if the request originates from loopback (127.0.0.1 / ::1)."""
+    client = request.client
+    if not client:
+        return False
+    host = client.host or ""
+    return host in ("127.0.0.1", "::1", "localhost")
 
 
 class _AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # Allow public routes through unconditionally
         path = request.url.path
+
+        # Allow fully-public routes through unconditionally
         if any(path == p or path.startswith(p + "/") or path.startswith(p + "?")
                for p in _PUBLIC_PREFIXES):
             return await call_next(request)
+
+        # MCP endpoints: allow if (a) normal session cookie is valid, OR
+        # (b) localhost + valid bearer token (for AI subprocesses)
+        if any(path == p or path.startswith(p + "/") for p in _MCP_PREFIXES):
+            # Option A: authenticated browser session
+            if _auth.check_auth(request):
+                return await call_next(request)
+            # Option B: localhost + bearer token (for Codex/Gemini subprocesses)
+            if _is_localhost(request):
+                auth_header = request.headers.get("authorization", "")
+                expected = f"Bearer {MCP_BEARER_TOKEN}"
+                if secrets.compare_digest(auth_header, expected):
+                    return await call_next(request)
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+
         # Allow WebSocket upgrades — the WS handler checks auth itself
         if request.headers.get("upgrade", "").lower() == "websocket":
             return await call_next(request)

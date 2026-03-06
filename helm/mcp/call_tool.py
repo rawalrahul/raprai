@@ -25,6 +25,23 @@ import urllib.error
 _PORT = os.environ.get("WEB_PORT", "8000")
 _HOST = os.environ.get("WEB_HOST", "127.0.0.1")
 _BASE = f"http://{_HOST}:{_PORT}"
+_BEARER = os.environ.get("MCP_BEARER_TOKEN", "")
+
+
+def _auth_headers() -> dict:
+    """Build request headers including bearer auth for MCP endpoints."""
+    headers = {"Content-Type": "application/json"}
+    token = _BEARER
+    if not token:
+        # Try to import from running app (same-process usage)
+        try:
+            from helm.web_routes.app import MCP_BEARER_TOKEN
+            token = MCP_BEARER_TOKEN
+        except Exception:
+            pass
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 def mcp_call(tool_name: str, arguments: dict | None = None) -> str:
@@ -38,7 +55,7 @@ def mcp_call(tool_name: str, arguments: dict | None = None) -> str:
     req = urllib.request.Request(
         url,
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers=_auth_headers(),
         method="POST",
     )
 
@@ -65,7 +82,8 @@ def mcp_list_servers() -> str:
     """List available MCP servers and their status."""
     url = f"{_BASE}/mcp/servers"
     try:
-        with urllib.request.urlopen(url, timeout=10) as resp:
+        list_req = urllib.request.Request(url, headers=_auth_headers())
+        with urllib.request.urlopen(list_req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             servers = data.get("servers", [])
             if not servers:

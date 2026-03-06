@@ -2,13 +2,15 @@
 helm/auth.py — PIN-based authentication for RAPR AI.
 
 Provides:
-  - PIN hashing (SHA-256 + random salt, stored in .env)
+  - PIN hashing (bcrypt preferred, PBKDF2-SHA256 600k fallback)
+  - Auto-upgrade of legacy SHA-256 hashes on successful verify
   - Session token issuance and validation (SQLite-backed + HttpOnly cookie)
   - Brute-force lockout (SQLite-persisted, survives restarts)
   - check_auth() helper used by route guards
 """
 
 import hashlib
+import hmac
 import os
 import secrets
 import time
@@ -16,6 +18,13 @@ from typing import Optional
 
 from fastapi import Request
 from fastapi.responses import RedirectResponse
+
+try:
+    import bcrypt as _bcrypt
+    _HAS_BCRYPT = True
+except ImportError:
+    _bcrypt = None
+    _HAS_BCRYPT = False
 
 # ---------------------------------------------------------------------------
 # Constants (can be overridden via .env)
@@ -33,11 +42,27 @@ COOKIE_NAME     = "hq_session"
 _failed:   dict[str, list]  = {}       # client_ip -> [attempt_timestamps]
 
 # ---------------------------------------------------------------------------
-# PIN hashing
+# PIN hashing  (bcrypt preferred → PBKDF2-SHA256 600k fallback)
 # ---------------------------------------------------------------------------
 
-def _hash_pin(pin: str, salt: str) -> str:
-    """Return a deterministic SHA-256 hex digest for (salt, pin)."""
+_PBKDF2_ITERATIONS = 600_000  # OWASP 2023 recommendation
+
+
+def _hash_pin_bcrypt(pin: str) -> tuple[str, str]:
+    """Hash with bcrypt. Returns (salt_placeholder, bcrypt_hash)."""
+    hashed = _bcrypt.hashpw(pin.encode("utf-8"), _bcrypt.gensalt(rounds=12))
+    return ("bcrypt", hashed.decode("ascii"))
+
+
+def _hash_pin_pbkdf2(pin: str) -> tuple[str, str]:
+    """Hash with PBKDF2-SHA256. Returns (salt_hex, derived_hex)."""
+    salt = secrets.token_bytes(32)
+    derived = hashlib.pbkdf2_hmac("sha256", pin.encode("utf-8"), salt, _PBKDF2_ITERATIONS)
+    return (f"pbkdf2:{salt.hex()}", derived.hex())
+
+
+def _hash_pin_legacy(pin: str, salt: str) -> str:
+    """Legacy SHA-256 hash — used only for verification of old hashes."""
     return hashlib.sha256(f"{salt}{pin}".encode("utf-8")).hexdigest()
 
 
@@ -57,22 +82,60 @@ def pin_is_set() -> bool:
 
 def set_pin(new_pin: str) -> tuple[str, str]:
     """
-    Hash *new_pin* with a fresh random salt.
+    Hash *new_pin* with the strongest available algorithm.
 
     Returns (salt, hashed_pin) — the caller is responsible for persisting
     both values to .env and reloading os.environ.
     """
-    salt   = secrets.token_hex(16)
-    hashed = _hash_pin(new_pin, salt)
-    return salt, hashed
+    if _HAS_BCRYPT:
+        return _hash_pin_bcrypt(new_pin)
+    return _hash_pin_pbkdf2(new_pin)
+
+
+def _auto_upgrade_hash(pin: str) -> None:
+    """Re-hash the PIN with the current best algorithm and update .env."""
+    try:
+        from helm.web_routes.app import update_env
+        new_salt, new_hash = set_pin(pin)
+        update_env("PIN_SALT", new_salt)
+        update_env("PIN_HASH", new_hash)
+        os.environ["PIN_SALT"] = new_salt
+        os.environ["PIN_HASH"] = new_hash
+    except Exception:
+        pass  # non-critical — old hash still works
 
 
 def verify_pin(pin: str) -> bool:
-    """Return True if *pin* matches the stored hash."""
+    """Return True if *pin* matches the stored hash. Auto-upgrades legacy hashes."""
     salt, stored_hash = _get_stored()
     if not salt or not stored_hash:
         return False
-    return _hash_pin(pin, salt) == stored_hash
+
+    # --- bcrypt ---
+    if salt == "bcrypt":
+        try:
+            ok = _bcrypt.checkpw(pin.encode("utf-8"), stored_hash.encode("ascii"))
+        except Exception:
+            ok = False
+        return ok
+
+    # --- PBKDF2 ---
+    if salt.startswith("pbkdf2:"):
+        salt_bytes = bytes.fromhex(salt[7:])
+        derived = hashlib.pbkdf2_hmac(
+            "sha256", pin.encode("utf-8"), salt_bytes, _PBKDF2_ITERATIONS
+        )
+        ok = hmac.compare_digest(derived.hex(), stored_hash)
+        # Upgrade to bcrypt if now available
+        if ok and _HAS_BCRYPT:
+            _auto_upgrade_hash(pin)
+        return ok
+
+    # --- Legacy SHA-256 (auto-upgrade on success) ---
+    ok = hmac.compare_digest(_hash_pin_legacy(pin, salt), stored_hash)
+    if ok:
+        _auto_upgrade_hash(pin)
+    return ok
 
 # ---------------------------------------------------------------------------
 # Brute-force protection (SQLite-backed, survives restarts)

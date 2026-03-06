@@ -10,6 +10,10 @@ croniter>=2.0
 requests>=2.31
 aiofiles>=23.0
 
+# Security
+cryptography>=41.0
+bcrypt>=4.0
+
 # Document generation
 openpyxl>=3.1
 python-pptx>=0.6.23

@@ -15,7 +15,7 @@ from typing import Optional
 
 import helm.state as _st
 from helm.config import (
-    ALLOWED_USER_IDS, CHAT_LOG_DIR, CRONITER_OK, HISTORY_ID_RE,
+    ALLOWED_USER_IDS, CRONITER_OK, HISTORY_ID_RE,
     WEB_PORT, logger,
 )
 
@@ -505,45 +505,42 @@ async def tg_schedule(update, context):
 
 @authorized_only
 async def tg_history(update, context):
-    """/history [n] — show last n user+assistant messages from the log (default 5, max 20)."""
+    """/history [n] — show last n user+assistant messages from the database (default 5, max 20)."""
     arg = (update.message.text or "").partition(" ")[2].strip()
     try:
         n = max(1, min(20, int(arg))) if arg else 5
     except ValueError:
         n = 5
 
-    messages: list[dict] = []
-    for delta in range(7):
-        d = (datetime.now() - timedelta(days=delta)).strftime("%Y-%m-%d")
-        log_file = CHAT_LOG_DIR / f"{d}.jsonl"
-        if not log_file.exists():
-            continue
-        day_msgs = []
-        for line in log_file.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                m = json.loads(line)
-                if m.get("role") in ("user", "assistant"):
-                    day_msgs.append(m)
-            except Exception:
-                pass
-        messages = day_msgs + messages
-        if len(messages) >= n:
-            break
+    # Query recent messages from SQLite
+    from helm.db import get_db
+    try:
+        db = get_db()
+        rows = db.execute(
+            """SELECT role, content, ai, timestamp, ts
+               FROM messages
+               WHERE type = 'message' AND role IN ('user', 'assistant')
+               ORDER BY id DESC
+               LIMIT ?""",
+            (n,),
+        ).fetchall()
+    except Exception:
+        await update.message.reply_text("Could not read history from database.")
+        return
 
-    messages = messages[-n:]
-    if not messages:
+    if not rows:
         await update.message.reply_text("No history found.")
         return
 
+    # Reverse to show oldest-first
+    rows = list(reversed(rows))
+
     lines_out = []
-    for m in messages:
-        role = "You" if m["role"] == "user" else (m.get("ai") or "AI").title()
-        ts = m.get("timestamp", "")[:16].replace("T", " ")
-        preview = m.get("content", "")[:200]
-        if len(m.get("content", "")) > 200:
+    for m in rows:
+        role = "You" if m["role"] == "user" else (m["ai"] or "AI").title()
+        ts = (m["timestamp"] or "")[:16].replace("T", " ")
+        preview = (m["content"] or "")[:200]
+        if len(m["content"] or "") > 200:
             preview += "..."
         lines_out.append(f"[{ts}] {role}:\n{preview}")
 
@@ -557,63 +554,76 @@ async def perform_resume(message, date_str: str = "") -> None:
     from helm.history import load_chat_names
     from helm.broadcast import push_state
 
-    # --- Resolve which log file to load ---
+    # --- Resolve history_id (from SQLite) ---
+    from helm.db import get_db
+    from helm.history import get_history_messages
+
     if date_str:
-        log_file = CHAT_LOG_DIR / f"{date_str}.jsonl"
-        if not log_file.exists():
+        # Verify this history_id exists in the DB
+        db = get_db()
+        exists = db.execute(
+            "SELECT 1 FROM messages WHERE history_id = ? AND type = 'message' LIMIT 1",
+            (date_str,),
+        ).fetchone()
+        if not exists:
             await message.reply_text(f"❌ No history found for {date_str}.")
             return
     else:
-        if not CHAT_LOG_DIR.exists():
+        # Find the most recent history_id
+        db = get_db()
+        row = db.execute(
+            """SELECT DISTINCT history_id FROM messages
+               WHERE type = 'message'
+               ORDER BY id DESC LIMIT 1"""
+        ).fetchone()
+        if not row:
             await message.reply_text("No chat history saved yet.")
             return
-        logs = sorted(CHAT_LOG_DIR.glob("*.jsonl"), reverse=True)
-        if not logs:
-            await message.reply_text("No chat history saved yet.")
-            return
-        log_file = logs[0]
-        date_str = log_file.stem
+        date_str = row["history_id"]
 
-    # --- Read the log ---
-    messages: list[dict] = []
-    last_cwd: Optional[str] = None
-    last_ai:  Optional[str] = None
-    for line in log_file.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            m = json.loads(line)
-            if m.get("type") == "cwd":
-                last_cwd = m["path"]
-            elif m.get("type") == "ai":
-                last_ai = m.get("model")
-            elif m.get("role") in ("user", "assistant"):
-                messages.append(m)
-        except Exception:
-            pass
-
+    # --- Read messages from SQLite ---
+    messages: list[dict] = get_history_messages(date_str)
     if not messages:
         await message.reply_text(f"No conversation messages found in session {date_str}.")
         return
 
-    # --- Fallback: load CWD/AI from last_state.json ---
+    # --- Get CWD and AI from the history's own records ---
+    last_cwd: Optional[str] = None
+    last_ai:  Optional[str] = None
+
+    db = get_db()
+    cwd_row = db.execute(
+        """SELECT path FROM messages
+           WHERE history_id = ? AND type = 'cwd' AND path IS NOT NULL
+           ORDER BY id DESC LIMIT 1""",
+        (date_str,),
+    ).fetchone()
+    if cwd_row:
+        last_cwd = cwd_row["path"]
+
+    ai_row = db.execute(
+        """SELECT model FROM messages
+           WHERE history_id = ? AND type = 'ai' AND model IS NOT NULL
+           ORDER BY id DESC LIMIT 1""",
+        (date_str,),
+    ).fetchone()
+    if ai_row:
+        last_ai = ai_row["model"]
+
+    # --- Fallback: load CWD/AI from session_state table ---
     if not last_cwd or not last_ai:
         try:
-            state_file = CHAT_LOG_DIR / "last_state.json"
-            if state_file.exists():
-                st = json.loads(state_file.read_text(encoding="utf-8"))
-                sessions_saved = st.get("sessions", {})
+            state_row = db.execute(
+                "SELECT value FROM session_state WHERE key = 'sessions'"
+            ).fetchone()
+            if state_row:
+                sessions_saved = json.loads(state_row["value"])
                 if sessions_saved:
                     first = next(iter(sessions_saved.values()))
                     if not last_cwd:
                         last_cwd = first.get("cwd") or None
                     if not last_ai:
                         last_ai = first.get("ai") or None
-                if not last_cwd:
-                    last_cwd = st.get("cwd") or None
-                if not last_ai:
-                    last_ai = st.get("ai") or None
         except Exception:
             pass
 
