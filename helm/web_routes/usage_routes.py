@@ -207,8 +207,7 @@ async def get_budget():
 @router.post("/api/budget")
 async def save_budget(request: Request):
     """Save budget caps. Body: { claude: { daily_cap_min: 300, warn_pct: 80 }, ... }"""
-    from .app import update_env
-    from dotenv import load_dotenv
+    from .app import update_env, reload_env
 
     body = await request.json()
     saved = []
@@ -237,5 +236,5 @@ async def save_budget(request: Request):
             os.environ[env_key] = val
             saved.append(env_key)
 
-    load_dotenv(override=True)
+    reload_env()
     return JSONResponse({"saved": saved})

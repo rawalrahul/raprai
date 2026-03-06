@@ -254,6 +254,23 @@ def update_env(key: str, value: str):
 _update_env = update_env  # legacy alias
 
 
+def reload_env():
+    """Reload .env into os.environ AND re-apply vault tokens on top.
+
+    Use this instead of raw ``load_dotenv(override=True)`` anywhere in the
+    codebase, so that encrypted vault tokens aren't clobbered by the
+    "vault-managed" placeholders stored in .env.
+    """
+    from dotenv import load_dotenv
+    load_dotenv(override=True)
+    # Re-apply decrypted tokens so vault-managed placeholders don't stick
+    try:
+        from helm.token_vault import load_all_tokens
+        load_all_tokens()
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Settings keys (for settings_routes.py)
 # ---------------------------------------------------------------------------

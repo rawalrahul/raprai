@@ -56,8 +56,8 @@ async def save_settings(request: Request):
         os.environ[key] = str(value).strip()
         saved.append(key)
     # Reload dotenv so any module that reads os.environ gets fresh values
-    from dotenv import load_dotenv
-    load_dotenv(override=True)
+    from helm.web_routes.app import reload_env
+    reload_env()
     return JSONResponse({"saved": saved, "skipped": skipped})
 
 

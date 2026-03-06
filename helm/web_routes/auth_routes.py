@@ -73,8 +73,8 @@ async def setup_save(request: Request):
             if isinstance(key, str) and isinstance(value, str) and value.strip():
                 update_env(key, value.strip())
         # Reload so the running process picks up new values immediately
-        from dotenv import load_dotenv
-        load_dotenv(override=True)
+        from helm.web_routes.app import reload_env
+        reload_env()
         return JSONResponse({"ok": True})
     except Exception as e:
         logger.error("setup/save error: %s", e)
@@ -184,8 +184,8 @@ async def set_pin_endpoint(request: Request):
         update_env("PIN_HASH", hashed)
 
         # Reload env so the in-process check picks up the new values immediately
-        from dotenv import load_dotenv
-        load_dotenv(override=True)
+        from helm.web_routes.app import reload_env
+        reload_env()
 
         return JSONResponse({"ok": True})
     except Exception as exc:

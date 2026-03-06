@@ -307,6 +307,8 @@ def handle_callback(code: str, state: str) -> dict:
 
 def _has_token(env_key: str) -> bool:
     """Check if a token exists (vault or os.environ), ignoring placeholders."""
+    if not env_key:
+        return False
     val = os.environ.get(env_key, "")
     if val and val != "vault-managed":
         return True

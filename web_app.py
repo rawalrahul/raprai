@@ -74,9 +74,43 @@ async def _main():
     from helm.session_mgr import load_usage_from_db
     load_usage_from_db()
 
+    # Load encrypted tokens from vault into os.environ (must run before plugins/MCP)
+    try:
+        from helm.token_vault import load_all_tokens
+        loaded = load_all_tokens()
+        if loaded:
+            logger.info("Token vault: loaded %d token(s) into environment", len(loaded))
+    except Exception as exc:
+        logger.warning("Token vault init: %s", exc)
+
     # Load Helm-level plugins (helm/plugins/ directory)
     from helm.plugins import load_plugins
     load_plugins()
+
+    # Migrate any remaining plaintext plugin tokens into the encrypted vault
+    # (must run after load_plugins so _registry is populated)
+    try:
+        from helm.token_vault import migrate_env_tokens
+        from helm.plugins import _registry as _plugin_registry
+        token_env_keys = []
+        for info in _plugin_registry.values():
+            auth = info.get("auth", {})
+            if auth.get("token_env"):
+                token_env_keys.append(auth["token_env"])
+            for t in auth.get("tokens", []):
+                if t.get("token_env"):
+                    token_env_keys.append(t["token_env"])
+            fb = auth.get("fallback_token", {})
+            if fb.get("token_env"):
+                token_env_keys.append(fb["token_env"])
+            if auth.get("refresh_token_env"):
+                token_env_keys.append(auth["refresh_token_env"])
+        if token_env_keys:
+            migrated = migrate_env_tokens(token_env_keys)
+            if migrated:
+                logger.info("Token vault: migrated %d plaintext token(s)", migrated)
+    except Exception as exc:
+        logger.warning("Token migration: %s", exc)
 
     # Auto-start MCP servers from mcp_servers.json
     # We block here (up to 30s) so servers are ready before first AI query.
