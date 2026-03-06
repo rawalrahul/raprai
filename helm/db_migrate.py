@@ -93,7 +93,7 @@ def v2_add_content_fts(conn: sqlite3.Connection):
 
 def v3_add_helmpack_tables(conn: sqlite3.Connection):
     """
-    Version 3: Add tables for HelmPack marketplace package tracking.
+    Version 3: Add tables for RAPR Packages marketplace package tracking.
 
     - packages: installed package metadata
     - package_installs: transaction log for install/uninstall operations
@@ -129,10 +129,38 @@ def v3_add_helmpack_tables(conn: sqlite3.Connection):
     conn.commit()
 
 
+def v4_add_memories_table(conn: sqlite3.Connection):
+    """
+    Version 4: Add shared AI memory table.
+
+    Stores cross-session, cross-AI knowledge (facts, preferences, decisions)
+    that gets injected into every AI session for continuity.
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS memories (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            content    TEXT NOT NULL,
+            category   TEXT NOT NULL DEFAULT 'fact',
+            source_ai  TEXT DEFAULT '',
+            session_id TEXT DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            last_used  TEXT,
+            use_count  INTEGER NOT NULL DEFAULT 0,
+            pinned     INTEGER NOT NULL DEFAULT 0,
+            archived   INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
+        CREATE INDEX IF NOT EXISTS idx_memories_archived ON memories(archived);
+    """)
+    conn.commit()
+
+
 MIGRATIONS: list[tuple[int, str, callable]] = [
     (1, "Initial schema", v1_initial),
     (2, "Add FTS5 full-text search", v2_add_content_fts),
-    (3, "Add HelmPack package tracking", v3_add_helmpack_tables),
+    (3, "Add RAPR Packages tracking", v3_add_helmpack_tables),
+    (4, "Add shared AI memory", v4_add_memories_table),
 ]
 
 

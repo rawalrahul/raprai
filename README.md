@@ -1,6 +1,6 @@
-# Claude Remote — Multi-Session AI Control via Web UI + Telegram
+# RAPR AI — Multi-Session AI Control Platform
 
-Run Claude Code, Gemini, Codex, and your shell as **parallel independent sessions** — controlled from a local web UI in your browser and/or Telegram on your phone. Both channels stay in sync. Every session gets its own terminal, its own working directory, and its own conversation history.
+Run Claude Code, Gemini, Codex, Ollama, and any custom AI CLI as **parallel independent sessions** — controlled from a local web UI in your browser and/or Telegram on your phone. Both channels stay in sync. Every session gets its own terminal, its own working directory, and its own conversation history.
 
 ---
 
@@ -9,18 +9,21 @@ Run Claude Code, Gemini, Codex, and your shell as **parallel independent session
 ```
 Browser (http://localhost:8000)  ←── WebSocket ──┐
                                                   ├── Session Manager ── Session 1: Claude Code  (C:\projects\webapp)
-Telegram App (your phone)        ←── Bot API  ────┘                  ├── Session 2: Gemini       (C:\projects\data)
-                                        ↑                            └── Session 3: Shell         (C:\scripts)
-                                  web_app.py
+Telegram App (your phone)        ←── Bot API  ────┘                  ├── Session 2: Ollama       (C:\projects\data)
+                                        ↑                            ├── Session 3: Gemini       (C:\projects\api)
+                                   web_app.py                        └── Session 4: Shell         (C:\scripts)
                              (single Python process)
 ```
 
-- **Multi-session** — run Claude Code, Gemini, Codex, and a raw shell at the same time, each with its own directory and history
+- **Multi-session** — run Claude Code, Gemini, Codex, Ollama, custom AIs, and a raw shell at the same time, each with its own directory and history
 - **Focused session** — Telegram always routes to the session you last tapped. Switch focus with one button tap
 - **Web UI** — chat bubbles, session picker chip, directory bar, per-session badges, thinking indicator
 - **Full sync** — web messages forwarded to Telegram, Telegram messages shown in browser, both always in sync
 - **File auto-send** — any AI-generated file (PDF, image, video, code) sent to Telegram as a proper attachment the moment it's created
 - **Chat history** — every session auto-saved; browse, view, resume with context, rename, or delete from web UI or Telegram
+- **Shared AI memory** — knowledge learned in one AI session is available to all others via persistent memory store
+- **RAPR Packages** — browse, search, and one-click install MCP servers, skills, and plugins
+- **Custom AI management** — add or remove AI integrations from the Settings UI without editing files or restarting
 
 ---
 
@@ -39,8 +42,8 @@ Telegram App (your phone)        ←── Bot API  ────┘             
 
 1. Open Telegram and search for **@BotFather**
 2. Send `/newbot`
-3. Choose a name (e.g. `My Claude Remote`)
-4. Choose a username ending in `bot` (e.g. `my_claude_remote_bot`)
+3. Choose a name (e.g. `My RAPR AI`)
+4. Choose a username ending in `bot` (e.g. `my_raprai_bot`)
 5. BotFather replies with a token:
    ```
    123456789:ABCDefgh-XXXXXXXXXXXXXXXXXXXXXXX
@@ -116,7 +119,7 @@ Your browser opens automatically at **http://localhost:8000**. The Telegram bot 
 
 > **Tip — per-project shortcuts:** Right-click `launch.bat` → *Create shortcut*, open the shortcut properties, and append your project path to the **Target** field:
 > ```
-> C:\...\claude-remote\launch.bat  C:\projects\website
+> C:\...\raprai\launch.bat  C:\projects\website
 > ```
 > Give each shortcut a different name and pin them to your taskbar.
 
@@ -124,7 +127,7 @@ Your browser opens automatically at **http://localhost:8000**. The Telegram bot 
 
 ## Sessions — the core concept
 
-Claude Remote is built around sessions. Each session is an independent process with its own AI, working directory, and conversation history. You can run as many as you like simultaneously.
+RAPR AI is built around sessions. Each session is an independent process with its own AI, working directory, and conversation history. You can run as many as you like simultaneously.
 
 **Focused session** — only one session is "focused" at a time. All typing (in Telegram or the web UI) goes to the focused session. You can switch focus at any moment.
 
@@ -141,7 +144,7 @@ Claude Remote is built around sessions. Each session is an independent process w
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  ◈ Claude Remote                                   ≡  ●      │  ← header (history / connection)
+│  ◈ RAPR AI                                   ≡  ●      │  ← header (history / connection)
 │──────────────────────────────────────────────────────────────│
 │  📁  2 sessions ·  C:\projects\webapp              [🔍]      │  ← dir bar (focused session CWD)
 │──────────────────────────────────────────────────────────────│
@@ -290,7 +293,7 @@ Each session's files, CWD, and conversation history are completely independent. 
 
 ## File Auto-Send
 
-When an AI creates a file in the session's working directory, Claude Remote detects it and sends it to Telegram automatically. The message includes which session produced the file.
+When an AI creates a file in the session's working directory, RAPR AI detects it and sends it to Telegram automatically. The message includes which session produced the file.
 
 | File type | Extensions | Telegram action |
 |-----------|-----------|----------------|
@@ -344,9 +347,42 @@ Bot:  📎 Context injected. Thinking…
 
 ## Adding AI integrations
 
-Claude Remote loads integrations from an `integrations/` folder at startup. Drop in a new `.json` file and restart — no code changes needed.
+RAPR AI supports two ways to add new AI integrations:
 
-Each integration file defines the CLI command, display name, emoji, and colour. See the existing files in `integrations/` for the format.
+### From the Settings UI (recommended)
+
+Open Settings (gear icon) → scroll to "Add Custom AI Integration" → fill in the key, name, command template, and optional fields → click Add. The new AI appears immediately in the session picker — no restart needed.
+
+Command templates support `{prompt}` and `{model}` placeholders. Enable "Pipe prompt via stdin" if your CLI reads from stdin instead of command-line arguments.
+
+### From the integrations/ folder
+
+Drop a `.py` file into the `integrations/` folder and restart. Each file defines KEY, NAME, EMOJI, COLOR, and a `build_command(prompt)` function. See `integrations/_template.py` for the format.
+
+---
+
+## Shared AI Memory
+
+RAPR AI maintains a persistent memory store that all AI sessions share. Knowledge learned in one AI session is available to all others.
+
+**How it works:** Relevant memories are automatically injected into AI prompts based on keyword matching. Memories can be added manually or extracted automatically at session end.
+
+**Adding memories:**
+- Type `/remember <fact>` in any chat session
+- Use the Memory panel in the sidebar to quick-add entries
+- Memories are auto-extracted from session transcripts when a session ends
+
+**Memory categories:** preference, fact, project, person, decision, instruction
+
+**Memory panel:** Open from the sidebar to browse, search, pin, archive, or delete memories. Pinned memories are always injected into AI prompts.
+
+---
+
+## RAPR Packages
+
+Browse, search, and one-click install packages (MCP servers, skills, plugins) from the unified RAPR Packages sidebar panel. The Installed tab shows all detected skills, plugins, and MCP servers in one view. The Browse tab lets you discover and install new packages from the catalog.
+
+Upload `.raprpkg` files to install from local packages. Each `.raprpkg` is a ZIP with a `manifest.json` describing the package type, dependencies, and metadata. Installs are atomic with automatic rollback on failure.
 
 ---
 
@@ -357,7 +393,7 @@ To start automatically when you log into Windows:
 1. Press `Win + R`, type `shell:startup`, press Enter
 2. Create a shortcut pointing to:
    ```
-   pythonw "C:\path\to\claude-remote\web_app.py"
+   pythonw "C:\path\to\raprai\web_app.py"
    ```
    (`pythonw` runs Python without a visible console window.)
 
@@ -366,21 +402,32 @@ To start automatically when you log into Windows:
 ## Project files
 
 ```
-claude-remote/
+RAPR-AI/
 ├── web_app.py            # Main entry point (Web UI + Telegram bot + session manager)
 ├── requirements.txt      # Python dependencies
 ├── .env                  # Your config (never share this)
 ├── .env.example          # Config template
 ├── setup.bat             # One-time setup (install deps, create .env)
 ├── launch.bat            # Daily launcher — accepts optional path argument
-├── integrations/         # AI plugin definitions (one .json per AI)
-│   ├── gemini.json
-│   └── codex.json
+├── helm/                 # Core application package
+│   ├── ai_runner/        # AI session management (core.py, ollama.py)
+│   ├── frontend/         # Modular web UI (template.html, styles.css, JS modules)
+│   ├── packages/         # RAPR Packages system (installer, catalog)
+│   ├── mcp/              # MCP server management
+│   ├── web_routes/       # FastAPI route modules
+│   ├── db.py             # SQLite database (WAL mode, FTS5)
+│   ├── db_migrate.py     # Schema migrations (currently v4)
+│   ├── integrations.py   # AI integration loader (file-based + custom JSON)
+│   ├── memory.py         # Shared AI memory system
+│   ├── plugins.py        # Plugin system
+│   └── skills.py         # Skill registry
+├── integrations/         # AI plugin definitions (one .py per AI)
+│   ├── _template.py      # Template for new integrations
+│   ├── gemini.py
+│   └── codex.py
+├── raprai.db             # SQLite database (auto-created)
 ├── README.md             # This file
-└── chat_logs/            # Auto-created; stores chat history
-    ├── 2026-02-25.jsonl  # One file per day
-    ├── last_state.json   # Saved session state (restored on restart)
-    └── chat_names.json   # Custom session names
+└── chat_logs/            # Legacy (migrated to SQLite)
 ```
 
 ---

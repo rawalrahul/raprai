@@ -628,6 +628,15 @@ def _ollama_system_prompt(cwd: str, skill_content: str = "") -> str:
         if mcp_summary:
             base += f"\n{mcp_summary}\n"
 
+    # Inject shared AI memory
+    try:
+        from helm.memory import get_memory_block
+        mem_block = get_memory_block()
+        if mem_block:
+            base += f"\n{mem_block}"
+    except Exception:
+        pass
+
     return base
 
 

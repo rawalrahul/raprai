@@ -185,6 +185,15 @@ async def emit_session_end_summary(sess: dict, ended_as: str, source: str) -> No
     _add_block("Modified", mod_files, "\u270F\uFE0F")
     _add_block("Deleted", del_files, "\U0001F5D1\uFE0F")
 
+    # Extract and save memories from this session's conversation
+    try:
+        from helm.memory import save_extracted_memories
+        mem_count = save_extracted_memories(sess)
+        if mem_count:
+            lines.append(f"🧠 Extracted {mem_count} memory/memories for future sessions")
+    except Exception as e:
+        logger.warning("Session memory extraction failed: %s", e)
+
     summary = "\n".join(lines)
     await push_message("system", summary, source=source, session_id=sess.get("id"))
 

@@ -309,3 +309,68 @@ async def ollama_status():
         "model_ready":   model_ok,
         "setup_hint":    hint,
     })
+
+
+# ---------------------------------------------------------------------------
+# Custom AI integrations — CRUD via Settings UI
+# ---------------------------------------------------------------------------
+
+from pydantic import BaseModel
+from typing import Optional
+
+
+class CustomAIRequest(BaseModel):
+    key: str
+    name: str
+    emoji: str = "🤖"
+    color: str = "#6b7280"
+    command: str                  # e.g. "mygpt --model {model} --prompt {prompt}"
+    env_vars: list[str] = []
+    setup_hint: str = ""
+    stdin_prompt: bool = False
+
+
+class CustomAIUpdate(BaseModel):
+    name: Optional[str] = None
+    emoji: Optional[str] = None
+    color: Optional[str] = None
+    command: Optional[str] = None
+    env_vars: Optional[list[str]] = None
+    setup_hint: Optional[str] = None
+    stdin_prompt: Optional[bool] = None
+
+
+@router.get("/integrations/custom")
+async def list_custom_integrations():
+    """List all custom (user-defined) integrations."""
+    from helm.integrations import list_custom
+    entries = list_custom()
+    return {"ok": True, "integrations": entries}
+
+
+@router.post("/integrations/custom")
+async def add_custom_integration(req: CustomAIRequest):
+    """Add a new custom AI integration."""
+    from helm.integrations import add_custom
+    try:
+        key = add_custom(req.model_dump())
+        return {"ok": True, "key": key}
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.put("/integrations/custom/{key}")
+async def update_custom_integration(key: str, req: CustomAIUpdate):
+    """Update an existing custom integration."""
+    from helm.integrations import update_custom
+    updates = {k: v for k, v in req.model_dump().items() if v is not None}
+    ok = update_custom(key, updates)
+    return {"ok": ok, "error": "" if ok else f"Integration '{key}' not found"}
+
+
+@router.delete("/integrations/custom/{key}")
+async def delete_custom_integration(key: str):
+    """Remove a custom integration."""
+    from helm.integrations import remove_custom
+    ok = remove_custom(key)
+    return {"ok": ok}

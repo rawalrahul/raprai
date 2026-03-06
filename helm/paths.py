@@ -61,15 +61,20 @@ def user_data_dir() -> pathlib.Path:
     return PROJECT_ROOT
 
 
-def helmpack_cache_dir() -> pathlib.Path:
+def packages_cache_dir() -> pathlib.Path:
     """Return the directory for cached marketplace data (catalogs, downloads)."""
-    d = user_data_dir() / "helmpack_cache"
+    d = user_data_dir() / "packages_cache"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def helmpack_staging_dir() -> pathlib.Path:
+def packages_staging_dir() -> pathlib.Path:
     """Return the directory for temporary package extraction during install."""
-    d = user_data_dir() / "helmpack_staging"
+    d = user_data_dir() / "packages_staging"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+# Backward compatibility aliases
+helmpack_cache_dir = packages_cache_dir
+helmpack_staging_dir = packages_staging_dir

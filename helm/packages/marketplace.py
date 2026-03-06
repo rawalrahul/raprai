@@ -1,5 +1,5 @@
 """
-helm/helmpack/marketplace.py — Marketplace catalog manager.
+helm/packages/marketplace.py — Marketplace catalog manager.
 
 Fetches a catalog JSON from a configurable URL, caches it locally
 (1-hour TTL), and provides search/browse functionality.  Works
@@ -23,7 +23,7 @@ from helm.config import logger
 # Config
 # ---------------------------------------------------------------------------
 
-# Default catalog URL — override with HELMPACK_CATALOG_URL env var
+# Default catalog URL — override with RAPR_CATALOG_URL env var
 _DEFAULT_CATALOG_URL = "https://rapr.ai/marketplace/catalog.json"
 
 _CACHE_TTL = 3600  # 1 hour
@@ -39,8 +39,8 @@ _cached_at: float = 0.0
 
 def _cache_file_path():
     """Return path to the local catalog cache file."""
-    from helm.paths import helmpack_cache_dir
-    return helmpack_cache_dir() / "catalog.json"
+    from helm.paths import packages_cache_dir
+    return packages_cache_dir() / "catalog.json"
 
 
 def _load_cache() -> list[dict]:
@@ -56,7 +56,7 @@ def _load_cache() -> list[dict]:
             return data
         return []
     except Exception as e:
-        logger.warning("HelmPack: failed to load cached catalog: %s", e)
+        logger.warning("RAPR Packages: failed to load cached catalog: %s", e)
         return []
 
 
@@ -73,7 +73,7 @@ def _save_cache(catalog: list[dict]):
             encoding="utf-8",
         )
     except Exception as e:
-        logger.warning("HelmPack: failed to save catalog cache: %s", e)
+        logger.warning("RAPR Packages: failed to save catalog cache: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +82,7 @@ def _save_cache(catalog: list[dict]):
 
 def _catalog_url() -> str:
     """Return the catalog URL from env or default."""
-    return os.environ.get("HELMPACK_CATALOG_URL", _DEFAULT_CATALOG_URL)
+    return os.environ.get("RAPR_CATALOG_URL", _DEFAULT_CATALOG_URL)
 
 
 def _fetch_remote_catalog() -> list[dict]:
@@ -92,7 +92,7 @@ def _fetch_remote_catalog() -> list[dict]:
     url = _catalog_url()
     try:
         resp = requests.get(url, timeout=15, headers={
-            "User-Agent": "RAPR-AI-HelmPack/1.0",
+            "User-Agent": "RAPR-AI/1.0",
             "Accept": "application/json",
         })
         resp.raise_for_status()
@@ -105,7 +105,7 @@ def _fetch_remote_catalog() -> list[dict]:
         return []
 
     except Exception as e:
-        logger.warning("HelmPack: failed to fetch catalog from %s: %s", url, e)
+        logger.warning("RAPR Packages: failed to fetch catalog from %s: %s", url, e)
         return []
 
 
@@ -140,7 +140,7 @@ def get_catalog(force_refresh: bool = False) -> list[dict]:
         _cached_catalog = remote
         _cached_at = now
         _save_cache(remote)
-        logger.info("HelmPack: catalog refreshed — %d packages", len(remote))
+        logger.info("RAPR Packages: catalog refreshed — %d packages", len(remote))
         return _cached_catalog
 
     # Fall back to local file cache
@@ -148,7 +148,7 @@ def get_catalog(force_refresh: bool = False) -> list[dict]:
     if local:
         _cached_catalog = local
         _cached_at = now  # Prevent repeated fetch attempts
-        logger.info("HelmPack: using cached catalog — %d packages (offline mode)", len(local))
+        logger.info("RAPR Packages: using cached catalog — %d packages (offline mode)", len(local))
         return _cached_catalog
 
     # Fall back to built-in demo catalog so the UI isn't empty
@@ -156,10 +156,10 @@ def get_catalog(force_refresh: bool = False) -> list[dict]:
     if builtin:
         _cached_catalog = builtin
         _cached_at = now
-        logger.info("HelmPack: using built-in catalog — %d packages", len(builtin))
+        logger.info("RAPR Packages: using built-in catalog — %d packages", len(builtin))
         return _cached_catalog
 
-    logger.info("HelmPack: no catalog available (offline, no cache)")
+    logger.info("RAPR Packages: no catalog available (offline, no cache)")
     return []
 
 
@@ -205,7 +205,7 @@ def search_catalog(
 
     # Mark installed packages
     try:
-        from helm.helmpack.installer import list_installed
+        from helm.packages.installer import list_installed
         installed_ids = {p["id"] for p in list_installed()}
         for pkg in results:
             pkg["installed"] = pkg.get("id", "") in installed_ids

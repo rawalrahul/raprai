@@ -577,6 +577,56 @@ async def process_message(text: str, source: str = "web",
         return msg
     # ── end /model ────────────────────────────────────────────────────────────
 
+    # ── /remember slash command — save a memory ──────────────────────────────
+    if stripped.lower().startswith("/remember"):
+        from helm.memory import add_memory, list_memories, VALID_CATEGORIES
+
+        arg = stripped[9:].strip()
+
+        if not arg or arg.lower() == "list":
+            # List memories
+            mems = list_memories(limit=20)
+            if not mems:
+                msg = "🧠 No memories saved yet. Use `/remember <fact>` to add one."
+            else:
+                lines = ["🧠 **Shared AI Memory** (%d entries):\n" % len(mems)]
+                for m in mems:
+                    pin = "📌 " if m.get("pinned") else ""
+                    lines.append(f"  {pin}**[{m['category']}]** {m['content']}")
+                msg = "\n".join(lines)
+            await push_message("system", msg, source=source, session_id=sid)
+            return msg
+
+        if arg.lower() == "help":
+            msg = (
+                "🧠 **Memory Commands:**\n"
+                "  `/remember <fact>` — save a memory\n"
+                "  `/remember [category] <fact>` — save with category\n"
+                "  `/remember list` — show all memories\n\n"
+                f"Categories: {', '.join(sorted(VALID_CATEGORIES))}"
+            )
+            await push_message("system", msg, source=source, session_id=sid)
+            return msg
+
+        # Check if first word is a category
+        words = arg.split(None, 1)
+        category = "fact"
+        content = arg
+        if len(words) >= 2 and words[0].lower().rstrip(":") in VALID_CATEGORIES:
+            category = words[0].lower().rstrip(":")
+            content = words[1]
+
+        mid = add_memory(
+            content=content,
+            category=category,
+            source_ai=ai,
+            session_id=sid,
+        )
+        msg = f"🧠 Remembered: **[{category}]** {content}"
+        await push_message("system", msg, source=source, session_id=sid)
+        return msg
+    # ── end /remember ────────────────────────────────────────────────────────
+
     task_started_at = time.time()
     sess["last_used"] = task_started_at
     sess["busy"]       = True
@@ -854,6 +904,15 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         enriched_text = inject_skill_prefix(safe_text, ai="claude")
         enriched_text = inject_plugin_context(enriched_text)
 
+        # Inject shared AI memory into prompt
+        try:
+            from helm.memory import get_memory_block
+            _mem = get_memory_block(prompt=safe_text)
+            if _mem:
+                enriched_text = _mem + enriched_text
+        except Exception:
+            pass
+
         sess["claude_msgs"].append(text)
 
         # Check if MCP tools are available — use agent loop if so
@@ -962,6 +1021,16 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         skill_matched = detect_skill(text)
         enriched_text = inject_skill_prefix(safe_text, ai=ai)
         enriched_text = inject_plugin_context(enriched_text)
+
+        # Inject shared AI memory into prompt
+        try:
+            from helm.memory import get_memory_block
+            _mem = get_memory_block(prompt=safe_text)
+            if _mem:
+                enriched_text = _mem + enriched_text
+        except Exception:
+            pass
+
         integration = _st.integrations[ai]
         use_stdin   = integration.get("stdin_prompt", False)
 
