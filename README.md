@@ -80,12 +80,14 @@ This will:
 
 ## Step 4 — Configure `.env`
 
-Open `.env` in any text editor and fill in the required values:
+Open `.env` in any text editor and fill in the required values (or use the setup wizard at `http://localhost:8000/setup` on first run):
 
 ```env
 TELEGRAM_BOT_TOKEN=123456789:ABCDefgh-XXXXXXXXXXXXXXXXXXXXXXX
 ALLOWED_USER_IDS=987654321
 ```
+
+> **Note:** API keys and tokens are automatically migrated to an encrypted vault on first run. After migration, `.env` entries show `vault-managed` as a placeholder — the real values are Fernet-encrypted in SQLite.
 
 All available settings:
 
@@ -309,7 +311,7 @@ Files up to **50 MB** are supported. The web UI also shows a clickable link at `
 
 ## Chat History
 
-Every session is auto-saved to daily log files in `chat_logs/`. Nothing to configure.
+Every session is auto-saved to the SQLite database (`raprai.db`). Nothing to configure.
 
 ### Web UI — 📂 History button
 
@@ -339,10 +341,10 @@ Bot:  📎 Context injected. Thinking…
 
 ### Notes
 
-- History is not AI memory — each CLI is stateless. Resume works by prepending a condensed transcript to your next message.
-- Log files are stored as `chat_logs/YYYY-MM-DD.jsonl` (one file per day).
-- Custom names are stored in `chat_logs/chat_names.json`.
-- Both files are plain text — safe to back up or delete.
+- History is not AI memory — each CLI is stateless. Resume works by loading conversation summaries and recent messages as context for your next session.
+- All data is stored in `raprai.db` (SQLite with WAL mode). Legacy `chat_logs/` files are auto-migrated on first run.
+- Custom session names are stored in the database alongside chat history.
+- Use the Cloud Backup feature (Settings → Cloud Backup) to back up the database to OneDrive, Google Drive, Dropbox, or a local folder.
 
 ---
 
@@ -416,7 +418,7 @@ To start automatically when you log into Windows:
 RAPR-AI/
 ├── web_app.py            # Main entry point (Web UI + Telegram bot + session manager)
 ├── requirements.txt      # Python dependencies
-├── .env                  # Your config (never share this)
+├── .env                  # Your config (secrets auto-migrated to encrypted vault)
 ├── .env.example          # Config template
 ├── setup.bat             # One-time setup (install deps, create .env)
 ├── launch.bat            # Daily launcher — accepts optional path argument
@@ -428,9 +430,11 @@ RAPR-AI/
 │   ├── web_routes/       # FastAPI route modules
 │   ├── db.py             # SQLite database (WAL mode, FTS5)
 │   ├── cloud_backup/     # Cloud backup system (OneDrive, GDrive, Dropbox, local)
-│   ├── db_migrate.py     # Schema migrations (currently v5)
+│   ├── db_migrate.py     # Schema migrations (currently v8)
 │   ├── integrations.py   # AI integration loader (file-based + custom JSON)
-│   ├── memory.py         # Shared AI memory system
+│   ├── memory.py         # Shared AI memory system (encrypted at rest)
+│   ├── token_vault.py    # Fernet-encrypted credential vault
+│   ├── security.py       # Security constants and helpers
 │   ├── plugins.py        # Plugin system
 │   └── skills.py         # Skill registry
 ├── integrations/         # AI plugin definitions (one .py per AI)

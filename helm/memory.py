@@ -20,6 +20,7 @@ Public API:
     extract_memories_from_session(sess) → list[dict]   (session-end)
     save_extracted_memories(sess) → int
     enforce_memory_cap() → int   (auto-archive oldest if over cap)
+    apply_memory_decay() → dict  (reduce decay_score, auto-archive stale)
 """
 
 import os
@@ -86,6 +87,39 @@ def _db():
     return get_db()
 
 
+def _encrypt(plaintext: str) -> str:
+    """Encrypt memory content for DB storage."""
+    try:
+        from helm.token_vault import encrypt_value
+        return encrypt_value(plaintext)
+    except Exception:
+        return plaintext
+
+
+def _decrypt(cipher: str) -> str:
+    """Decrypt memory content from DB."""
+    try:
+        from helm.token_vault import decrypt_value
+        return decrypt_value(cipher)
+    except Exception:
+        return cipher
+
+
+def _make_search_text(content: str, category: str, source_ai: str = "") -> str:
+    """Build a lowercase keyword string for searchable indexing."""
+    words = re.findall(r"[a-z0-9]+", content.lower())
+    significant = [w for w in words if len(w) > 2][:15]
+    parts = [category.lower(), (source_ai or "").lower()] + significant
+    return " ".join(parts)
+
+
+def _decrypt_row(row_dict: dict) -> dict:
+    """Decrypt the 'content' field of a memory row dict."""
+    if "content" in row_dict and row_dict["content"]:
+        row_dict["content"] = _decrypt(row_dict["content"])
+    return row_dict
+
+
 def add_memory(
     content: str,
     category: str = DEFAULT_CATEGORY,
@@ -115,17 +149,31 @@ def add_memory(
 
     content_lower = content.lower()
     for row in rows:
-        if _similarity(content_lower, (row["content"] or "").lower()) > 0.80:
+        # Decrypt stored content for comparison
+        existing_content = _decrypt(row["content"] or "")
+        if _similarity(content_lower, existing_content.lower()) > 0.80:
             # Existing duplicate — bump usage, don't create new
             touch_memory(row["id"])
             logger.info("Memory dedup: bumped existing #%d instead of creating new", row["id"])
             return row["id"]
 
-    cur = db.execute(
-        """INSERT INTO memories (content, category, source_ai, session_id)
-           VALUES (?, ?, ?, ?)""",
-        (content, category, source_ai, session_id),
-    )
+    # Build search_text from plaintext, then encrypt content for storage
+    search_text = _make_search_text(content, category, source_ai)
+    encrypted_content = _encrypt(content)
+
+    try:
+        cur = db.execute(
+            """INSERT INTO memories (content, category, source_ai, session_id, search_text)
+               VALUES (?, ?, ?, ?, ?)""",
+            (encrypted_content, category, source_ai, session_id, search_text),
+        )
+    except Exception:
+        # Fallback: search_text column may not exist yet (pre-v8 migration)
+        cur = db.execute(
+            """INSERT INTO memories (content, category, source_ai, session_id)
+               VALUES (?, ?, ?, ?)""",
+            (encrypted_content, category, source_ai, session_id),
+        )
     db.commit()
     mid = cur.lastrowid
     logger.info("Memory added #%d: [%s] %s", mid, category, content[:80])
@@ -140,17 +188,35 @@ def edit_memory(memory_id: int, content: str = "", category: str = "") -> bool:
     """Update a memory's content and/or category.
 
     Returns True if the row was found and updated, False otherwise.
+    Content is encrypted before storage; search_text is rebuilt from plaintext.
     """
     db = _db()
     parts, vals = [], []
-    if content:
+    plaintext_content = content.strip() if content else ""
+
+    if plaintext_content:
         parts.append("content = ?")
-        vals.append(content.strip())
+        vals.append(_encrypt(plaintext_content))
     if category and category in VALID_CATEGORIES:
         parts.append("category = ?")
         vals.append(category)
     if not parts:
         return False
+
+    # Rebuild search_text if content changed
+    if plaintext_content:
+        # Determine category for search_text (use new category if provided, else fetch existing)
+        cat_for_search = category if (category and category in VALID_CATEGORIES) else ""
+        if not cat_for_search:
+            row = db.execute("SELECT category, source_ai FROM memories WHERE id = ?", (memory_id,)).fetchone()
+            cat_for_search = row["category"] if row else DEFAULT_CATEGORY
+            source_ai = row["source_ai"] if row else ""
+        else:
+            row = db.execute("SELECT source_ai FROM memories WHERE id = ?", (memory_id,)).fetchone()
+            source_ai = row["source_ai"] if row else ""
+        parts.append("search_text = ?")
+        vals.append(_make_search_text(plaintext_content, cat_for_search, source_ai))
+
     vals.append(memory_id)
     cur = db.execute(f"UPDATE memories SET {', '.join(parts)} WHERE id = ?", vals)
     db.commit()
@@ -214,11 +280,15 @@ def list_memories(
     params.append(limit)
 
     rows = db.execute(sql, params).fetchall()
-    return [dict(r) for r in rows]
+    return [_decrypt_row(dict(r)) for r in rows]
 
 
 def search_memories(query: str, limit: int = 20) -> list[dict]:
-    """Search memories by keyword matching against content.
+    """Search memories by keyword matching.
+
+    First searches the ``search_text`` column (unencrypted keywords) for fast
+    filtering, then decrypts content for display.  Falls back to scanning
+    decrypted content if search_text is empty (pre-v8 rows).
 
     Filters out stop words so common words like 'the', 'is', 'a' don't
     pollute results.  Falls back to all terms if stop-word filtering
@@ -241,16 +311,32 @@ def search_memories(query: str, limit: int = 20) -> list[dict]:
 
     scored = []
     for row in rows:
-        content_lower = (row["content"] or "").lower()
-        category_lower = (row["category"] or "").lower()
-        score = 0.0
-        for term in terms:
-            if term in content_lower:
-                score += 3.0
-            if term in category_lower:
-                score += 1.0
+        d = dict(row)
+        # Use search_text for scoring (fast, unencrypted keywords)
+        search_text = (d.get("search_text") or "").lower()
+        category_lower = (d.get("category") or "").lower()
+
+        # If search_text is populated, score against it
+        if search_text:
+            score = 0.0
+            for term in terms:
+                if term in search_text:
+                    score += 3.0
+                if term in category_lower:
+                    score += 1.0
+        else:
+            # Fallback for pre-v8 rows: decrypt and score against content
+            decrypted = _decrypt(d.get("content") or "")
+            content_lower = decrypted.lower()
+            score = 0.0
+            for term in terms:
+                if term in content_lower:
+                    score += 3.0
+                if term in category_lower:
+                    score += 1.0
+
         if score > 0:
-            d = dict(row)
+            d = _decrypt_row(d)
             d["_score"] = score
             scored.append(d)
 
@@ -259,14 +345,16 @@ def search_memories(query: str, limit: int = 20) -> list[dict]:
 
 
 def touch_memory(memory_id: int):
-    """Bump use_count and last_used for a memory.
+    """Bump use_count, last_used, and reset decay_score for a memory.
 
     Call this when a memory is genuinely referenced or helpful —
     NOT on every prompt injection (which inflates counts).
+    Resets decay_score to 1.0 (fully fresh) since the memory is actively useful.
     """
     db = _db()
     db.execute(
-        "UPDATE memories SET use_count = use_count + 1, last_used = datetime('now') WHERE id = ?",
+        "UPDATE memories SET use_count = use_count + 1, "
+        "last_used = datetime('now'), decay_score = 1.0 WHERE id = ?",
         (memory_id,),
     )
     db.commit()
@@ -330,19 +418,27 @@ def get_memory_block(prompt: str = "", max_tokens: int = 0) -> str:
     normal = [m for m in all_memories if not m.get("pinned")]
 
     # Score normal memories by relevance to current prompt (stop-word aware)
+    # decay_score (0.0–1.0) is factored in as a multiplier on relevance
     if prompt:
         prompt_terms = _meaningful_terms(prompt)
         if prompt_terms:
             for m in normal:
                 content_terms = _meaningful_terms(m["content"])
                 overlap = prompt_terms & content_terms
-                m["_relevance"] = len(overlap)
+                decay = m.get("decay_score", 1.0)
+                m["_relevance"] = len(overlap) * decay
             normal.sort(key=lambda m: (-m["_relevance"], -m.get("use_count", 0)))
         else:
-            # Prompt was all stop words — fall back to use_count ordering
-            normal.sort(key=lambda m: (-m.get("use_count", 0), -m.get("id", 0)))
+            # Prompt was all stop words — fall back to decay-weighted use_count
+            normal.sort(key=lambda m: (
+                -m.get("use_count", 0) * m.get("decay_score", 1.0),
+                -m.get("id", 0),
+            ))
     else:
-        normal.sort(key=lambda m: (-m.get("use_count", 0), -m.get("id", 0)))
+        normal.sort(key=lambda m: (
+            -m.get("use_count", 0) * m.get("decay_score", 1.0),
+            -m.get("id", 0),
+        ))
 
     # Build block: pinned first, then top relevant
     selected = []
@@ -610,3 +706,53 @@ def memory_stats() -> dict:
         }
     except Exception:
         return {"total": 0, "pinned": 0, "archived": 0, "cap": MAX_ACTIVE_MEMORIES, "by_category": {}}
+
+
+# ---------------------------------------------------------------------------
+# Memory Decay
+# ---------------------------------------------------------------------------
+
+# Decay factor per cycle (e.g., 0.95 means lose 5% relevance per decay run).
+# Pinned memories are exempt. Memories drop to 0 and get auto-archived.
+DECAY_FACTOR = float(os.environ.get("MEMORY_DECAY_FACTOR", "0.95"))
+DECAY_ARCHIVE_THRESHOLD = float(os.environ.get("MEMORY_DECAY_ARCHIVE", "0.1"))
+
+
+def apply_memory_decay() -> dict:
+    """Apply time-based decay to all non-pinned, non-archived memories.
+
+    Reduces decay_score by DECAY_FACTOR (multiplicative).
+    Memories that drop below DECAY_ARCHIVE_THRESHOLD are auto-archived.
+
+    Returns stats: {"decayed": int, "archived": int}.
+    """
+    db = _db()
+    try:
+        # Decay all non-pinned, non-archived memories
+        cur = db.execute(
+            "UPDATE memories SET decay_score = decay_score * ? "
+            "WHERE archived = 0 AND pinned = 0 AND decay_score > 0",
+            (DECAY_FACTOR,),
+        )
+        decayed = cur.rowcount
+
+        # Auto-archive memories that have decayed below threshold
+        cur2 = db.execute(
+            "UPDATE memories SET archived = 1 "
+            "WHERE archived = 0 AND pinned = 0 AND decay_score < ?",
+            (DECAY_ARCHIVE_THRESHOLD,),
+        )
+        archived = cur2.rowcount
+
+        db.commit()
+
+        if decayed > 0 or archived > 0:
+            logger.info(
+                "Memory decay: %d memories decayed (factor %.2f), %d auto-archived (below %.2f)",
+                decayed, DECAY_FACTOR, archived, DECAY_ARCHIVE_THRESHOLD,
+            )
+
+        return {"decayed": decayed, "archived": archived}
+    except Exception as e:
+        logger.warning("Memory decay failed: %s", e)
+        return {"decayed": 0, "archived": 0}

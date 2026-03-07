@@ -187,16 +187,20 @@ def load_all_tokens() -> dict[str, str]:
     return loaded
 
 
-def migrate_env_tokens(token_env_keys: list[str]) -> int:
+def migrate_env_tokens(token_env_keys: list[str], scrub_env: bool = True) -> int:
     """Migrate plaintext tokens from .env / os.environ into the vault.
 
-    Call once at startup with the list of all plugin token env-var names.
+    Call once at startup with the list of all plugin/core token env-var names.
     Returns the number of tokens migrated.
+
+    If *scrub_env* is True (default), the plaintext value in .env is replaced
+    with the placeholder ``vault-managed`` after successful migration — matching
+    the pattern used by plugin_routes and plugin_oauth.
     """
     count = 0
     for key in token_env_keys:
         val = os.environ.get(key, "")
-        if val:
+        if val and val != "vault-managed":
             # Check if already in vault
             try:
                 from helm.db import get_db
@@ -208,6 +212,49 @@ def migrate_env_tokens(token_env_keys: list[str]) -> int:
                 if not existing:
                     store_token(key, val)
                     count += 1
+                # Scrub .env even if already in vault (might still have plaintext)
+                if scrub_env:
+                    try:
+                        from helm.web_routes.app import update_env
+                        update_env(key, "vault-managed")
+                    except Exception:
+                        pass
             except Exception:
                 pass
     return count
+
+
+# ---------------------------------------------------------------------------
+# Application-level encryption helpers (for DB column encryption)
+# ---------------------------------------------------------------------------
+
+def encrypt_value(plaintext: str) -> str:
+    """Encrypt a string for DB column storage.
+
+    Returns Fernet ciphertext (base64 ASCII) or the original plaintext
+    if the ``cryptography`` library is not available.
+    """
+    if not plaintext:
+        return plaintext
+    f = _fernet()
+    if f:
+        return f.encrypt(plaintext.encode("utf-8")).decode("ascii")
+    return plaintext
+
+
+def decrypt_value(cipher: str) -> str:
+    """Decrypt a string read from a DB column.
+
+    Gracefully returns the input as-is when:
+    - ``cryptography`` is not installed, or
+    - the value was stored before encryption was enabled (legacy rows).
+    """
+    if not cipher:
+        return cipher
+    f = _fernet()
+    if f:
+        try:
+            return f.decrypt(cipher.encode("ascii")).decode("utf-8")
+        except (InvalidToken, Exception):
+            return cipher  # not encrypted (legacy row)
+    return cipher

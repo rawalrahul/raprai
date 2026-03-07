@@ -192,12 +192,126 @@ def v5_add_cloud_backup_tables(conn: sqlite3.Connection):
     conn.commit()
 
 
+def v6_add_summaries_and_decay(conn: sqlite3.Connection):
+    """
+    Version 6: Conversation summaries persistence + memory decay score.
+
+    - conversation_summaries: stores compaction summaries per session for
+      richer session resume (instead of raw last-10 messages).
+    - memories.decay_score: 0.0–1.0 float that decreases over time for
+      unaccessed memories, used in relevance ranking.
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS conversation_summaries (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            history_id  TEXT NOT NULL,
+            summary     TEXT NOT NULL,
+            token_count INTEGER NOT NULL DEFAULT 0,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_convsumm_history
+            ON conversation_summaries(history_id);
+    """)
+
+    # Add decay_score column to memories (default 1.0 = fully fresh)
+    try:
+        conn.execute(
+            "ALTER TABLE memories ADD COLUMN decay_score REAL NOT NULL DEFAULT 1.0"
+        )
+    except Exception:
+        pass  # Column already exists
+
+    conn.commit()
+
+
+def v7_add_cost_usd(conn: sqlite3.Connection):
+    """Add cost_usd column to usage_stats for dollar-based budget tracking."""
+    try:
+        conn.execute(
+            "ALTER TABLE usage_stats ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0.0"
+        )
+    except Exception:
+        pass  # Column already exists
+    conn.commit()
+
+
+def v8_encrypt_memory_content(conn: sqlite3.Connection):
+    """
+    Version 8: Encrypt memory content at rest + add search_text column.
+
+    Encrypts the ``content`` column of every existing memory using the
+    token-vault Fernet key.  A new ``search_text`` column stores
+    lowercased keywords (category + source_ai + first significant words)
+    so keyword search still works without decrypting every row.
+    """
+    # 1. Add search_text column (idempotent)
+    try:
+        conn.execute(
+            "ALTER TABLE memories ADD COLUMN search_text TEXT NOT NULL DEFAULT ''"
+        )
+    except Exception:
+        pass  # Column already exists
+
+    # 2. Batch-encrypt existing memory content
+    try:
+        from helm.token_vault import encrypt_value, _fernet
+        f = _fernet()
+        if not f:
+            logger.warning("v8: cryptography not installed — skipping content encryption")
+            # Still populate search_text even without encryption
+            rows = conn.execute("SELECT id, content, category, source_ai FROM memories").fetchall()
+            for row in rows:
+                mid, content, category, source_ai = row["id"], row["content"], row["category"], row["source_ai"] or ""
+                search_text = _build_search_text(content, category, source_ai)
+                conn.execute(
+                    "UPDATE memories SET search_text = ? WHERE id = ?",
+                    (search_text, mid),
+                )
+            conn.commit()
+            return
+
+        rows = conn.execute("SELECT id, content, category, source_ai FROM memories").fetchall()
+        encrypted_count = 0
+        for row in rows:
+            mid, content, category, source_ai = row["id"], row["content"], row["category"], row["source_ai"] or ""
+            # Build search_text from plaintext BEFORE encrypting
+            search_text = _build_search_text(content, category, source_ai)
+            # Encrypt content
+            cipher = encrypt_value(content)
+            conn.execute(
+                "UPDATE memories SET content = ?, search_text = ? WHERE id = ?",
+                (cipher, search_text, mid),
+            )
+            encrypted_count += 1
+
+        conn.commit()
+        if encrypted_count:
+            logger.info("v8: encrypted %d memory content entries", encrypted_count)
+    except Exception as exc:
+        logger.error("v8: memory encryption failed: %s", exc)
+        conn.rollback()
+
+
+def _build_search_text(content: str, category: str, source_ai: str) -> str:
+    """Build a lowercase keyword string for search without exposing full content."""
+    import re
+    words = re.findall(r"[a-z0-9]+", content.lower())
+    # Keep first 15 significant words (skip very short ones)
+    significant = [w for w in words if len(w) > 2][:15]
+    parts = [category.lower(), source_ai.lower()] + significant
+    return " ".join(parts)
+
+
 MIGRATIONS: list[tuple[int, str, callable]] = [
     (1, "Initial schema", v1_initial),
     (2, "Add FTS5 full-text search", v2_add_content_fts),
     (3, "Add RAPR Packages tracking", v3_add_helmpack_tables),
     (4, "Add shared AI memory", v4_add_memories_table),
     (5, "Add cloud backup", v5_add_cloud_backup_tables),
+    (6, "Add summaries + memory decay", v6_add_summaries_and_decay),
+    (7, "Add dollar cost tracking to usage_stats", v7_add_cost_usd),
+    (8, "Encrypt memory content at rest", v8_encrypt_memory_content),
 ]
 
 

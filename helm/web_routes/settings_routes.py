@@ -189,3 +189,82 @@ async def integration_models_debug():
 
     result = await asyncio.to_thread(_gather_debug)
     return JSONResponse(result)
+
+
+# ---------------------------------------------------------------------------
+# API Key Management (vault-secured)
+# ---------------------------------------------------------------------------
+
+@router.post("/settings/api-keys")
+async def save_api_key(request: Request):
+    """Save a core API key through the encrypted vault.
+
+    Body: ``{"env_key": "GEMINI_API_KEY", "value": "AIza..."}``
+
+    The key is encrypted via Fernet and stored in the SQLite token_vault.
+    The ``.env`` file receives a ``vault-managed`` placeholder so the
+    actual secret is never stored in plaintext on disk.
+    """
+    from helm.security import VAULT_ELIGIBLE_KEYS
+    from helm.token_vault import store_token
+
+    body = await request.json()
+    env_key = body.get("env_key", "").strip()
+    value = body.get("value", "").strip()
+
+    if not env_key or not value:
+        return JSONResponse({"ok": False, "error": "env_key and value are required"}, status_code=400)
+
+    if env_key not in VAULT_ELIGIBLE_KEYS:
+        return JSONResponse(
+            {"ok": False, "error": f"Unknown or non-secret key: {env_key}"},
+            status_code=400,
+        )
+
+    # Store encrypted in vault + set in os.environ for runtime
+    store_token(env_key, value)
+    # Replace .env entry with placeholder
+    update_env(env_key, "vault-managed")
+
+    logger.info("API key saved via vault: %s", env_key)
+    return JSONResponse({"ok": True, "env_key": env_key})
+
+
+@router.delete("/settings/api-keys/{env_key}")
+async def delete_api_key(env_key: str):
+    """Remove a stored API key from the vault."""
+    from helm.security import VAULT_ELIGIBLE_KEYS
+    from helm.token_vault import delete_token
+
+    if env_key not in VAULT_ELIGIBLE_KEYS:
+        return JSONResponse(
+            {"ok": False, "error": f"Unknown or non-secret key: {env_key}"},
+            status_code=400,
+        )
+
+    delete_token(env_key)
+    update_env(env_key, "")
+    logger.info("API key removed from vault: %s", env_key)
+    return JSONResponse({"ok": True, "env_key": env_key})
+
+
+@router.get("/settings/api-keys")
+async def list_api_keys():
+    """List which API keys are configured (names only, not values).
+
+    Returns a dict mapping env_key → bool (True if a value exists in the
+    vault or os.environ, False if unconfigured).
+    """
+    from helm.security import VAULT_ELIGIBLE_KEYS, redact_env_value
+
+    status = {}
+    for key in sorted(VAULT_ELIGIBLE_KEYS):
+        val = os.environ.get(key, "")
+        if val and val != "vault-managed":
+            status[key] = {"configured": True, "preview": redact_env_value(key, val)}
+        elif val == "vault-managed":
+            status[key] = {"configured": True, "preview": "vault-managed"}
+        else:
+            status[key] = {"configured": False, "preview": ""}
+
+    return JSONResponse(status)

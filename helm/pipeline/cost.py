@@ -33,6 +33,21 @@ def _chars_to_tokens(chars: int) -> int:
     return max(1, chars // 4)
 
 
+def calculate_cost(ai_key: str, input_tokens: int, output_tokens: int) -> float:
+    """Calculate USD cost from actual token counts using the pricing table.
+
+    Returns cost in USD (e.g. 0.0035 for $0.0035).
+    Falls back to "openai" pricing for unknown AI keys.
+    """
+    pricing = _PRICING.get(ai_key, _PRICING.get("openai", {"input": 0.005, "output": 0.015}))
+    return (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1000.0
+
+
+def get_pricing(ai_key: str) -> dict:
+    """Return pricing dict for an AI key (or openai default)."""
+    return _PRICING.get(ai_key, _PRICING.get("openai", {"input": 0.005, "output": 0.015}))
+
+
 def estimate_step_cost(step: dict, context_length: int = 0) -> dict:
     """
     Estimate token usage and cost for a single step.

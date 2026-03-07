@@ -207,7 +207,11 @@ async def history_get(date: str):
 
 @router.get("/history/{date}/resume")
 async def history_resume(date: str):
-    """Return context prefix for resuming a session."""
+    """Return context prefix for resuming a session.
+
+    Uses stored conversation summaries when available (much richer context
+    from prior compactions), falling back to the last 10 raw messages.
+    """
     if not is_valid_history_id(date):
         return JSONResponse({"error": "Invalid ID format."}, status_code=400)
 
@@ -215,22 +219,47 @@ async def history_resume(date: str):
     if not messages:
         return JSONResponse({"context": ""})
 
-    # Filter to user/assistant messages
-    turns = [m for m in messages if m.get("role") in ("user", "assistant")][-10:]
-    lines_ctx = []
-    for m in turns:
-        role = "User" if m["role"] == "user" else (m.get("ai") or "AI").title()
-        body = (m.get("content") or "")[:300]
-        if len(m.get("content", "")) > 300:
-            body += "..."
-        lines_ctx.append(f"{role}: {body}")
-
     label = load_chat_names().get(date) or date
-    context_prefix = (
-        f"[Previous conversation — {label}]\n"
-        + "\n".join(lines_ctx)
-        + "\n[End context]\n\n"
-    )
+
+    # Try stored summaries first (persisted during context compaction)
+    from helm.context_manager import load_summaries_from_db
+    summaries = load_summaries_from_db(date)
+
+    if summaries:
+        # Use summaries + last 5 recent messages for best resume quality
+        summary_block = "\n\n".join(summaries)
+        turns = [m for m in messages if m.get("role") in ("user", "assistant")][-5:]
+        recent_lines = []
+        for m in turns:
+            role = "User" if m["role"] == "user" else (m.get("ai") or "AI").title()
+            body = (m.get("content") or "")[:300]
+            if len(m.get("content", "")) > 300:
+                body += "..."
+            recent_lines.append(f"{role}: {body}")
+
+        context_prefix = (
+            f"[Previous conversation — {label}]\n"
+            f"[Conversation Summary]\n{summary_block}\n"
+            f"[Recent Messages]\n" + "\n".join(recent_lines)
+            + "\n[End context]\n\n"
+        )
+    else:
+        # Fallback: last 10 raw messages
+        turns = [m for m in messages if m.get("role") in ("user", "assistant")][-10:]
+        lines_ctx = []
+        for m in turns:
+            role = "User" if m["role"] == "user" else (m.get("ai") or "AI").title()
+            body = (m.get("content") or "")[:300]
+            if len(m.get("content", "")) > 300:
+                body += "..."
+            lines_ctx.append(f"{role}: {body}")
+
+        context_prefix = (
+            f"[Previous conversation — {label}]\n"
+            + "\n".join(lines_ctx)
+            + "\n[End context]\n\n"
+        )
+
     return JSONResponse({"context": context_prefix})
 
 

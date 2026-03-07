@@ -226,25 +226,29 @@ _usage_cap_minutes = usage_cap_minutes  # legacy alias
 def record_usage_task(ai_key: Optional[str], elapsed_seconds: float,
                       prompt: str = "", output: str = "",
                       input_tokens: Optional[int] = None,
-                      output_tokens: Optional[int] = None) -> None:
+                      output_tokens: Optional[int] = None,
+                      cost_usd: Optional[float] = None) -> None:
     usage_reset_if_needed()
     key = ai_key or "shell"
     st = _st.usage_stats.setdefault(key, {
         "tasks": 0, "seconds": 0.0, "chars_in": 0, "chars_out": 0, "last_used": 0.0,
-        "tokens_in": 0, "tokens_out": 0, "tokens_source": "estimate",
+        "tokens_in": 0, "tokens_out": 0, "tokens_source": "estimate", "cost_usd": 0.0,
     })
     st["tasks"]     += 1
     st["seconds"]   += max(0.0, float(elapsed_seconds))
     st["chars_in"]  += len(prompt or "")
     st["chars_out"] += len(output or "")
     st["last_used"]  = time.time()
+    st.setdefault("cost_usd", 0.0)
 
     # Store actual token counts when available
+    tok_in = input_tokens or 0
+    tok_out = output_tokens or 0
     if input_tokens is not None or output_tokens is not None:
         st.setdefault("tokens_in", 0)
         st.setdefault("tokens_out", 0)
-        st["tokens_in"]  += input_tokens or 0
-        st["tokens_out"] += output_tokens or 0
+        st["tokens_in"]  += tok_in
+        st["tokens_out"] += tok_out
         st["tokens_source"] = "actual"
     else:
         # Ensure keys exist for backward compat
@@ -252,6 +256,19 @@ def record_usage_task(ai_key: Optional[str], elapsed_seconds: float,
         st.setdefault("tokens_out", 0)
         if st.get("tokens_source") != "actual":
             st["tokens_source"] = "estimate"
+        # Estimate tokens from chars for cost calculation
+        tok_in = len(prompt or "") // 4
+        tok_out = len(output or "") // 4
+
+    # Track dollar cost — use explicit value or calculate from tokens
+    if cost_usd is not None:
+        st["cost_usd"] += cost_usd
+    else:
+        try:
+            from helm.pipeline.cost import calculate_cost
+            st["cost_usd"] += calculate_cost(key, tok_in, tok_out)
+        except Exception:
+            pass  # Non-critical
 
     if key in ("codex", "claude", "gemini"):
         exact = _parse_cli_usage_from_text(output or "", key)
@@ -278,8 +295,8 @@ def _flush_usage_to_db(ai_key: str, st: dict) -> None:
         db.execute(
             """INSERT OR REPLACE INTO usage_stats
                (ai_key, tasks, seconds, chars_in, chars_out, tokens_in,
-                tokens_out, tokens_source, last_used, period_start)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                tokens_out, tokens_source, last_used, period_start, cost_usd)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 ai_key,
                 st.get("tasks", 0),
@@ -291,6 +308,7 @@ def _flush_usage_to_db(ai_key: str, st: dict) -> None:
                 st.get("tokens_source", "estimate"),
                 st.get("last_used", 0.0),
                 _st.usage_period_start,
+                st.get("cost_usd", 0.0),
             ),
         )
         db.commit()
@@ -319,6 +337,7 @@ def load_usage_from_db() -> None:
                     "tokens_out": row["tokens_out"],
                     "tokens_source": row["tokens_source"],
                     "last_used": row["last_used"],
+                    "cost_usd": float(row["cost_usd"]) if "cost_usd" in row.keys() else 0.0,
                 }
                 _st.usage_period_start = period_start
     except Exception:

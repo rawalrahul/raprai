@@ -352,6 +352,15 @@ async def heartbeat_runner():
 
             logger.info("Heartbeat: scanning for pending tasks…")
 
+            # Apply memory decay on each heartbeat cycle
+            try:
+                from helm.memory import apply_memory_decay
+                decay_result = await asyncio.to_thread(apply_memory_decay)
+                if decay_result.get("archived", 0) > 0:
+                    logger.info("Heartbeat: memory decay archived %d stale memories", decay_result["archived"])
+            except Exception as e:
+                logger.debug("Heartbeat: memory decay failed: %s", e)
+
             # Scan history
             pending = await asyncio.to_thread(scan_pending_tasks)
 

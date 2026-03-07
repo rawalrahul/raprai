@@ -1115,8 +1115,11 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         else:
             # Self-healing: AI failed and no skill existed → ask Claude to create one
             if not skill_matched:
+                # Enrich error context with model info for better skill generation
+                model = sess.get("model", "default")
+                enriched_error = f"[AI: {ai}, Model: {model}]\n{output}"
                 healed = await _self_heal_with_skill(ai, sess, text, safe_text,
-                                                     source, sid, output)
+                                                     source, sid, enriched_error)
                 if healed:
                     return healed
         return output

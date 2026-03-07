@@ -25,6 +25,43 @@ from typing import Optional
 
 from helm.config import logger
 
+
+# ---------------------------------------------------------------------------
+# Summary persistence helpers
+# ---------------------------------------------------------------------------
+
+def save_summary_to_db(history_id: str, summary: str, token_count: int = 0):
+    """Persist a compaction summary to the conversation_summaries table."""
+    if not history_id or not summary:
+        return
+    try:
+        from helm.db import get_db
+        db = get_db()
+        db.execute(
+            "INSERT INTO conversation_summaries (history_id, summary, token_count) "
+            "VALUES (?, ?, ?)",
+            (history_id, summary, token_count),
+        )
+        db.commit()
+    except Exception as e:
+        logger.debug("Failed to save summary for %s: %s", history_id, e)
+
+
+def load_summaries_from_db(history_id: str) -> list[str]:
+    """Load all stored summaries for a session, ordered chronologically."""
+    try:
+        from helm.db import get_db
+        db = get_db()
+        rows = db.execute(
+            "SELECT summary FROM conversation_summaries "
+            "WHERE history_id = ? ORDER BY id ASC",
+            (history_id,),
+        ).fetchall()
+        return [r["summary"] for r in rows]
+    except Exception as e:
+        logger.debug("Failed to load summaries for %s: %s", history_id, e)
+        return []
+
 # ---------------------------------------------------------------------------
 # AI Model Context Windows (tokens)
 # ---------------------------------------------------------------------------
@@ -303,6 +340,11 @@ async def check_and_compact(sess: dict, source: str = "web") -> Optional[str]:
         if result:
             ctx["summarised_at"] = time.time()
             ctx["warned"] = False  # reset warning for next cycle
+
+            # Persist summary to DB for session resume
+            history_id = sess.get("history_id", sid)
+            est_tokens = len(result) // 4
+            save_summary_to_db(history_id, result, est_tokens)
 
             # Recalculate
             new_usage = context_usage(sess)

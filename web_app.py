@@ -83,6 +83,26 @@ async def _main():
     except Exception as exc:
         logger.warning("Token vault init: %s", exc)
 
+    # Refresh module-level config constants that were cached at import time
+    # BEFORE load_all_tokens() ran.  After vault migration, .env contains
+    # "vault-managed" placeholders — the real values are only in os.environ
+    # now that the vault has been decrypted.
+    import helm.config as _cfg
+    _cfg.BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    if _cfg.BOT_TOKEN == "vault-managed":
+        _cfg.BOT_TOKEN = ""  # placeholder is not a real token
+    _cfg.ALLOWED_USER_IDS = set(
+        int(uid.strip())
+        for uid in os.environ.get("ALLOWED_USER_IDS", "").split(",")
+        if uid.strip()
+    )
+
+    # Re-bind the local names used later in this function so they
+    # reflect the post-vault-decryption values (the line-14 import
+    # captured stale values before load_all_tokens ran).
+    BOT_TOKEN = _cfg.BOT_TOKEN                # noqa: F841
+    ALLOWED_USER_IDS = _cfg.ALLOWED_USER_IDS  # noqa: F841
+
     # Load Helm-level plugins (helm/plugins/ directory)
     from helm.plugins import load_plugins
     load_plugins()
@@ -106,11 +126,22 @@ async def _main():
             if auth.get("refresh_token_env"):
                 token_env_keys.append(auth["refresh_token_env"])
         if token_env_keys:
-            migrated = migrate_env_tokens(token_env_keys)
+            migrated = migrate_env_tokens(token_env_keys, scrub_env=True)
             if migrated:
-                logger.info("Token vault: migrated %d plaintext token(s)", migrated)
+                logger.info("Token vault: migrated %d plaintext plugin token(s)", migrated)
     except Exception as exc:
-        logger.warning("Token migration: %s", exc)
+        logger.warning("Token migration (plugins): %s", exc)
+
+    # Migrate core API keys & credentials from plaintext .env to encrypted vault.
+    # This covers GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.
+    # PIN_HASH and PIN_SALT are excluded (they are hashed values, not raw secrets).
+    try:
+        from helm.security import VAULT_ELIGIBLE_KEYS
+        core_migrated = migrate_env_tokens(list(VAULT_ELIGIBLE_KEYS), scrub_env=True)
+        if core_migrated:
+            logger.info("Token vault: migrated %d core credential(s) from .env", core_migrated)
+    except Exception as exc:
+        logger.warning("Token migration (core): %s", exc)
 
     # Auto-start MCP servers from mcp_servers.json
     # We block here (up to 30s) so servers are ready before first AI query.
@@ -148,7 +179,6 @@ async def _main():
 
     # --- Build Telegram application ---
     if BOT_TOKEN:
-        from helm.config import ALLOWED_USER_IDS
         if not ALLOWED_USER_IDS:
             logger.error(
                 "\n"

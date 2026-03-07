@@ -11,6 +11,7 @@ Endpoints:
     POST   /memory/<id>/pin       — pin/unpin a memory
     POST   /memory/<id>/archive   — archive a memory
     POST   /memory/<id>/unarchive — restore an archived memory
+    POST   /memory/decay          — manually trigger memory decay
 """
 
 from fastapi import APIRouter
@@ -121,3 +122,11 @@ async def unarchive(memory_id: int):
     from helm.memory import unarchive_memory
     ok = unarchive_memory(memory_id)
     return {"ok": ok}
+
+
+@router.post("/decay")
+async def trigger_decay():
+    """Manually trigger memory decay (normally runs on heartbeat cycle)."""
+    from helm.memory import apply_memory_decay
+    result = apply_memory_decay()
+    return {"ok": True, **result}

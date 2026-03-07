@@ -58,6 +58,24 @@ from typing import Optional
 from helm.config import logger
 
 # ---------------------------------------------------------------------------
+# Stop words excluded from skill name generation (common English words)
+# ---------------------------------------------------------------------------
+
+_STOP_WORDS = frozenset({
+    "about", "after", "also", "back", "been", "before", "being", "between",
+    "both", "came", "come", "could", "each", "from", "have", "here", "into",
+    "just", "like", "make", "many", "more", "most", "much", "must", "need",
+    "only", "other", "over", "said", "same", "should", "show", "some",
+    "such", "take", "than", "that", "their", "them", "then", "there",
+    "these", "they", "this", "through", "time", "very", "want", "well",
+    "were", "what", "when", "where", "which", "while", "will", "with",
+    "would", "your", "able", "does", "done", "every", "good", "great",
+    "help", "keep", "know", "look", "part", "please", "right", "tell",
+    "thing", "think", "those", "using", "work", "write", "create", "update",
+    "generate", "build", "implement", "develop", "design",
+})
+
+# ---------------------------------------------------------------------------
 # Registry (populated at startup by scan_skills())
 # ---------------------------------------------------------------------------
 
@@ -675,11 +693,37 @@ def _detect_task_type(prompt: str) -> str:
 
 def _skill_name_from_prompt(prompt: str) -> str:
     """
-    Derive a short kebab-case skill name from the prompt / task type.
-    e.g. "document_creation" → "document-creation"
+    Derive a unique kebab-case skill name from the prompt.
+
+    Combines the broad task type with up to 3 significant words from the
+    prompt so that different tasks within the same category get separate
+    skills.  e.g. "Create a budget spreadsheet" → "spreadsheet-budget"
+    instead of just "spreadsheet" for every spreadsheet task.
     """
     task_type = _detect_task_type(prompt)
-    return task_type.replace("_", "-")
+    base = task_type.replace("_", "-")
+
+    # Extract significant words (>3 chars, not stop words, not the task type itself)
+    task_words = set(base.split("-"))
+    words = [
+        w for w in re.findall(r"[a-z]{4,}", prompt.lower())
+        if w not in _STOP_WORDS and w not in task_words
+    ]
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique: list[str] = []
+    for w in words:
+        if w not in seen:
+            seen.add(w)
+            unique.append(w)
+        if len(unique) >= 3:
+            break
+
+    if unique:
+        base = f"{base}-{'-'.join(unique)}"
+
+    # Keep filesystem-safe length
+    return base[:60]
 
 
 def _generate_skill_content(task_type: str, ai: str, prompt: str, output: str) -> str:
@@ -886,13 +930,18 @@ def create_skill(name: str, description: str, content: str) -> bool:
     return True
 
 
-def claude_generate_skill(prompt: str, ai: str, error_output: str = "") -> Optional[str]:
+def claude_generate_skill(prompt: str, ai: str, error_output: str = "",
+                          regenerate: bool = False) -> Optional[str]:
     """
     Invoke Claude CLI to generate a high-quality SKILL.md for a task the AI failed.
 
     This is the "self-healing" path: when a non-Claude AI encounters a task it
     cannot handle and no skill exists, Claude is asked to create a reusable skill
     so the original AI can retry (and future tasks succeed immediately).
+
+    If *regenerate* is True and the skill already exists with an "AI-generated"
+    description, it will be overwritten with a new version incorporating the
+    latest error context.
 
     Returns the skill name on success, None on failure or if Claude CLI unavailable.
     """
@@ -906,10 +955,17 @@ def claude_generate_skill(prompt: str, ai: str, error_output: str = "") -> Optio
     skill_name = _skill_name_from_prompt(prompt)
     task_type = _detect_task_type(prompt)
 
-    # Don't overwrite existing skills
+    # Check existing skill — allow overwrite only for auto-generated ones
     if skill_name in _registry:
-        logger.info("claude_generate_skill: skill '%s' already exists — skipping", skill_name)
-        return skill_name
+        existing = _registry[skill_name]
+        is_auto = existing.get("description", "").startswith("AI-generated")
+        if not regenerate or not is_auto:
+            logger.info("claude_generate_skill: skill '%s' already exists (auto=%s, regen=%s) — skipping",
+                        skill_name, is_auto, regenerate)
+            return skill_name
+
+        logger.info("claude_generate_skill: regenerating auto-generated skill '%s' with new error context",
+                    skill_name)
 
     display_task = task_type.replace("_", " ").title()
 
@@ -920,10 +976,10 @@ def claude_generate_skill(prompt: str, ai: str, error_output: str = "") -> Optio
         succeed at this type of task in the future.
 
         ## Failed task
-        {prompt[:1500]}
+        {prompt[:2000]}
 
-        ## Error output
-        {error_output[:1000] if error_output else "(no error output)"}
+        ## Error output from {ai}
+        {error_output[:2000] if error_output else "(no error output captured)"}
 
         ## Task type detected
         {display_task}
@@ -932,7 +988,8 @@ def claude_generate_skill(prompt: str, ai: str, error_output: str = "") -> Optio
         - Write clear, step-by-step instructions the AI should follow
         - Include complete Python code templates with all imports
         - Code must be self-contained (install deps inline with pip)
-        - Include error handling patterns
+        - Include error handling patterns specific to the error above
+        - Address the SPECIFIC failure mode shown in the error output
         - Include quality checklist at the end
         - Target AI: {ai} (but make it usable by any AI)
         - Keep it under 200 lines
@@ -944,7 +1001,7 @@ def claude_generate_skill(prompt: str, ai: str, error_output: str = "") -> Optio
     try:
         result = sp.run(
             ["claude", "-p", claude_prompt, "--output-format", "text"],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True, text=True, timeout=180,
             env={**os.environ, "CLAUDE_AUTO_APPROVE": "1"},
         )
         if result.returncode != 0 or not result.stdout.strip():
@@ -953,16 +1010,24 @@ def claude_generate_skill(prompt: str, ai: str, error_output: str = "") -> Optio
             return None
 
         content = result.stdout.strip()
+
+        # Validate: reject skills that are too short (likely generic/useless)
+        line_count = len(content.splitlines())
+        if line_count < 20:
+            logger.warning("claude_generate_skill: generated skill too short (%d lines) — rejecting",
+                           line_count)
+            return None
+
         description = f"AI-generated skill for {display_task.lower()} tasks (created by Claude for {ai})."
         success = create_skill(skill_name, description, content)
         if success:
-            logger.info("claude_generate_skill: created high-quality skill '%s' via Claude CLI",
-                        skill_name)
+            logger.info("claude_generate_skill: created skill '%s' (%d lines) via Claude CLI",
+                        skill_name, line_count)
             return skill_name
         return None
 
     except sp.TimeoutExpired:
-        logger.warning("claude_generate_skill: Claude CLI timed out (120s)")
+        logger.warning("claude_generate_skill: Claude CLI timed out (180s)")
         return None
     except Exception as exc:
         logger.warning("claude_generate_skill: unexpected error — %s", exc)

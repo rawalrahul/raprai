@@ -2,6 +2,7 @@
 helm/web_routes/auth_routes.py — Login, logout, PIN setup, auth status endpoints.
 """
 
+import os
 import pathlib
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -56,9 +57,20 @@ async def setup_status():
 
     cli_status = await asyncio.to_thread(_check_clis)
 
+    # Check for bot token: prefer os.environ (vault-decrypted) over .env
+    # (after vault migration .env contains "vault-managed" placeholder)
+    bot_token_raw = vals.get("TELEGRAM_BOT_TOKEN", "").strip()
+    bot_token_env = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    has_bot_token = bool(bot_token_env and bot_token_env != "vault-managed") or bool(
+        bot_token_raw and bot_token_raw != "vault-managed"
+    )
+    # Fallback: if .env says vault-managed, the vault has it → configured
+    if not has_bot_token and bot_token_raw == "vault-managed":
+        has_bot_token = True
+
     return JSONResponse({
         "env_exists":    env_path.exists(),
-        "has_bot_token": bool(vals.get("TELEGRAM_BOT_TOKEN", "").strip()),
+        "has_bot_token": has_bot_token,
         "has_user_ids":  bool(vals.get("ALLOWED_USER_IDS", "").strip()),
         **cli_status,
     })
@@ -66,12 +78,30 @@ async def setup_status():
 
 @router.post("/setup/save")
 async def setup_save(request: Request):
-    """Write one or more key=value pairs to the .env file and reload env."""
+    """Write one or more key=value pairs to the .env file and reload env.
+
+    Secret keys (API tokens, credentials) are stored in the encrypted vault
+    and their .env entry is replaced with a ``vault-managed`` placeholder.
+    Non-secret keys (ALLOWED_USER_IDS, etc.) are written to .env as before.
+    """
     try:
+        from helm.security import VAULT_ELIGIBLE_KEYS
+        from helm.token_vault import store_token
+
         body = await request.json()
         for key, value in body.items():
-            if isinstance(key, str) and isinstance(value, str) and value.strip():
-                update_env(key, value.strip())
+            if not (isinstance(key, str) and isinstance(value, str) and value.strip()):
+                continue
+            value = value.strip()
+
+            if key in VAULT_ELIGIBLE_KEYS:
+                # Store secret in encrypted vault; .env gets a placeholder
+                store_token(key, value)
+                update_env(key, "vault-managed")
+            else:
+                # Non-secret (e.g. ALLOWED_USER_IDS) → plaintext .env
+                update_env(key, value)
+
         # Reload so the running process picks up new values immediately
         from helm.web_routes.app import reload_env
         reload_env()

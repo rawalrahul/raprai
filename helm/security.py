@@ -386,6 +386,18 @@ SECRET_ENV_KEYS = {
     "DISCORD_BOT_TOKEN", "ZAPIER_NLA_API_KEY",
 }
 
+# Subset: core API keys that should always be vault-managed.
+# Excludes PIN_HASH/PIN_SALT (hashed values, not raw secrets) and
+# plugin-specific tokens (handled via plugin manifest migration).
+CORE_API_KEYS = {
+    "GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+    "TELEGRAM_BOT_TOKEN", "WEBHOOK_TOKEN",
+    "GITHUB_TOKEN", "GOOGLE_CLIENT_SECRET",
+}
+
+# Keys eligible for vault migration (everything except hash/salt values)
+VAULT_ELIGIBLE_KEYS = SECRET_ENV_KEYS - {"PIN_HASH", "PIN_SALT"}
+
 
 def redact_env_value(key: str, value: str) -> str:
     """Redact secret values — show only first 4 chars + '***'."""
