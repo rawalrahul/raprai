@@ -12,12 +12,17 @@ Public API:
     delete_memory(memory_id) → bool
     pin_memory(memory_id, pinned) → bool
     archive_memory(memory_id) → bool
+    unarchive_memory(memory_id) → bool
     list_memories(category, include_archived, limit) → list[dict]
     search_memories(query, limit) → list[dict]
     get_memory_block(prompt, max_tokens) → str
+    touch_memory(memory_id) → None
     extract_memories_from_session(sess) → list[dict]   (session-end)
+    save_extracted_memories(sess) → int
+    enforce_memory_cap() → int   (auto-archive oldest if over cap)
 """
 
+import os
 import re
 import time
 from typing import Optional
@@ -40,10 +45,36 @@ VALID_CATEGORIES = {
 DEFAULT_CATEGORY = "fact"
 
 # Max tokens for the injected memory block (keeps prompt overhead small)
-MAX_MEMORY_TOKENS = int(__import__("os").environ.get("MEMORY_MAX_TOKENS", "500"))
+MAX_MEMORY_TOKENS = int(os.environ.get("MEMORY_MAX_TOKENS", "500"))
+
+# Max active (non-archived) memories before auto-archiving oldest
+MAX_ACTIVE_MEMORIES = int(os.environ.get("MEMORY_MAX_ACTIVE", "500"))
 
 # Chars-per-token estimate (consistent with context_manager.py)
 _CPT = 4.0
+
+# ---------------------------------------------------------------------------
+# Stop words — filtered from search queries and relevance scoring
+# ---------------------------------------------------------------------------
+_STOP_WORDS = frozenset({
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "shall", "can", "need", "must",
+    "i", "me", "my", "we", "our", "you", "your", "he", "she", "it",
+    "they", "them", "its", "his", "her", "this", "that", "these", "those",
+    "in", "on", "at", "to", "for", "of", "with", "by", "from", "as",
+    "into", "about", "between", "through", "after", "before", "above",
+    "and", "or", "but", "not", "no", "if", "so", "than", "too", "very",
+    "just", "also", "how", "what", "when", "where", "who", "which",
+    "all", "any", "some", "each", "every", "both", "few", "more",
+    "other", "such", "only", "same", "then", "there", "here",
+    "up", "out", "off", "over", "under", "again", "once",
+})
+
+
+def _meaningful_terms(text: str) -> set[str]:
+    """Extract meaningful (non-stop) words from text, lowered."""
+    return {w for w in text.lower().split() if w not in _STOP_WORDS and len(w) > 1}
 
 
 # ---------------------------------------------------------------------------
@@ -61,23 +92,35 @@ def add_memory(
     source_ai: str = "",
     session_id: str = "",
 ) -> int:
-    """Store a new memory. Returns the row id."""
+    """Store a new memory. Returns the row id.
+
+    Dedup: checks ALL non-archived memories via SQL for near-duplicates
+    (>80% Jaccard word overlap).  If a duplicate is found, bumps its
+    use_count instead of creating a new row.
+
+    After insert, enforces MAX_ACTIVE_MEMORIES cap by auto-archiving
+    the oldest, least-used memories.
+    """
     content = content.strip()
     if not content:
         raise ValueError("Memory content cannot be empty")
     if category not in VALID_CATEGORIES:
         category = DEFAULT_CATEGORY
 
-    # Dedup: check for near-duplicate (>80% overlap via simple ratio)
-    existing = list_memories(include_archived=False, limit=200)
-    for mem in existing:
-        if _similarity(content.lower(), mem["content"].lower()) > 0.80:
-            # Update existing instead of creating duplicate
-            _touch(mem["id"])
-            logger.info("Memory dedup: updating existing #%d instead of creating new", mem["id"])
-            return mem["id"]
-
+    # Dedup: fetch ALL non-archived content for comparison (only id + content)
     db = _db()
+    rows = db.execute(
+        "SELECT id, content FROM memories WHERE archived = 0"
+    ).fetchall()
+
+    content_lower = content.lower()
+    for row in rows:
+        if _similarity(content_lower, (row["content"] or "").lower()) > 0.80:
+            # Existing duplicate — bump usage, don't create new
+            touch_memory(row["id"])
+            logger.info("Memory dedup: bumped existing #%d instead of creating new", row["id"])
+            return row["id"]
+
     cur = db.execute(
         """INSERT INTO memories (content, category, source_ai, session_id)
            VALUES (?, ?, ?, ?)""",
@@ -86,11 +129,18 @@ def add_memory(
     db.commit()
     mid = cur.lastrowid
     logger.info("Memory added #%d: [%s] %s", mid, category, content[:80])
+
+    # Enforce cap — auto-archive excess memories
+    enforce_memory_cap()
+
     return mid
 
 
 def edit_memory(memory_id: int, content: str = "", category: str = "") -> bool:
-    """Update a memory's content and/or category."""
+    """Update a memory's content and/or category.
+
+    Returns True if the row was found and updated, False otherwise.
+    """
     db = _db()
     parts, vals = [], []
     if content:
@@ -102,33 +152,41 @@ def edit_memory(memory_id: int, content: str = "", category: str = "") -> bool:
     if not parts:
         return False
     vals.append(memory_id)
-    db.execute(f"UPDATE memories SET {', '.join(parts)} WHERE id = ?", vals)
+    cur = db.execute(f"UPDATE memories SET {', '.join(parts)} WHERE id = ?", vals)
     db.commit()
-    return True
+    return cur.rowcount > 0
 
 
 def delete_memory(memory_id: int) -> bool:
-    """Permanently delete a memory."""
+    """Permanently delete a memory. Returns True if a row was actually deleted."""
     db = _db()
-    db.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+    cur = db.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
     db.commit()
-    return True
+    return cur.rowcount > 0
 
 
 def pin_memory(memory_id: int, pinned: bool = True) -> bool:
     """Pin/unpin a memory (pinned memories are always injected)."""
     db = _db()
-    db.execute("UPDATE memories SET pinned = ? WHERE id = ?", (1 if pinned else 0, memory_id))
+    cur = db.execute("UPDATE memories SET pinned = ? WHERE id = ?", (1 if pinned else 0, memory_id))
     db.commit()
-    return True
+    return cur.rowcount > 0
 
 
 def archive_memory(memory_id: int) -> bool:
     """Archive a memory (excluded from injection, kept for history)."""
     db = _db()
-    db.execute("UPDATE memories SET archived = 1 WHERE id = ?", (memory_id,))
+    cur = db.execute("UPDATE memories SET archived = 1 WHERE id = ?", (memory_id,))
     db.commit()
-    return True
+    return cur.rowcount > 0
+
+
+def unarchive_memory(memory_id: int) -> bool:
+    """Restore an archived memory back to active status."""
+    db = _db()
+    cur = db.execute("UPDATE memories SET archived = 0 WHERE id = ?", (memory_id,))
+    db.commit()
+    return cur.rowcount > 0
 
 
 def list_memories(
@@ -160,12 +218,21 @@ def list_memories(
 
 
 def search_memories(query: str, limit: int = 20) -> list[dict]:
-    """Search memories by keyword matching against content."""
+    """Search memories by keyword matching against content.
+
+    Filters out stop words so common words like 'the', 'is', 'a' don't
+    pollute results.  Falls back to all terms if stop-word filtering
+    removes everything (e.g. query is "is it?").
+    """
     if not query.strip():
         return list_memories(limit=limit)
 
     db = _db()
-    terms = query.lower().split()
+    raw_terms = query.lower().split()
+
+    # Filter stop words, but fall back to raw terms if all are stop words
+    meaningful = [t for t in raw_terms if t not in _STOP_WORDS and len(t) > 1]
+    terms = meaningful if meaningful else raw_terms
 
     # Score each non-archived memory
     rows = db.execute(
@@ -191,8 +258,12 @@ def search_memories(query: str, limit: int = 20) -> list[dict]:
     return scored[:limit]
 
 
-def _touch(memory_id: int):
-    """Bump use_count and last_used for a memory."""
+def touch_memory(memory_id: int):
+    """Bump use_count and last_used for a memory.
+
+    Call this when a memory is genuinely referenced or helpful —
+    NOT on every prompt injection (which inflates counts).
+    """
     db = _db()
     db.execute(
         "UPDATE memories SET use_count = use_count + 1, last_used = datetime('now') WHERE id = ?",
@@ -201,10 +272,22 @@ def _touch(memory_id: int):
     db.commit()
 
 
+# Internal alias kept for backward compatibility
+_touch = touch_memory
+
+
 def _similarity(a: str, b: str) -> float:
-    """Simple Jaccard-like similarity on word sets."""
-    sa = set(a.split())
-    sb = set(b.split())
+    """Jaccard similarity on meaningful word sets (stop words excluded).
+
+    Falls back to full word sets if stop-word filtering empties either side.
+    """
+    sa_meaningful = _meaningful_terms(a)
+    sb_meaningful = _meaningful_terms(b)
+
+    # Fall back to full word sets if filtering removed everything
+    sa = sa_meaningful if sa_meaningful else set(a.split())
+    sb = sb_meaningful if sb_meaningful else set(b.split())
+
     if not sa or not sb:
         return 0.0
     intersection = sa & sb
@@ -222,6 +305,9 @@ def get_memory_block(prompt: str = "", max_tokens: int = 0) -> str:
     Returns an empty string if no memories exist.  Prioritises pinned
     memories, then relevance to the current prompt, then recency.
 
+    Relevance scoring uses meaningful (non-stop-word) term overlap
+    so common words don't dominate the ranking.
+
     The block is capped at max_tokens (default MAX_MEMORY_TOKENS) to
     keep prompt overhead small.
     """
@@ -231,7 +317,7 @@ def get_memory_block(prompt: str = "", max_tokens: int = 0) -> str:
     max_chars = int(max_tokens * _CPT)
 
     try:
-        all_memories = list_memories(include_archived=False, limit=200)
+        all_memories = list_memories(include_archived=False, limit=500)
     except Exception as e:
         logger.warning("Memory block: failed to load memories: %s", e)
         return ""
@@ -243,16 +329,18 @@ def get_memory_block(prompt: str = "", max_tokens: int = 0) -> str:
     pinned = [m for m in all_memories if m.get("pinned")]
     normal = [m for m in all_memories if not m.get("pinned")]
 
-    # Score normal memories by relevance to current prompt
+    # Score normal memories by relevance to current prompt (stop-word aware)
     if prompt:
-        prompt_lower = prompt.lower()
-        prompt_terms = set(prompt_lower.split())
-        for m in normal:
-            content_lower = m["content"].lower()
-            content_terms = set(content_lower.split())
-            overlap = prompt_terms & content_terms
-            m["_relevance"] = len(overlap)
-        normal.sort(key=lambda m: (-m["_relevance"], -m.get("use_count", 0)))
+        prompt_terms = _meaningful_terms(prompt)
+        if prompt_terms:
+            for m in normal:
+                content_terms = _meaningful_terms(m["content"])
+                overlap = prompt_terms & content_terms
+                m["_relevance"] = len(overlap)
+            normal.sort(key=lambda m: (-m["_relevance"], -m.get("use_count", 0)))
+        else:
+            # Prompt was all stop words — fall back to use_count ordering
+            normal.sort(key=lambda m: (-m.get("use_count", 0), -m.get("id", 0)))
     else:
         normal.sort(key=lambda m: (-m.get("use_count", 0), -m.get("id", 0)))
 
@@ -267,11 +355,6 @@ def get_memory_block(prompt: str = "", max_tokens: int = 0) -> str:
             break
         selected.append(entry)
         used_chars += entry_chars
-        # Touch to track usage
-        try:
-            _touch(m["id"])
-        except Exception:
-            pass
 
     if not selected:
         return ""
@@ -286,27 +369,118 @@ def get_memory_block(prompt: str = "", max_tokens: int = 0) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Memory cap enforcement — prevent unbounded growth
+# ---------------------------------------------------------------------------
+
+def enforce_memory_cap() -> int:
+    """Auto-archive oldest, least-used memories if active count > cap.
+
+    Pinned memories are never auto-archived.
+    Returns the number of memories archived.
+    """
+    try:
+        db = _db()
+        count = db.execute(
+            "SELECT COUNT(*) FROM memories WHERE archived = 0"
+        ).fetchone()[0]
+
+        if count <= MAX_ACTIVE_MEMORIES:
+            return 0
+
+        excess = count - MAX_ACTIVE_MEMORIES
+
+        # Find the oldest, least-used, non-pinned memories to archive
+        rows = db.execute(
+            """SELECT id FROM memories
+               WHERE archived = 0 AND pinned = 0
+               ORDER BY use_count ASC, id ASC
+               LIMIT ?""",
+            (excess,),
+        ).fetchall()
+
+        if not rows:
+            return 0
+
+        ids = [r["id"] for r in rows]
+        placeholders = ",".join("?" * len(ids))
+        db.execute(
+            f"UPDATE memories SET archived = 1 WHERE id IN ({placeholders})",
+            ids,
+        )
+        db.commit()
+        logger.info("Memory cap enforced: auto-archived %d memories (cap=%d)",
+                     len(ids), MAX_ACTIVE_MEMORIES)
+        return len(ids)
+    except Exception as e:
+        logger.warning("Memory cap enforcement failed: %s", e)
+        return 0
+
+
+# ---------------------------------------------------------------------------
 # Session-end memory extraction (lightweight, no LLM needed)
 # ---------------------------------------------------------------------------
 
-# Patterns that indicate a memorable fact
+# Patterns that indicate a memorable fact.
+#
+# IMPORTANT: These are deliberately strict to avoid capturing task-specific
+# instructions as permanent memories.  Each pattern requires strong signal
+# words and uses non-greedy matching + length caps.
+#
+# What we DON'T want to capture:
+#   "I want you to fix this bug"    — task instruction, not a preference
+#   "I need the output in JSON"     — one-time request, not lasting
+#   "I like the way you did that"   — compliment, not a preference
+#
+# What we DO want to capture:
+#   "I always prefer Python over JS"   — lasting preference
+#   "Our project is called RAPR AI"    — project fact
+#   "My name is Aashima"               — personal fact
+#   "We decided to use SQLite"         — architectural decision
+
 _REMEMBER_PATTERNS = [
-    re.compile(r"(?:my|our|the)\s+(?:project|app|repo|site|tool)\s+(?:is|uses?|called)\s+(.+)", re.I),
-    re.compile(r"(?:i|we)\s+(?:prefer|like|always use|want|need)\s+(.+)", re.I),
-    re.compile(r"(?:i'm|i am|my name is|call me)\s+(.+)", re.I),
-    re.compile(r"(?:we decided|decision:?|let'?s go with)\s+(.+)", re.I),
-    re.compile(r"(?:remember|note|important):\s*(.+)", re.I),
-    re.compile(r"(?:my|our)\s+(?:github|repo|email|username|stack)\s+(?:is)\s+(.+)", re.I),
+    # Project identity: "our project is called X", "the app uses FastAPI"
+    re.compile(
+        r"(?:my|our|the)\s+(?:project|app|repo|site|tool|product|service)"
+        r"\s+(?:is\s+called|is\s+named|uses?)\s+(.{3,80}?)(?:\.|,|$)",
+        re.I,
+    ),
+    # Lasting preferences: "I always prefer X", "I prefer X over Y", "we always use X"
+    # Excludes task verbs: want, need, like (too vague without "always"/"prefer")
+    re.compile(
+        r"(?:i|we)\s+(?:always\s+(?:use|prefer|like)|prefer)\s+(.{3,80}?)(?:\.|,|$)",
+        re.I,
+    ),
+    # Personal identity: "my name is X", "I'm X" (only when followed by a name-like word)
+    re.compile(
+        r"(?:my\s+name\s+is|i'?m\s+called|call\s+me)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)",
+        re.I,
+    ),
+    # Decisions: "we decided to use X", "let's go with X"
+    re.compile(
+        r"(?:we\s+decided\s+(?:to\s+)?(?:use|go\s+with)|decision:\s*|let'?s\s+go\s+with)\s+(.{3,80}?)(?:\.|,|$)",
+        re.I,
+    ),
+    # Explicit "remember this": "remember: X", "note: X", "important: X"
+    re.compile(
+        r"(?:remember|note|important)\s*:\s*(.{5,200}?)(?:\.|$)",
+        re.I,
+    ),
+    # Account/identity facts: "my github is X", "our email is X"
+    re.compile(
+        r"(?:my|our)\s+(?:github|repo|email|username|stack|domain|website)"
+        r"\s+(?:is|are)\s+(.{3,80}?)(?:\.|,|\s|$)",
+        re.I,
+    ),
 ]
 
 # Category hints from keywords
 _CATEGORY_HINTS = {
-    "prefer": "preference", "like": "preference", "always": "instruction",
-    "project": "project", "app": "project", "repo": "project",
-    "name": "person", "team": "person", "lead": "person",
+    "prefer": "preference", "always use": "preference", "always prefer": "preference",
+    "project": "project", "app": "project", "repo": "project", "product": "project",
+    "name is": "person", "call me": "person", "team": "person", "lead": "person",
     "decided": "decision", "chose": "decision", "go with": "decision",
-    "remember": "instruction", "note": "instruction",
-    "github": "fact", "email": "fact", "username": "fact",
+    "remember": "instruction", "note": "instruction", "important": "instruction",
+    "github": "fact", "email": "fact", "username": "fact", "domain": "fact",
 }
 
 
@@ -325,7 +499,8 @@ def extract_memories_from_session(sess: dict) -> list[dict]:
     Called at session end (or periodically). Scans user messages for
     patterns that indicate facts worth remembering.
 
-    Returns list of {content, category, source_ai} dicts (not yet saved).
+    Returns list of {content, category, source_ai, session_id} dicts
+    (not yet saved — call save_extracted_memories() to persist).
     """
     ai = sess.get("ai") or "shell"
     sid = sess.get("id", "")
@@ -348,19 +523,48 @@ def extract_memories_from_session(sess: dict) -> list[dict]:
         for pattern in _REMEMBER_PATTERNS:
             match = pattern.search(text)
             if match:
-                fact = match.group(0).strip()
-                # Clean up and cap length
-                fact = fact[:200]
-                if fact.lower() not in seen_contents and len(fact) > 10:
+                # Use the captured group (the actual fact), not the full match
+                fact = match.group(1).strip()
+                # Clean trailing punctuation
+                fact = fact.rstrip(".,;:!?")
+                # Skip if too short (likely a false positive)
+                if len(fact) < 5:
+                    continue
+                # Skip if it looks like a task instruction rather than a fact
+                if _is_task_instruction(fact):
+                    continue
+                if fact.lower() not in seen_contents:
                     seen_contents.add(fact.lower())
                     extracted.append({
                         "content": fact,
-                        "category": _guess_category(fact),
+                        "category": _guess_category(text),  # use full text for category hints
                         "source_ai": ai,
                         "session_id": sid,
                     })
 
     return extracted
+
+
+def _is_task_instruction(text: str) -> bool:
+    """Return True if text looks like a one-time task instruction, not a fact.
+
+    Filters out common false positives like:
+      "fix this bug", "create a file", "run the tests"
+    """
+    task_verbs = {
+        "fix", "create", "make", "build", "run", "test", "check", "update",
+        "add", "remove", "delete", "change", "modify", "write", "read",
+        "show", "display", "print", "send", "open", "close", "save",
+        "generate", "convert", "move", "copy", "rename", "install",
+        "deploy", "debug", "refactor", "review", "merge", "commit",
+    }
+    words = text.lower().split()
+    if words and words[0] in task_verbs:
+        return True
+    # "you to <verb>" pattern
+    if len(words) >= 3 and words[0] == "you" and words[1] == "to" and words[2] in task_verbs:
+        return True
+    return False
 
 
 def save_extracted_memories(sess: dict) -> int:
@@ -401,7 +605,8 @@ def memory_stats() -> dict:
             "total": total,
             "pinned": pinned,
             "archived": archived,
+            "cap": MAX_ACTIVE_MEMORIES,
             "by_category": {r["category"]: r["cnt"] for r in cats},
         }
     except Exception:
-        return {"total": 0, "pinned": 0, "archived": 0, "by_category": {}}
+        return {"total": 0, "pinned": 0, "archived": 0, "cap": MAX_ACTIVE_MEMORIES, "by_category": {}}

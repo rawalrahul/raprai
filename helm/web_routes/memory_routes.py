@@ -2,14 +2,15 @@
 helm/web_routes/memory_routes.py — API endpoints for shared AI memory.
 
 Endpoints:
-    GET    /memory              — list memories (with optional category filter)
-    GET    /memory/search       — search memories by keyword
-    GET    /memory/stats        — memory stats for sidebar badge
-    POST   /memory              — add a memory
-    PUT    /memory/<id>         — edit a memory
-    DELETE /memory/<id>         — delete a memory
-    POST   /memory/<id>/pin     — pin/unpin a memory
-    POST   /memory/<id>/archive — archive a memory
+    GET    /memory                — list memories (with optional category filter)
+    GET    /memory/search         — search memories by keyword
+    GET    /memory/stats          — memory stats for sidebar badge
+    POST   /memory                — add a memory
+    PUT    /memory/<id>           — edit a memory
+    DELETE /memory/<id>           — delete a memory
+    POST   /memory/<id>/pin       — pin/unpin a memory
+    POST   /memory/<id>/archive   — archive a memory
+    POST   /memory/<id>/unarchive — restore an archived memory
 """
 
 from fastapi import APIRouter
@@ -111,4 +112,12 @@ async def archive(memory_id: int):
     """Archive a memory."""
     from helm.memory import archive_memory
     ok = archive_memory(memory_id)
+    return {"ok": ok}
+
+
+@router.post("/{memory_id}/unarchive")
+async def unarchive(memory_id: int):
+    """Restore an archived memory back to active status."""
+    from helm.memory import unarchive_memory
+    ok = unarchive_memory(memory_id)
     return {"ok": ok}

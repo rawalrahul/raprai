@@ -352,6 +352,26 @@ async def graceful_shutdown():
     if stopped:
         logger.info("Stopped %d active AI process(es)", stopped)
 
+    # Extract and save memories from all active sessions before DB close
+    total_memories = 0
+    for sid, sess in list(_st.sessions.items()):
+        try:
+            from helm.memory import save_extracted_memories
+            count = save_extracted_memories(sess)
+            total_memories += count
+        except Exception as e:
+            logger.debug("Memory extraction failed for session %s: %s", sid, e)
+    if total_memories:
+        logger.info("Extracted %d memories from active sessions during shutdown", total_memories)
+
+    # Save session state for resume
+    try:
+        from helm.history import save_last_state
+        save_last_state()
+        logger.info("Session state saved for resume")
+    except Exception as e:
+        logger.debug("Session state save failed: %s", e)
+
     # Stop cloud backup scheduler
     try:
         from helm.cloud_backup.scheduler import stop_scheduler

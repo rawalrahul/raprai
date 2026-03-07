@@ -23,6 +23,7 @@ Telegram App (your phone)        ←── Bot API  ────┘             
 - **Chat history** — every session auto-saved; browse, view, resume with context, rename, or delete from web UI or Telegram
 - **Shared AI memory** — knowledge learned in one AI session is available to all others via persistent memory store
 - **RAPR Packages** — browse, search, and one-click install MCP servers, skills, and plugins
+- **Cloud backup** — automatic database backups to OneDrive, Google Drive, Dropbox, or a local folder with scheduling and job history
 - **Custom AI management** — add or remove AI integrations from the Settings UI without editing files or restarting
 
 ---
@@ -386,6 +387,16 @@ Upload `.raprpkg` files to install from local packages. Each `.raprpkg` is a ZIP
 
 ---
 
+## Cloud Backup
+
+Back up the full RAPR AI database to cloud storage or a local folder. Configure from Settings → Cloud Backup.
+
+Supported providers: OneDrive, Google Drive, Dropbox, and local/network folder. Each provider uses OAuth 2.0 for authentication (tokens stored in the encrypted vault). The local provider requires no authentication — just set a folder path.
+
+Schedule automatic backups (daily or weekly at a chosen time), or trigger a manual backup with the "Backup Now" button. Each backup is a ZIP containing the SQLite database, a SHA-256 checksum, and a manifest with table row counts. Job history shows status, size, and timestamps for recent backups.
+
+---
+
 ## Running on startup (optional)
 
 To start automatically when you log into Windows:
@@ -416,7 +427,8 @@ RAPR-AI/
 │   ├── mcp/              # MCP server management
 │   ├── web_routes/       # FastAPI route modules
 │   ├── db.py             # SQLite database (WAL mode, FTS5)
-│   ├── db_migrate.py     # Schema migrations (currently v4)
+│   ├── cloud_backup/     # Cloud backup system (OneDrive, GDrive, Dropbox, local)
+│   ├── db_migrate.py     # Schema migrations (currently v5)
 │   ├── integrations.py   # AI integration loader (file-based + custom JSON)
 │   ├── memory.py         # Shared AI memory system
 │   ├── plugins.py        # Plugin system

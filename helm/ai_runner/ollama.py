@@ -606,7 +606,7 @@ def _parse_content_tool_calls(content: str) -> list[dict]:
     return result
 
 
-def _ollama_system_prompt(cwd: str, skill_content: str = "") -> str:
+def _ollama_system_prompt(cwd: str, skill_content: str = "", user_prompt: str = "") -> str:
     """Build the Ollama system prompt."""
     base = (
         f"You are a capable AI assistant with tools to create and manage files.\n"
@@ -628,10 +628,10 @@ def _ollama_system_prompt(cwd: str, skill_content: str = "") -> str:
         if mcp_summary:
             base += f"\n{mcp_summary}\n"
 
-    # Inject shared AI memory
+    # Inject shared AI memory (pass prompt for relevance scoring)
     try:
         from helm.memory import get_memory_block
-        mem_block = get_memory_block()
+        mem_block = get_memory_block(prompt=user_prompt)
         if mem_block:
             base += f"\n{mem_block}"
     except Exception:
@@ -699,7 +699,8 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
         logger.info("Ollama skill injection (system prompt): skill=%s chars=%d",
                      skill_name, len(skill_content))
 
-    system_content = _ollama_system_prompt(cwd, skill_content=skill_content)
+    system_content = _ollama_system_prompt(cwd, skill_content=skill_content,
+                                            user_prompt=text)
     if not sess.get("ollama_messages"):
         sess["ollama_messages"] = [{"role": "system", "content": system_content}]
     else:

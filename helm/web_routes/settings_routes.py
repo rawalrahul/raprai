@@ -1,5 +1,5 @@
 """
-helm/web_routes/settings_routes.py — Settings GET/POST, model discovery endpoints, webhook.
+helm/web_routes/settings_routes.py — Settings GET/POST, model discovery endpoints.
 """
 
 import asyncio
@@ -11,8 +11,6 @@ from fastapi.responses import JSONResponse
 
 import helm.state as _st
 from helm.config import logger
-from helm.session_mgr import make_session
-from helm.ai_runner import process_message
 from .app import update_env, _SETTINGS_KEYS
 from .helpers import _fetch_claude_models, _fetch_ollama_models, _fetch_openai_models, _fetch_gemini_models
 
@@ -191,66 +189,3 @@ async def integration_models_debug():
 
     result = await asyncio.to_thread(_gather_debug)
     return JSONResponse(result)
-
-
-# ---------------------------------------------------------------------------
-# Webhook / Zapier Integration
-# ---------------------------------------------------------------------------
-
-@router.post("/webhook")
-async def webhook_endpoint(request: Request):
-    """
-    Accept webhook requests from external services (Zapier, IFTTT, etc).
-
-    Request body:
-    {
-      "prompt": "...",
-      "ai": "claude|gemini|shell",
-      "cwd": "/optional/path",
-      "token": "webhook_token"
-    }
-    """
-    webhook_token = os.environ.get("WEBHOOK_TOKEN", "").strip()
-
-    # If no token is set, reject all webhook requests
-    if not webhook_token:
-        return JSONResponse(
-            {"error": "Webhook not configured. Set WEBHOOK_TOKEN in settings."},
-            status_code=403
-        )
-
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
-
-    # Validate token
-    provided_token = (body.get("token") or "").strip()
-    if provided_token != webhook_token:
-        return JSONResponse({"error": "Invalid token"}, status_code=403)
-
-    prompt = (body.get("prompt") or "").strip()
-    if not prompt:
-        return JSONResponse({"error": "prompt is required"}, status_code=400)
-
-    ai_key = (body.get("ai") or "").strip() or None
-    cwd = (body.get("cwd") or "").strip() or None
-    model = (body.get("model") or "").strip() or None
-
-    try:
-        # Create ephemeral session for the webhook request
-        sess = make_session(ai_key, cwd=cwd, model=model)
-        response = await process_message(prompt, source="webhook", session_id=sess["id"])
-
-        return JSONResponse({
-            "ok": True,
-            "response": response,
-            "session_id": sess["id"],
-            "ai": sess.get("ai", "shell"),
-        })
-    except Exception as e:
-        logger.error("Webhook processing error: %s", e)
-        return JSONResponse(
-            {"error": f"Processing failed: {str(e)}"},
-            status_code=500
-        )
