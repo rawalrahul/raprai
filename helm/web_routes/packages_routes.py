@@ -42,6 +42,12 @@ class UninstallRequest(BaseModel):
     package_id: str
 
 
+class ConfigureRequest(BaseModel):
+    """Save API keys / env vars for a package."""
+    package_id: str
+    env_vars: dict[str, str] = {}   # {"API_KEY": "value", ...}
+
+
 # ---------------------------------------------------------------------------
 # Catalog endpoints
 # ---------------------------------------------------------------------------
@@ -68,6 +74,87 @@ async def refresh_catalog():
     from helm.packages.marketplace import get_catalog
     catalog = get_catalog(force_refresh=True)
     return {"ok": True, "count": len(catalog)}
+
+
+@router.get("/updates")
+async def check_updates(force: bool = False):
+    """Check for available package updates."""
+    from helm.packages.marketplace import check_updates as _check
+    updates = _check(force=force)
+    return {"ok": True, "updates": updates, "count": len(updates)}
+
+
+@router.get("/setup/{package_id}")
+async def package_setup_info(package_id: str):
+    """Get setup information for a catalog package (API keys, OAuth, etc.)."""
+    from helm.packages.marketplace import get_package_setup_info
+    setup = get_package_setup_info(package_id)
+    if not setup:
+        raise HTTPException(status_code=404, detail=f"No setup info for '{package_id}'")
+    return {"ok": True, "package_id": package_id, "setup": setup}
+
+
+@router.post("/configure")
+async def configure_package(req: ConfigureRequest):
+    """
+    Save environment variables for a package (API keys, tokens, etc.).
+    Updates the .env file and restarts the MCP server if applicable.
+    """
+    pkg_id = req.package_id
+    env_vars = req.env_vars
+
+    if not env_vars:
+        raise HTTPException(status_code=400, detail="No env_vars provided")
+
+    # Update .env file
+    try:
+        from helm.paths import user_data_dir
+        env_path = user_data_dir() / ".env"
+
+        # Read existing .env
+        existing = {}
+        if env_path.exists():
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    existing[k.strip()] = v.strip()
+
+        # Merge new values
+        for key, value in env_vars.items():
+            if value:  # Only set non-empty values
+                existing[key] = value
+                # Also set in current process environment
+                import os
+                os.environ[key] = value
+
+        # Write back .env
+        lines = [f"{k}={v}" for k, v in sorted(existing.items())]
+        env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        logger.info("Packages: updated env vars for %s: %s", pkg_id, list(env_vars.keys()))
+
+        # If this is an MCP server, try to restart it
+        result = {"ok": True, "package_id": pkg_id, "configured_keys": list(env_vars.keys())}
+        try:
+            from helm.mcp.config import load_config
+            mcp_cfg = load_config()
+            mcp_id = pkg_id.replace("-", "_")
+            if mcp_id in mcp_cfg or pkg_id in mcp_cfg:
+                server_id = mcp_id if mcp_id in mcp_cfg else pkg_id
+                from helm.mcp.manager import MCPManager
+                mgr = MCPManager.get_instance()
+                if mgr:
+                    await mgr.restart_server(server_id)
+                    result["restarted"] = server_id
+        except Exception as e:
+            logger.warning("Packages: could not restart MCP after config: %s", e)
+
+        return result
+
+    except Exception as e:
+        logger.error("Packages: failed to configure %s: %s", pkg_id, e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ---------------------------------------------------------------------------

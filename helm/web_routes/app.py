@@ -46,6 +46,7 @@ _MCP_PREFIXES = ("/mcp/call", "/mcp/servers")
 # Also exported as env var so child processes (call_tool.py) can read it.
 MCP_BEARER_TOKEN: str = secrets.token_urlsafe(32)
 os.environ["MCP_BEARER_TOKEN"] = MCP_BEARER_TOKEN
+logger.info("MCP bearer token: %s", MCP_BEARER_TOKEN)
 
 
 def _is_localhost(request: Request) -> bool:

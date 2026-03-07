@@ -10,10 +10,13 @@ Public API:
     search_catalog(query, pkg_type=None) → list[dict]
     get_catalog_entry(package_id) → dict | None
     get_download_url(package_id) → str | None
+    check_updates() → list[dict]
+    get_app_latest_version() → str | None
 """
 
 import json
 import os
+import re
 import time
 from typing import Optional
 
@@ -31,6 +34,12 @@ _CACHE_TTL = 3600  # 1 hour
 # In-memory cache
 _cached_catalog: list[dict] = []
 _cached_at: float = 0.0
+_cached_full_response: dict = {}   # full JSON from remote (includes version, app_latest_version, etc.)
+
+# Update check cache (separate from catalog TTL)
+_UPDATE_CHECK_TTL = 1800  # 30 minutes
+_cached_updates: list[dict] = []
+_updates_checked_at: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +96,7 @@ def _catalog_url() -> str:
 
 def _fetch_remote_catalog() -> list[dict]:
     """Fetch catalog JSON from the remote URL."""
+    global _cached_full_response
     import requests
 
     url = _catalog_url()
@@ -99,8 +109,10 @@ def _fetch_remote_catalog() -> list[dict]:
         data = resp.json()
 
         if isinstance(data, dict):
+            _cached_full_response = data
             return data.get("packages", [])
         if isinstance(data, list):
+            _cached_full_response = {"packages": data}
             return data
         return []
 
@@ -377,3 +389,141 @@ def remove_local_entry(package_id: str) -> None:
     _cached_catalog = catalog
     _cached_at = time.time()
     _save_cache(catalog)
+
+
+# ---------------------------------------------------------------------------
+# Version comparison
+# ---------------------------------------------------------------------------
+
+_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)")
+
+
+def _parse_version(v: str) -> tuple[int, ...]:
+    """Parse a semver string into a comparable tuple."""
+    m = _SEMVER_RE.match(v or "")
+    if not m:
+        return (0, 0, 0)
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
+def _is_newer(remote_version: str, local_version: str) -> bool:
+    """Return True if remote_version is strictly newer than local_version."""
+    return _parse_version(remote_version) > _parse_version(local_version)
+
+
+# ---------------------------------------------------------------------------
+# Update checking
+# ---------------------------------------------------------------------------
+
+def check_updates(force: bool = False) -> list[dict]:
+    """
+    Compare installed packages against the catalog and return those
+    with newer versions available.
+
+    Returns a list of dicts:
+        [{"id": "...", "name": "...", "type": "...",
+          "installed_version": "1.0.0", "latest_version": "1.1.0",
+          "changelog": "...", "download_url": "..."}]
+    """
+    global _cached_updates, _updates_checked_at
+
+    now = time.time()
+    if not force and _cached_updates and (now - _updates_checked_at) < _UPDATE_CHECK_TTL:
+        return _cached_updates
+
+    catalog = get_catalog(force_refresh=force)
+    if not catalog:
+        return []
+
+    # Build lookup from catalog
+    catalog_map = {p["id"]: p for p in catalog if "id" in p}
+
+    # Get installed packages
+    try:
+        from helm.packages.installer import list_installed
+        installed = list_installed()
+    except Exception:
+        installed = []
+
+    # Also check MCP servers from mcp_servers.json (they may not be
+    # in the packages DB but are in the catalog)
+    try:
+        from helm.mcp.config import load_config
+        mcp_cfg = load_config()
+        for server_id, cfg in mcp_cfg.items():
+            # If this MCP server matches a catalog entry but isn't in
+            # installed packages, treat it as "installed at v0.0.0"
+            if server_id in catalog_map or server_id.replace("_", "-") in catalog_map:
+                # Check if already in installed list
+                if not any(p["id"] == server_id or p["id"] == server_id.replace("_", "-") for p in installed):
+                    cat_id = server_id if server_id in catalog_map else server_id.replace("_", "-")
+                    installed.append({
+                        "id": cat_id,
+                        "type": "mcp",
+                        "version": "0.0.0",  # Unknown local version
+                        "name": catalog_map[cat_id].get("name", cat_id),
+                    })
+    except Exception:
+        pass
+
+    updates = []
+    for pkg in installed:
+        pkg_id = pkg.get("id", "")
+        cat_entry = catalog_map.get(pkg_id)
+        if not cat_entry:
+            continue
+
+        local_ver = pkg.get("version", "0.0.0")
+        remote_ver = cat_entry.get("version", "0.0.0")
+
+        if _is_newer(remote_ver, local_ver):
+            updates.append({
+                "id": pkg_id,
+                "name": cat_entry.get("name", pkg_id),
+                "type": cat_entry.get("type", ""),
+                "installed_version": local_ver,
+                "latest_version": remote_ver,
+                "changelog": cat_entry.get("changelog", ""),
+                "download_url": cat_entry.get("download_url", ""),
+            })
+
+    _cached_updates = updates
+    _updates_checked_at = now
+
+    if updates:
+        logger.info(
+            "RAPR Packages: %d update(s) available: %s",
+            len(updates),
+            ", ".join(f"{u['id']} {u['installed_version']}→{u['latest_version']}" for u in updates),
+        )
+
+    return updates
+
+
+def get_app_latest_version() -> Optional[str]:
+    """
+    Return the latest app version advertised by the catalog,
+    or None if unavailable.
+    """
+    # Ensure catalog is loaded
+    get_catalog()
+    return _cached_full_response.get("app_latest_version")
+
+
+def get_package_setup_info(package_id: str) -> Optional[dict]:
+    """
+    Return the setup information for a catalog package.
+
+    Setup types:
+        "none"       — no setup required
+        "api_key"    — user needs to provide API key(s)
+        "oauth"      — OAuth flow required
+        "extension"  — requires browser extension or external tool
+
+    Returns:
+        {"type": "api_key", "env_vars": [...]} or None
+    """
+    entry = get_catalog_entry(package_id)
+    if not entry:
+        return None
+    return entry.get("setup")

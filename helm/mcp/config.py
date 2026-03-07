@@ -68,6 +68,22 @@ def load_config(config_path: Optional[str] = None) -> dict:
             logger.warning("MCP config: skipping '%s' — expected object", server_id)
             continue
 
+        server_type = cfg.get("type", "subprocess")
+        enabled = cfg.get("enabled", False)
+        status = "enabled" if enabled else "disabled"
+
+        # WebSocket-based servers (e.g. Chrome extension) have no command
+        if server_type == "websocket":
+            servers[server_id] = {
+                "type": "websocket",
+                "command": [],
+                "env": {},
+                "enabled": enabled,
+            }
+            logger.info("MCP config: loaded '%s' [%s] — type=websocket",
+                         server_id, status)
+            continue
+
         command_str = cfg.get("command", "").strip()
         if not command_str:
             logger.warning("MCP config: skipping '%s' — no command", server_id)
@@ -83,15 +99,13 @@ def load_config(config_path: Optional[str] = None) -> dict:
         # Filter out empty env values (unresolved vars)
         env = {k: v for k, v in env.items() if v}
 
-        enabled = cfg.get("enabled", False)
-
         servers[server_id] = {
+            "type": "subprocess",
             "command": command,
             "env": env,
             "enabled": enabled,
         }
 
-        status = "enabled" if enabled else "disabled"
         logger.info("MCP config: loaded '%s' [%s] — %s",
                      server_id, status, command_str)
 

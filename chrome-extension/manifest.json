@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "RAPR AI Browser Tools",
+  "version": "1.0.0",
+  "description": "Expose browser automation tools to RAPR AI — enables any AI (Claude, Gemini, Ollama, etc.) to control Chrome tabs via MCP.",
+  "permissions": [
+    "tabs",
+    "scripting",
+    "activeTab",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "RAPR AI Browser Tools"
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content-script.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
