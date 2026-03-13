@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 
 import helm.auth as _auth
 from helm.config import logger
+from helm.paths import user_data_dir
 from helm.setup_wizard import _SETUP_HTML
 from .app import update_env
 
@@ -22,6 +23,11 @@ router = APIRouter()
 
 @router.get("/setup", response_class=HTMLResponse)
 async def setup_page():
+    from .app import _USE_SEPARATED_FRONTEND, _FRONTEND_DIR
+    if _USE_SEPARATED_FRONTEND:
+        setup_path = _FRONTEND_DIR / "setup.html"
+        if setup_path.exists():
+            return HTMLResponse(content=setup_path.read_text(encoding="utf-8"))
     return HTMLResponse(content=_SETUP_HTML)
 
 
@@ -32,7 +38,7 @@ async def setup_status():
     from dotenv import dotenv_values
     from .app import _find_cli
 
-    env_path = pathlib.Path(".env")
+    env_path = user_data_dir() / ".env"
     vals = dotenv_values(env_path) if env_path.exists() else {}
 
     def _check_clis():
@@ -102,9 +108,22 @@ async def setup_save(request: Request):
                 # Non-secret (e.g. ALLOWED_USER_IDS) → plaintext .env
                 update_env(key, value)
 
+        # Persist the MCP bearer token now that .env exists
+        from helm.web_routes.app import MCP_BEARER_TOKEN
+        update_env("MCP_BEARER_TOKEN", MCP_BEARER_TOKEN)
+
         # Reload so the running process picks up new values immediately
         from helm.web_routes.app import reload_env
         reload_env()
+
+        # Hot-start Telegram bot if token was just saved and bot isn't running yet
+        if "TELEGRAM_BOT_TOKEN" in body and body["TELEGRAM_BOT_TOKEN"].strip():
+            import asyncio
+            import helm.state as _st
+            hot_start = getattr(_st, "_hot_start_telegram", None)
+            if hot_start and not _st.telegram_app:
+                asyncio.create_task(hot_start())
+
         return JSONResponse({"ok": True})
     except Exception as e:
         logger.error("setup/save error: %s", e)
@@ -126,7 +145,19 @@ async def login_page(request: Request, error: str = ""):
     wait = _auth.seconds_until_unlock(ip)
 
     disabled = "disabled" if wait > 0 else ""
-    html = _auth.LOGIN_HTML.replace("__WAIT__",     str(wait))
+
+    # Use separated frontend login.html if available
+    from .app import _USE_SEPARATED_FRONTEND, _FRONTEND_DIR
+    if _USE_SEPARATED_FRONTEND:
+        login_path = _FRONTEND_DIR / "login.html"
+        if login_path.exists():
+            html = login_path.read_text(encoding="utf-8")
+        else:
+            html = _auth.LOGIN_HTML
+    else:
+        html = _auth.LOGIN_HTML
+
+    html = html.replace("__WAIT__",     str(wait))
     html = html.replace("__DISABLED__", disabled)
     html = html.replace("__ERROR__",    error.replace('"', "&quot;"))
     return HTMLResponse(content=html)

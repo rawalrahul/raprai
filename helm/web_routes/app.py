@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 import helm.state as _st
 from helm.config import logger
 from helm.frontend import _HTML
+from helm.paths import user_data_dir
 import helm.auth as _auth
 
 
@@ -42,9 +43,13 @@ _PUBLIC_PREFIXES = ("/login", "/setup", "/static", "/health")
 # and a bearer token that's auto-generated at startup.
 _MCP_PREFIXES = ("/mcp/call", "/mcp/servers")
 
-# Auto-generated bearer token for subprocess MCP calls (set at startup).
-# Also exported as env var so child processes (call_tool.py) can read it.
-MCP_BEARER_TOKEN: str = secrets.token_urlsafe(32)
+# Bearer token for subprocess MCP calls + Chrome plugin auth.
+# Persisted to .env so it survives restarts (Chrome plugin stores it once).
+MCP_BEARER_TOKEN: str = os.environ.get("MCP_BEARER_TOKEN", "")
+_MCP_TOKEN_IS_NEW = False
+if not MCP_BEARER_TOKEN:
+    MCP_BEARER_TOKEN = secrets.token_urlsafe(32)
+    _MCP_TOKEN_IS_NEW = True
 os.environ["MCP_BEARER_TOKEN"] = MCP_BEARER_TOKEN
 logger.info("MCP bearer token: %s", MCP_BEARER_TOKEN)
 
@@ -205,7 +210,7 @@ def _gemini_ready() -> bool:
 def _telegram_configured() -> bool:
     """Return True if both TELEGRAM_BOT_TOKEN and ALLOWED_USER_IDS are set in .env."""
     from dotenv import dotenv_values
-    env_path = pathlib.Path(".env")
+    env_path = user_data_dir() / ".env"
     vals = dotenv_values(env_path) if env_path.exists() else {}
     return bool(vals.get("TELEGRAM_BOT_TOKEN", "").strip() and vals.get("ALLOWED_USER_IDS", "").strip())
 
@@ -234,7 +239,7 @@ _windows_folder_picker = windows_folder_picker  # legacy alias
 
 def update_env(key: str, value: str):
     """Update or add a key=value line in the .env file."""
-    env_path = pathlib.Path(".env")
+    env_path = user_data_dir() / ".env"
     if not env_path.exists():
         env_path.write_text(f"{key}={value}\n", encoding="utf-8")
         return
@@ -254,6 +259,15 @@ def update_env(key: str, value: str):
 
 _update_env = update_env  # legacy alias
 
+# Persist the MCP bearer token to .env if it was just generated
+# Only write if .env already exists — otherwise we'd create it prematurely
+# and the setup wizard redirect (which checks .env existence) would be skipped.
+if _MCP_TOKEN_IS_NEW and (user_data_dir() / ".env").exists():
+    try:
+        update_env("MCP_BEARER_TOKEN", MCP_BEARER_TOKEN)
+    except Exception:
+        pass
+
 
 def reload_env():
     """Reload .env into os.environ AND re-apply vault tokens on top.
@@ -263,7 +277,7 @@ def reload_env():
     "vault-managed" placeholders stored in .env.
     """
     from dotenv import load_dotenv
-    load_dotenv(override=True)
+    load_dotenv(dotenv_path=str(user_data_dir() / ".env"), override=True)
     # Re-apply decrypted tokens so vault-managed placeholders don't stick
     try:
         from helm.token_vault import load_all_tokens
@@ -305,6 +319,33 @@ _SETTINGS_KEYS = [
 
 
 # ---------------------------------------------------------------------------
+# Separated frontend support
+# ---------------------------------------------------------------------------
+# The backend can serve a separated frontend from a standalone directory.
+# Priority: FRONTEND_DIR env var > frontend2/ > frontend/ > embedded HTML.
+# Set FRONTEND_DIR env var to override auto-detection.
+
+if os.environ.get("FRONTEND_DIR"):
+    _FRONTEND_DIR = pathlib.Path(os.environ["FRONTEND_DIR"])
+elif (PROJECT_ROOT / "frontend2" / "index.html").exists():
+    _FRONTEND_DIR = PROJECT_ROOT / "frontend2"
+elif (PROJECT_ROOT / "frontend" / "index.html").exists():
+    _FRONTEND_DIR = PROJECT_ROOT / "frontend"
+else:
+    _FRONTEND_DIR = PROJECT_ROOT / "frontend"
+
+_USE_SEPARATED_FRONTEND = _FRONTEND_DIR.exists() and (_FRONTEND_DIR / "index.html").exists()
+
+if _USE_SEPARATED_FRONTEND:
+    logger.info("Serving separated frontend from: %s", _FRONTEND_DIR)
+    # Mount frontend static assets (js/, css/, assets/)
+    for sub in ("js", "css", "assets"):
+        sub_dir = _FRONTEND_DIR / sub
+        if sub_dir.exists():
+            app.mount(f"/{sub}", StaticFiles(directory=str(sub_dir)), name=f"frontend-{sub}")
+
+
+# ---------------------------------------------------------------------------
 # Main page and health endpoint
 # ---------------------------------------------------------------------------
 
@@ -313,8 +354,11 @@ async def index():
     # Only redirect to setup on true first run (no .env file yet).
     # Everything else (Telegram, AI CLIs) is optional — the user can configure
     # them later via the Settings panel or by editing .env directly.
-    if not pathlib.Path(".env").exists():
+    if not (user_data_dir() / ".env").exists():
         return RedirectResponse(url="/setup")
+    # Serve from separated frontend if available, otherwise use embedded HTML
+    if _USE_SEPARATED_FRONTEND:
+        return HTMLResponse(content=(_FRONTEND_DIR / "index.html").read_text(encoding="utf-8"))
     return HTMLResponse(content=_HTML)
 
 

@@ -15,14 +15,43 @@ env/
 # Environment / secrets — NEVER commit these
 .env
 *.env
+.vault_key
+credentials.json
+
+# Nuitka build output
+web_app.build/
+web_app.dist/
+
+# Database — user-specific data
+helmhq.db
+helmhq.db-shm
+helmhq.db-wal
 
 # Chat history — contains your personal conversations
 chat_logs/
+
+# Logs
+logs/
+
+# Caches
+helmpack_cache/
+packages_cache/
+
+# Release archives
+*.zip
+
+# Backup / old files
+*.bak
+*.py.bak
+
+# PyArmor (no longer used)
+pyarmor.bug.log
 
 # OS
 .DS_Store
 Thumbs.db
 desktop.ini
+.fuse_hidden*
 
 # Editor
 .vscode/

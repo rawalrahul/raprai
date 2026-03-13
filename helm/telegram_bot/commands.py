@@ -18,6 +18,7 @@ from helm.config import (
     ALLOWED_USER_IDS, CRONITER_OK, HISTORY_ID_RE,
     WEB_PORT, logger,
 )
+from helm.paths import user_data_dir
 
 from .auth import authorized_only, tg_send_chunks
 from .browse import show_browse
@@ -338,7 +339,7 @@ async def tg_timeout(update, context):
 
 def _update_env(key: str, value: str):
     """Update or add a key=value line in the .env file."""
-    env_path = pathlib.Path(".env")
+    env_path = user_data_dir() / ".env"
     if not env_path.exists():
         env_path.write_text(f"{key}={value}\n", encoding="utf-8")
         return

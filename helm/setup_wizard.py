@@ -418,11 +418,17 @@ async function checkOptionalIntegrations() {
   } catch (e) {}
 }
 
+// ── CSRF helper ──────────────────────────────────────────────
+function csrfToken() {
+  const m = document.cookie.match(/(?:^|;\\s*)hq_csrf=([^;]*)/);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+
 // ── Save helpers ──────────────────────────────────────────────
 async function apiSave(payload) {
   const r = await fetch('/setup/save', {
     method:  'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken()},
     body:    JSON.stringify(payload),
   });
   return r.json();
@@ -505,7 +511,7 @@ async function savePin() {
   try {
     const r = await fetch('/auth/set-pin', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken()},
       body: JSON.stringify({pin}),
     });
     const data = await r.json();

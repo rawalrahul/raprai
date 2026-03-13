@@ -255,6 +255,92 @@ async def _main():
         tg.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, tg_text))
 
 
+    # --- Hot-start Telegram function (called from setup_save if bot wasn't started at launch) ---
+    async def _hot_start_telegram():
+        """Build + start the Telegram bot after initial setup provides token/user IDs."""
+        if _st.telegram_app:
+            logger.info("Telegram bot already running — skipping hot-start")
+            return
+        import helm.config as _cfg
+        token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        if token == "vault-managed":
+            try:
+                from helm.token_vault import load_all_tokens
+                load_all_tokens()
+                token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+            except Exception:
+                pass
+        if not token or token == "vault-managed":
+            logger.warning("Telegram hot-start: no valid token found")
+            return
+        user_ids = set(
+            int(uid.strip())
+            for uid in os.environ.get("ALLOWED_USER_IDS", "").split(",")
+            if uid.strip()
+        )
+        if not user_ids:
+            logger.warning("Telegram hot-start: ALLOWED_USER_IDS empty")
+            return
+        _cfg.BOT_TOKEN = token
+        _cfg.ALLOWED_USER_IDS = user_ids
+        try:
+            from telegram import Update as _Upd
+            from telegram.ext import (
+                Application, CallbackQueryHandler, CommandHandler,
+                MessageHandler, filters,
+            )
+            from helm.telegram_bot import (
+                action_callback, browse_callback, pipeline_callback,
+                approval_callback,
+                tg_browse, tg_clear, tg_clear_context, tg_claude, tg_cmd,
+                tg_codex, tg_cwd, tg_gemini, tg_history, tg_interrupt,
+                tg_launch, tg_menu, tg_pipeline, tg_resume, tg_schedule,
+                tg_start, tg_status, tg_stop, tg_stop_ai, tg_text, tg_timeout,
+                tg_voice, tg_file,
+            )
+            _st.telegram_app = (
+                Application.builder().token(token).concurrent_updates(True).build()
+            )
+            tg = _st.telegram_app
+            tg.add_handler(CommandHandler("start",   tg_start))
+            tg.add_handler(CommandHandler("menu",    tg_menu))
+            tg.add_handler(CommandHandler("claude",  tg_claude))
+            tg.add_handler(CommandHandler("gemini",  tg_gemini))
+            tg.add_handler(CommandHandler("codex",   tg_codex))
+            tg.add_handler(CommandHandler("launch",    tg_launch))
+            tg.add_handler(CommandHandler("stop",      tg_stop))
+            tg.add_handler(CommandHandler("interrupt", tg_interrupt))
+            tg.add_handler(CommandHandler("stop_ai",   tg_stop_ai))
+            tg.add_handler(CommandHandler("status",    tg_status))
+            tg.add_handler(CommandHandler("cwd",          tg_cwd))
+            tg.add_handler(CommandHandler("browse",        tg_browse))
+            tg.add_handler(CommandHandler("cmd",           tg_cmd))
+            tg.add_handler(CommandHandler("timeout",       tg_timeout))
+            tg.add_handler(CommandHandler("clear",         tg_clear))
+            tg.add_handler(CommandHandler("history",       tg_history))
+            tg.add_handler(CommandHandler("resume",        tg_resume))
+            tg.add_handler(CommandHandler("clear_context", tg_clear_context))
+            tg.add_handler(CommandHandler("schedule",      tg_schedule))
+            tg.add_handler(CommandHandler("pipeline",      tg_pipeline))
+            tg.add_handler(CallbackQueryHandler(action_callback, pattern=r"^(action:|ms:)"))
+            tg.add_handler(CallbackQueryHandler(pipeline_callback, pattern=r"^pl:"))
+            tg.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^appr:"))
+            tg.add_handler(CallbackQueryHandler(heartbeat_callback, pattern=r"^heartbeat:"))
+            tg.add_handler(CallbackQueryHandler(browse_callback))
+            tg.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, tg_voice))
+            tg.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, tg_file))
+            tg.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, tg_text))
+            await tg.initialize()
+            await tg.start()
+            await tg.updater.start_polling(allowed_updates=_Upd.ALL_TYPES)
+            logger.info("Telegram bot hot-started successfully after setup!")
+        except Exception as exc:
+            logger.error("Telegram hot-start failed: %s", exc)
+            _st.telegram_app = None
+
+    # Store reference so setup_save can call it
+    _st._hot_start_telegram = _hot_start_telegram
+
     # --- Resolve port conflicts ---
     from helm.resilience import find_free_port
     actual_port = find_free_port(WEB_HOST, WEB_PORT)
@@ -303,6 +389,15 @@ async def _main():
             await _st.telegram_app.stop()
     else:
         await server.serve()
+        # Clean up any hot-started Telegram bot
+        if _st.telegram_app:
+            try:
+                await _st.telegram_app.updater.stop()
+                await _st.telegram_app.stop()
+                await _st.telegram_app.shutdown()
+                logger.info("Hot-started Telegram bot stopped.")
+            except Exception as exc:
+                logger.warning("Telegram shutdown error: %s", exc)
 
 
 def main():

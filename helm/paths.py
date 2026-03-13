@@ -29,13 +29,23 @@ import sys
 
 
 def is_bundled() -> bool:
-    """Return True when running inside a PyInstaller bundle."""
-    return getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
+    """Return True when running inside a PyInstaller or Nuitka bundle."""
+    # PyInstaller sets sys.frozen and sys._MEIPASS
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return True
+    # Nuitka sets __compiled__ at module level in compiled modules
+    if "__compiled__" in globals():
+        return True
+    return False
 
 
 if is_bundled():
-    # PyInstaller sets sys._MEIPASS to the bundle extraction directory
-    PROJECT_ROOT = pathlib.Path(sys._MEIPASS)
+    if hasattr(sys, "_MEIPASS"):
+        # PyInstaller sets sys._MEIPASS to the bundle extraction directory
+        PROJECT_ROOT = pathlib.Path(sys._MEIPASS)
+    else:
+        # Nuitka --standalone: the .exe sits inside web_app.dist/
+        PROJECT_ROOT = pathlib.Path(sys.executable).resolve().parent
 else:
     # Development: helm/ is one level below the project root
     PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent

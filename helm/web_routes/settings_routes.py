@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 import helm.state as _st
 from helm.config import logger
+from helm.paths import user_data_dir
 from .app import update_env, _SETTINGS_KEYS
 from .helpers import _fetch_claude_models, _fetch_ollama_models, _fetch_openai_models, _fetch_gemini_models
 
@@ -28,7 +29,7 @@ async def get_settings():
     from dotenv import dotenv_values
     import helm.auth as _auth
 
-    env_path = pathlib.Path(".env")
+    env_path = user_data_dir() / ".env"
     saved = dotenv_values(env_path) if env_path.exists() else {}
     data = {}
     for key in _SETTINGS_KEYS:

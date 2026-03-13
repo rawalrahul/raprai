@@ -303,6 +303,19 @@ def _build_search_text(content: str, category: str, source_ai: str) -> str:
     return " ".join(parts)
 
 
+def v9_add_packages_keywords(conn: sqlite3.Connection):
+    """Version 9: Add keywords and updated_at columns to packages table."""
+    for col, defn in [
+        ("keywords", "TEXT DEFAULT '[]'"),
+        ("updated_at", "REAL DEFAULT 0"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE packages ADD COLUMN {col} {defn}")
+        except Exception:
+            pass  # Column already exists
+    conn.commit()
+
+
 MIGRATIONS: list[tuple[int, str, callable]] = [
     (1, "Initial schema", v1_initial),
     (2, "Add FTS5 full-text search", v2_add_content_fts),
@@ -312,6 +325,7 @@ MIGRATIONS: list[tuple[int, str, callable]] = [
     (6, "Add summaries + memory decay", v6_add_summaries_and_decay),
     (7, "Add dollar cost tracking to usage_stats", v7_add_cost_usd),
     (8, "Encrypt memory content at rest", v8_encrypt_memory_content),
+    (9, "Add keywords/updated_at to packages", v9_add_packages_keywords),
 ]
 
 

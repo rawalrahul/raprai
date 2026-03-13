@@ -13,12 +13,13 @@ import sys
 from dotenv import load_dotenv
 
 # In bundled mode, .env lives next to the .exe (not inside the bundle)
-from helm.paths import user_data_dir as _udd
+from helm.paths import user_data_dir as _udd, is_bundled as _is_bundled
 _env_path = _udd() / ".env"
 if _env_path.exists():
     load_dotenv(_env_path)
-else:
-    load_dotenv()  # fallback: search from cwd
+elif not _is_bundled():
+    load_dotenv()  # dev mode fallback: search from cwd
+# When bundled with no .env, skip — setup wizard will create it
 
 # ---------------------------------------------------------------------------
 # Logging

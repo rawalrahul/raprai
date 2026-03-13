@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RAPR AI</title>
+<link rel="icon" href="/static/logo.png" type="image/png">
+<link rel="stylesheet" href="/css/design-system.css">
+<link rel="stylesheet" href="/css/original.css">
+<link rel="stylesheet" href="/css/premium.css">
+</head>
+<body>
+<div id="app">
+
+<!-- --- Left Sidebar --- -->
+<div id="left-sidebar">
+  <div class="sb-search">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input id="sb-search-inp" placeholder="Search sessions..." oninput="filterSidebarHistory(this.value)" autocomplete="off">
+  </div>
+  <div class="sb-sections" id="sb-sections">
+
+    <!-- History -->
+    <div class="sb-section open" data-section="history">
+      <div class="sb-section-header" onclick="toggleSbSection(this)">
+        <span class="sb-section-arrow">▶</span>
+        <span class="sb-section-label">History</span>
+        <span class="sb-section-count" id="sb-count-history"></span>
+      </div>
+      <div class="sb-section-body" id="sb-panel-history">
+        <div class="sb-empty">No saved sessions yet</div>
+      </div>
+    </div>
+
+    <!-- Templates -->
+    <div class="sb-section" data-section="templates">
+      <div class="sb-section-header" onclick="toggleSbSection(this)">
+        <span class="sb-section-arrow">▶</span>
+        <span class="sb-section-label">Templates</span>
+      </div>
+      <div class="sb-section-body" id="sb-panel-templates">
+        <div id="sb-templates-list"><div class="sb-empty">No templates yet</div></div>
+        <details class="sb-add-form" style="padding:8px 14px">
+          <summary style="cursor:pointer">+ New Template</summary>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;font-size:11px">
+            <input id="sb-templ-name" placeholder="Template name..." style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px">
+            <select id="sb-templ-ai" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px">
+              <option value="">Shell</option>
+              <option value="claude">Claude Code</option>
+              <option value="gemini">Gemini</option>
+            </select>
+            <div style="display:flex;gap:4px">
+              <input id="sb-templ-cwd" placeholder="Folder path..." style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px">
+              <button onclick="openBrowse('sb-templ-cwd')" title="Browse" style="padding:4px 6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:11px">📂</button>
+            </div>
+            <textarea id="sb-templ-prompt" rows="2" placeholder="Initial prompt..." style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px;font-family:inherit"></textarea>
+            <button class="sb-add-btn" onclick="sbSaveTemplate()" style="font-size:11px">Save Template</button>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <!-- Scheduled -->
+    <div class="sb-section" data-section="scheduled">
+      <div class="sb-section-header" onclick="toggleSbSection(this)">
+        <span class="sb-section-arrow">▶</span>
+        <span class="sb-section-label">Scheduled</span>
+      </div>
+      <div class="sb-section-body" id="sb-panel-scheduled">
+        <div id="sb-sched-list"><div class="sb-empty">Loading...</div></div>
+        <details class="sb-add-form">
+          <summary>+ Add scheduled task</summary>
+          <div class="sched-picker">
+            <select id="sb-sched-freq" onchange="sbSchedFreqChange()">
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly / Multiple Days</option>
+              <option value="monthly">Monthly</option>
+            </select>
+            <div id="sb-sched-weekday-row" style="display:none;margin-top:4px">
+              <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Run on these days:</div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px">
+                <label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" name="sb-sched-wd" value="1"> Mon</label>
+                <label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" name="sb-sched-wd" value="2"> Tue</label>
+                <label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" name="sb-sched-wd" value="3"> Wed</label>
+                <label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" name="sb-sched-wd" value="4"> Thu</label>
+                <label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" name="sb-sched-wd" value="5"> Fri</label>
+                <label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" name="sb-sched-wd" value="6"> Sat</label>
+                <label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" name="sb-sched-wd" value="0"> Sun</label>
+              </div>
+            </div>
+            <div id="sb-sched-monthday-row" style="display:none">
+              <select id="sb-sched-monthday" style="width:100%"></select>
+            </div>
+            <div id="sb-sched-time-row" class="sched-time-row">
+              <select id="sb-sched-hour"></select>
+              <span style="color:var(--muted);font-size:12px;align-self:center">:</span>
+              <select id="sb-sched-min">
+                <option value="0">00</option>
+                <option value="15">15</option>
+                <option value="30">30</option>
+                <option value="45">45</option>
+              </select>
+              <select id="sb-sched-ampm">
+                <option value="am">AM</option>
+                <option value="pm">PM</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex;gap:4px">
+            <input id="sb-sched-cwd" placeholder="Folder path..." style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 6px;font-size:11px">
+            <button onclick="openBrowse('sb-sched-cwd')" title="Browse folders" style="padding:4px 6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:11px">📂</button>
+          </div>
+          <select id="sb-sched-ai">
+            <option value="claude">Claude Code</option>
+            <option value="">Shell</option>
+          </select>
+          <textarea id="sb-sched-prompt" rows="2" placeholder="Prompt to run..."></textarea>
+          <button class="sb-add-btn" onclick="sbSchedAdd()">Schedule</button>
+        </details>
+      </div>
+    </div>
+
+    <!-- Usage -->
+    <div class="sb-section" data-section="usage">
+      <div class="sb-section-header" onclick="toggleSbSection(this)">
+        <span class="sb-section-arrow">▶</span>
+        <span class="sb-section-label">Usage</span>
+        <button onclick="event.stopPropagation();loadUsageDashboard()" class="sb-section-action" title="Refresh">⟳</button>
+      </div>
+      <div class="sb-section-body" id="sb-panel-usage">
+        <div id="usage-dashboard">
+          <div class="sb-empty">Loading usage data...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pipelines -->
+    <div class="sb-section" data-section="pipelines">
+      <div class="sb-section-header" onclick="toggleSbSection(this)">
+        <span class="sb-section-arrow">▶</span>
+        <span class="sb-section-label">Pipelines</span>
+        <button onclick="event.stopPropagation();loadPipelines()" class="sb-section-action" title="Refresh">⟳</button>
+      </div>
+      <div class="sb-section-body" id="sb-panel-pipelines">
+        <div id="pipelines-list">
+          <div class="sb-empty">No pipelines yet.</div>
+        </div>
+        <details class="sb-add-form">
+          <summary>+ Create pipeline</summary>
+          <textarea id="sb-pipeline-prompt" rows="3" placeholder="Describe a complex task to split across AIs..."></textarea>
+          <button class="sb-add-btn" onclick="sbPipelineCreate()">Create Pipeline</button>
+        </details>
+      </div>
+    </div>
+
+    <!-- Memory -->
+    <div class="sb-section" data-section="memory">
+      <div class="sb-section-header" onclick="toggleSbSection(this)">
+        <span class="sb-section-arrow">▶</span>
+        <span class="sb-section-label">Memory</span>
+        <span class="sb-section-count" id="sb-count-memory"></span>
+        <button onclick="event.stopPropagation();loadMemoryPanel()" class="sb-section-action" title="Refresh">⟳</button>
+      </div>
+      <div class="sb-section-body" id="sb-panel-memory">
+        <!-- Quick add -->
+        <div class="mem-add-bar">
+          <input id="mem-add-input" placeholder="/remember a fact..." onkeydown="if(event.key==='Enter')memQuickAdd()">
+          <button class="mem-add-btn" onclick="memQuickAdd()" title="Remember">+</button>
+        </div>
+        <!-- Category filter -->
+        <div class="mem-cat-filters" id="mem-cat-filters">
+          <button class="mem-cat-btn active" onclick="memFilterCat(this,'')" data-cat="">All</button>
+          <button class="mem-cat-btn" onclick="memFilterCat(this,'preference')" data-cat="preference">Pref</button>
+          <button class="mem-cat-btn" onclick="memFilterCat(this,'fact')" data-cat="fact">Fact</button>
+          <button class="mem-cat-btn" onclick="memFilterCat(this,'project')" data-cat="project">Project</button>
+          <button class="mem-cat-btn" onclick="memFilterCat(this,'instruction')" data-cat="instruction">Instr</button>
+          <button class="mem-cat-btn" onclick="memFilterCat(this,'decision')" data-cat="decision">Dec</button>
+          <button class="mem-cat-btn" onclick="memFilterCat(this,'person')" data-cat="person">Person</button>
+        </div>
+        <!-- Memory list -->
+        <div id="mem-list">
+          <div class="sb-empty">No memories yet</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /sb-sections -->
+
+  <!-- RAPR Packages — unified panel (Plugins + MCP + Packages) -->
+  <div id="sb-packages-section">
+    <div class="sb-plugins-header" onclick="togglePackagesPanel()">
+      <span class="sb-plugins-arrow" id="sb-packages-arrow">▶</span>
+      <span class="sb-plugins-label">RAPR Packages</span>
+      <span id="rp-update-badge" style="display:none"></span>
+      <div style="display:flex;gap:4px;margin-left:auto" onclick="event.stopPropagation()">
+        <button onclick="rpRefresh()" class="sb-section-action" title="Refresh">⟳</button>
+      </div>
+    </div>
+    <div class="sb-plugins-body" id="sb-packages-body">
+      <!-- Search + type filter -->
+      <div class="rp-toolbar">
+        <input id="rp-search" placeholder="Search packages..." oninput="rpSearchDebounce()" autocomplete="off">
+        <div class="rp-type-filters">
+          <button class="rp-type-btn active" data-type="" onclick="rpSetType(this,'')">All</button>
+          <button class="rp-type-btn" data-type="mcp" onclick="rpSetType(this,'mcp')">MCP</button>
+          <button class="rp-type-btn" data-type="skill" onclick="rpSetType(this,'skill')">Skills</button>
+          <button class="rp-type-btn" data-type="plugin" onclick="rpSetType(this,'plugin')">Plugins</button>
+        </div>
+      </div>
+      <!-- Installed / Browse tabs -->
+      <div class="rp-tabs">
+        <button class="rp-tab active" onclick="rpSwitchTab(this,'installed')">Installed</button>
+        <button class="rp-tab" onclick="rpSwitchTab(this,'browse')">Browse</button>
+      </div>
+      <!-- Package list -->
+      <div id="rp-list" style="padding:4px 10px;display:flex;flex-direction:column;gap:4px">
+        <div class="sb-empty" style="padding:12px 4px">Loading packages...</div>
+      </div>
+      <!-- Upload .raprpkg -->
+      <details class="sb-add-form" style="padding:6px 10px">
+        <summary>+ Install from file</summary>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px;font-size:11px">
+          <input type="file" id="rp-upload-file" accept=".raprpkg" style="font-size:11px;color:var(--text)">
+          <button class="sb-add-btn" onclick="rpUploadInstall()">Install</button>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- Settings button pinned to bottom of left sidebar -->
+  <div id="sb-settings-footer">
+    <button onclick="openSettings()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+      Settings
+    </button>
+  </div>
+</div>
+
+<!-- --- Resize handle: left sidebar ↔ center --- -->
+<div class="resize-handle" id="resize-left" title="Drag to resize"></div>
+
+<!-- --- Sidebar overlay (mobile) --- -->
+<div class="sb-overlay" id="sb-overlay" onclick="closeSidebars()"></div>
+
+<!-- --- Center Panel --- -->
+<div id="center-panel">
+
+<header>
+  <div style="display:flex;align-items:center;gap:10px">
+    <button class="panel-toggle" id="toggle-left-panel" onclick="toggleLeftPanel()" title="Toggle left sidebar">☰</button>
+    <div class="logo">&#9875; RAPR <em>AI</em></div>
+  </div>
+  <div class="header-right">
+    <button class="sb-toggle" id="toggle-left" onclick="toggleLeft()" title="History & Scheduled">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+    </button>
+    <button class="sb-toggle" id="toggle-right" onclick="toggleRight()" title="Sessions">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+    </button>
+    <button class="hdr-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle light/dark theme">🌙</button>
+    <button class="hdr-btn" id="notify-toggle-btn" onclick="toggleNotifications()" title="Toggle notifications">🔔</button>
+    <button class="hdr-btn" onclick="showHelpTour()" title="Help & tour">?</button>
+    <button class="panel-toggle" id="toggle-right-panel" onclick="toggleRightPanel()" title="Toggle sessions panel">▸</button>
+    <div id="conn" title="WebSocket status"></div>
+  </div>
+</header>
+<!-- --- Connection error banner (hidden by default) --- -->
+<div id="conn-banner" class="conn-banner" style="display:none">
+  <span id="conn-banner-icon">⚠️</span>
+  <span id="conn-banner-msg">Disconnected from server</span>
+  <button id="conn-banner-action" onclick="location.href='/login'" style="display:none">Re-login</button>
+  <button onclick="document.getElementById('conn-banner').style.display='none'" class="conn-banner-close">✕</button>
+</div>
+
+<!-- Approval request banner (shown when destructive action needs user confirmation) -->
+<div id="approval-banner" class="approval-banner" style="display:none">
+  <div class="approval-banner-content">
+    <span id="approval-banner-icon">⚠️</span>
+    <span id="approval-banner-msg">An action requires your approval</span>
+  </div>
+  <div class="approval-banner-actions">
+    <button id="approval-approve-btn" class="approval-btn approve" onclick="resolveApproval('approved')">✅ Approve</button>
+    <button id="approval-deny-btn" class="approval-btn deny" onclick="resolveApproval('denied')">❌ Deny</button>
+  </div>
+</div>
+
+<!-- --- Schedules modal --->
+<div id="sched-modal" class="modal-overlay" onclick="if(event.target===this)closeSchedules()" style="display:none">
+  <div class="modal-box" style="max-width:600px">
+    <div class="modal-header">
+      <span>⏰ Scheduled Tasks</span>
+      <button class="modal-close" onclick="closeSchedules()">✖</button>
+    </div>
+    <div id="sched-list" style="max-height:320px;overflow-y:auto;margin-bottom:12px"></div>
+    <details id="sched-add-details" style="margin-top:8px">
+      <summary style="cursor:pointer;font-size:13px;color:var(--muted);padding:4px 0">
+        + Add scheduled task
+      </summary>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+        <div class="sched-picker">
+          <select id="sched-freq" onchange="schedFreqChange()">
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly / Multiple Days</option>
+            <option value="monthly">Monthly</option>
+          </select>
+          <div id="sched-weekday-row" style="display:none;margin-top:4px">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Run on these days:</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+              <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="sched-wd" value="1"> Mon</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="sched-wd" value="2"> Tue</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="sched-wd" value="3"> Wed</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="sched-wd" value="4"> Thu</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="sched-wd" value="5"> Fri</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="sched-wd" value="6"> Sat</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="sched-wd" value="0"> Sun</label>
+            </div>
+          </div>
+          <div id="sched-monthday-row" style="display:none">
+            <select id="sched-monthday" style="width:100%"></select>
+          </div>
+          <div id="sched-time-row" class="sched-time-row">
+            <select id="sched-hour"></select>
+            <span style="color:var(--muted);font-size:12px;align-self:center">:</span>
+            <select id="sched-min">
+              <option value="0">00</option>
+              <option value="15">15</option>
+              <option value="30">30</option>
+              <option value="45">45</option>
+            </select>
+            <select id="sched-ampm">
+              <option value="am">AM</option>
+              <option value="pm">PM</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;gap:4px">
+          <input id="sched-cwd" placeholder="Folder path (optional; defaults to current folder)" style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px">
+          <button onclick="openBrowse('sched-cwd')" title="Browse folders" style="padding:6px 10px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;cursor:pointer">📂</button>
+        </div>
+        <select id="sched-ai" style="width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px">
+          <option value="claude">Claude Code</option>
+          <option value="">Shell</option>
+        </select>
+        <textarea id="sched-prompt" rows="3" placeholder="Prompt to run (e.g. Review git diff and summarise changes)" style="width:100%;resize:vertical"></textarea>
+        <button onclick="schedAdd()" style="align-self:flex-end;padding:6px 18px;background:var(--accent,#f59e0b);color:#000;border:none;border-radius:6px;cursor:pointer;font-weight:600">Schedule</button>
+      </div>
+    </details>
+  </div>
+</div>
+
+<!-- --- Onboarding Modal --- -->
+<div id="onboarding-overlay">
+  <div id="onboarding-modal">
+    <h2 id="onboarding-title">Welcome to RAPR AI!</h2>
+    <p id="onboarding-content">Your AI assistant in the terminal</p>
+    <div class="onboarding-dots" id="onboarding-dots"></div>
+    <div id="onboarding-nav">
+      <button class="onboarding-btn" onclick="skipOnboarding()">Skip</button>
+      <button class="onboarding-btn primary" onclick="nextOnboarding()">Next →</button>
+    </div>
+  </div>
+</div>
+
+<!-- --- Settings modal --- -->
+<div id="settings-modal" class="modal-overlay" onclick="if(event.target===this)closeSettings()">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span class="modal-title">⚙ Settings</span>
+      <button class="modal-close" onclick="closeSettings()">✖</button>
+    </div>
+    <div class="modal-body" style="overflow-y:auto">
+
+      <!-- Security -->
+      <div class="settings-section">
+        <div class="settings-section-title">Security</div>
+        <div class="settings-row">
+          <label>PIN protection
+            <small id="st-pin-status">—</small>
+          </label>
+          <button class="settings-pin-btn" onclick="togglePinSub()">Change PIN</button>
+        </div>
+        <div class="settings-pin-sub" id="st-pin-sub">
+          <input type="password" id="st-pin-new" placeholder="New PIN" autocomplete="new-password">
+          <input type="password" id="st-pin-confirm" placeholder="Confirm PIN" autocomplete="new-password">
+          <div class="settings-pin-err" id="st-pin-err"></div>
+          <button class="settings-pin-confirm-btn" onclick="saveNewPin()">Set PIN</button>
+        </div>
+        <div class="settings-row">
+          <label>Session duration
+            <small>Days before you need to log in again</small>
+          </label>
+          <input class="settings-input" type="number" id="st-SESSION_DAYS" min="1" max="365" step="1">
+        </div>
+      </div>
+
+      <!-- AI Timeouts -->
+      <div class="settings-section">
+        <div class="settings-section-title">AI &amp; Shell Timeouts</div>
+        <div class="settings-row">
+          <label>Idle timeout
+            <small>Seconds of silence before output is considered done</small>
+          </label>
+          <input class="settings-input" type="number" id="st-OUTPUT_IDLE_TIMEOUT" min="0.1" step="0.1">
+        </div>
+        <div class="settings-row">
+          <label>Max output wait
+            <small>Hard ceiling per command (seconds)</small>
+          </label>
+          <input class="settings-input" type="number" id="st-OUTPUT_MAX_WAIT" min="1" step="1">
+        </div>
+        <div class="settings-row">
+          <label>No-response timeout
+            <small>Treat as done if nothing prints within this many seconds</small>
+          </label>
+          <input class="settings-input" type="number" id="st-OUTPUT_NO_RESPONSE" min="1" step="1">
+        </div>
+        <div class="settings-row">
+          <label>Claude max wait
+            <small>0 = unlimited. Increase for long generation tasks</small>
+          </label>
+          <input class="settings-input" type="number" id="st-CLAUDE_TIMEOUT" min="0" step="1">
+        </div>
+      </div>
+
+      <!-- Default Models per AI -->
+      <div class="settings-section">
+        <div class="settings-section-title">Default Models
+          <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:9px">(auto-loaded when starting a new session)</span>
+        </div>
+        <div id="default-models-container" style="opacity:.5;font-size:11px;color:var(--muted);padding:8px 0">Loading…</div>
+      </div>
+
+      <!-- Server -->
+      <div class="settings-section" style="padding-bottom:14px">
+        <div class="settings-section-title">Server <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:9px">(restart required)</span></div>
+        <div class="settings-row">
+          <label>Port
+            <small>Default: 8000</small>
+          </label>
+          <input class="settings-input" type="number" id="st-WEB_PORT" min="1024" max="65535" step="1">
+        </div>
+        <div class="settings-row">
+          <label>Host
+            <small>127.0.0.1 = local only, 0.0.0.0 = network</small>
+          </label>
+          <input class="settings-input wide" type="text" id="st-WEB_HOST" placeholder="127.0.0.1">
+        </div>
+      </div>
+
+      <!-- Heartbeat / Soul System -->
+      <div class="settings-section">
+        <div class="settings-section-title">Heartbeat / Soul</div>
+        <div class="settings-row">
+          <label>Enabled
+            <small>Periodically scans chat history for pending tasks and pings you via Telegram</small>
+          </label>
+          <select class="settings-input" id="st-HEARTBEAT_ENABLED" style="width:auto">
+            <option value="1">On</option>
+            <option value="0">Off</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <label>Check-in Interval
+            <small>How often to scan for pending tasks</small>
+          </label>
+          <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
+            <input class="settings-input" type="number" id="st-HEARTBEAT_INTERVAL_VAL" min="1" max="9999" value="24" style="width:80px">
+            <select class="settings-input" id="st-HEARTBEAT_INTERVAL_UNIT" style="width:auto">
+              <option value="hours">hours</option>
+              <option value="minutes">minutes</option>
+            </select>
+          </div>
+        </div>
+        <div class="settings-row">
+          <label>AI for Summarization
+            <small>Which AI checks your pending items</small>
+          </label>
+          <select class="settings-input" id="st-HEARTBEAT_AI" style="width:auto">
+            <option value="claude">Claude</option>
+            <!-- dynamically populated from integrations -->
+          </select>
+        </div>
+      </div>
+
+      <!-- Budget Guardrails -->
+      <div class="settings-section">
+        <div class="settings-section-title">Budget Guardrails</div>
+        <div class="settings-row">
+          <label>Budget Enforcement
+            <small>Block AI calls when daily usage cap is exceeded</small>
+          </label>
+          <select class="settings-input" id="budget-enabled" style="width:auto">
+            <option value="1">On</option>
+            <option value="0">Off</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <label>Claude Daily Cap (minutes)
+            <small>Max active minutes per reset period. Leave blank for no limit.</small>
+          </label>
+          <input class="settings-input" id="budget-claude" type="number" min="0" placeholder="e.g. 300" style="width:100px">
+        </div>
+        <div class="settings-row">
+          <label>Gemini Daily Cap (minutes)</label>
+          <input class="settings-input" id="budget-gemini" type="number" min="0" placeholder="e.g. 300" style="width:100px">
+        </div>
+        <div class="settings-row">
+          <label>Codex Daily Cap (minutes)</label>
+          <input class="settings-input" id="budget-codex" type="number" min="0" placeholder="e.g. 300" style="width:100px">
+        </div>
+        <div class="settings-row">
+          <label>Ollama Daily Cap (minutes)
+            <small>Ollama is local — usually no cost, but you can limit time.</small>
+          </label>
+          <input class="settings-input" id="budget-ollama" type="number" min="0" placeholder="No limit" style="width:100px">
+        </div>
+        <div class="settings-row">
+          <label>Warning Threshold (%)
+            <small>Show a warning when usage reaches this % of the cap</small>
+          </label>
+          <input class="settings-input" id="budget-warn-pct" type="number" min="1" max="99" value="80" style="width:70px">
+        </div>
+        <div style="padding:8px 0">
+          <button class="settings-save-btn" onclick="saveBudget()" style="font-size:11px;padding:4px 12px">Save Budget</button>
+          <span id="budget-msg" style="font-size:11px;color:var(--accent);margin-left:8px"></span>
+        </div>
+      </div>
+
+      <!-- Error Recovery & Resilience -->
+      <div class="settings-section">
+        <div class="settings-section-title">Error Recovery & Resilience</div>
+        <div class="settings-row">
+          <label>Max Retries
+            <small>Number of attempts before switching to a fallback AI (1–10)</small>
+          </label>
+          <input class="settings-input" id="st-AI_MAX_RETRIES" type="number" min="1" max="10" value="3" style="width:70px">
+        </div>
+        <div class="settings-row">
+          <label>Auto-Switch AI
+            <small>Automatically switch to another available AI when the chosen one fails</small>
+          </label>
+          <select class="settings-input" id="st-AI_AUTO_SWITCH" style="width:auto">
+            <option value="1">On</option>
+            <option value="0">Off</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Task Pipeline -->
+      <div class="settings-section">
+        <div class="settings-section-title">Task Pipeline & AI Delegation</div>
+        <div class="settings-row">
+          <label>Planner AI
+            <small>Which AI decomposes tasks into subtasks</small>
+          </label>
+          <select class="settings-input" id="st-PIPELINE_PLANNER_AI" style="width:auto">
+            <option value="claude">Claude</option>
+            <option value="gemini">Gemini</option>
+            <option value="ollama">Ollama</option>
+            <option value="codex">Codex</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <label>Max Parallel Steps
+            <small>How many subtasks can run simultaneously (1–10)</small>
+          </label>
+          <input class="settings-input" id="st-PIPELINE_MAX_PARALLEL" type="number" min="1" max="10" value="3" style="width:70px">
+        </div>
+        <div class="settings-row">
+          <label>Auto-Suggest Pipelines
+            <small>Suggest pipeline decomposition for complex-looking tasks</small>
+          </label>
+          <select class="settings-input" id="st-PIPELINE_AUTO_SUGGEST" style="width:auto">
+            <option value="1">On</option>
+            <option value="0">Off</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <label>Context Threshold
+            <small>Summarize step output if longer than this many characters</small>
+          </label>
+          <input class="settings-input" id="st-PIPELINE_CONTEXT_THRESHOLD" type="number" min="500" max="10000" value="2000" style="width:90px">
+        </div>
+      </div>
+
+      <!-- AI Integrations -->
+      <div class="settings-section" style="padding-bottom:14px">
+        <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between">
+          <span>AI Integrations</span>
+          <div style="display:flex;gap:6px">
+            <button class="ai-int-rescan-btn" id="ai-int-rescan-btn" onclick="rescanIntegrations()">⟳ Re-scan</button>
+            <button class="ai-int-rescan-btn" onclick="debugCli('claude')" title="Show raw detection output for Claude">🔍 Debug</button>
+          </div>
+        </div>
+        <div class="ai-int-list" id="ai-int-list">
+          <div style="font-size:12px;color:var(--muted);padding:4px 0">Loading…</div>
+        </div>
+        <!-- Custom AI integrations -->
+        <div id="custom-ai-list" style="margin-top:8px"></div>
+        <details class="sb-add-form" style="margin-top:8px">
+          <summary style="cursor:pointer;font-size:11px;color:var(--claude)">+ Add Custom AI</summary>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;font-size:11px">
+            <div style="display:flex;gap:6px">
+              <input id="cai-key" placeholder="Key (e.g. mygpt)" style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px">
+              <input id="cai-name" placeholder="Display Name" style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px">
+            </div>
+            <div style="display:flex;gap:6px">
+              <input id="cai-emoji" placeholder="Emoji" value="🤖" style="width:50px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px;text-align:center">
+              <input id="cai-color" type="color" value="#8b5cf6" style="width:40px;height:28px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--surface2)">
+              <label style="display:flex;align-items:center;gap:4px;color:var(--muted);font-size:10px;white-space:nowrap"><input type="checkbox" id="cai-stdin"> Stdin prompt</label>
+            </div>
+            <input id="cai-cmd" placeholder="Command: mygpt --model {model} --prompt {prompt}" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px;font-family:monospace">
+            <input id="cai-envvars" placeholder="Env vars (comma-separated): MYGPT_API_KEY" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px">
+            <input id="cai-hint" placeholder="Setup hint: pip install mygpt-cli" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px">
+            <button class="sb-add-btn" onclick="addCustomAI()" style="font-size:11px">Add Integration</button>
+          </div>
+        </details>
+      </div>
+
+      <!-- Cloud Backup -->
+      <div class="settings-section">
+        <div class="settings-section-title">☁ Cloud Backup
+          <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:9px">(automatic database backups)</span>
+        </div>
+
+        <!-- OneDrive -->
+        <div class="bk-provider-card">
+          <div class="bk-provider-header">
+            <label class="bk-provider-label">
+              <input type="checkbox" id="bk-onedrive-enabled" onchange="toggleBackupProvider('onedrive')">
+              <span>📁 OneDrive</span>
+            </label>
+            <button class="settings-pin-btn" id="bk-onedrive-connect" onclick="connectBackupProvider('onedrive')">Connect</button>
+          </div>
+          <div id="bk-onedrive-fields" style="display:none" class="bk-provider-fields">
+            <div class="settings-row">
+              <label>Backup folder</label>
+              <input class="settings-input wide" type="text" id="bk-onedrive-folder" placeholder="/RAPR-Backups">
+            </div>
+            <div class="bk-status" id="bk-onedrive-status">No backups yet</div>
+          </div>
+        </div>
+
+        <!-- Google Drive -->
+        <div class="bk-provider-card">
+          <div class="bk-provider-header">
+            <label class="bk-provider-label">
+              <input type="checkbox" id="bk-gdrive-enabled" onchange="toggleBackupProvider('gdrive')">
+              <span>🔵 Google Drive</span>
+            </label>
+            <button class="settings-pin-btn" id="bk-gdrive-connect" onclick="connectBackupProvider('gdrive')">Connect</button>
+          </div>
+          <div id="bk-gdrive-fields" style="display:none" class="bk-provider-fields">
+            <div class="settings-row">
+              <label>Backup folder</label>
+              <input class="settings-input wide" type="text" id="bk-gdrive-folder" placeholder="RAPR-Backups">
+            </div>
+            <div class="bk-status" id="bk-gdrive-status">No backups yet</div>
+          </div>
+        </div>
+
+        <!-- Dropbox -->
+        <div class="bk-provider-card">
+          <div class="bk-provider-header">
+            <label class="bk-provider-label">
+              <input type="checkbox" id="bk-dropbox-enabled" onchange="toggleBackupProvider('dropbox')">
+              <span>📦 Dropbox</span>
+            </label>
+            <button class="settings-pin-btn" id="bk-dropbox-connect" onclick="connectBackupProvider('dropbox')">Connect</button>
+          </div>
+          <div id="bk-dropbox-fields" style="display:none" class="bk-provider-fields">
+            <div class="settings-row">
+              <label>Backup folder</label>
+              <input class="settings-input wide" type="text" id="bk-dropbox-folder" placeholder="/RAPR-Backups">
+            </div>
+            <div class="bk-status" id="bk-dropbox-status">No backups yet</div>
+          </div>
+        </div>
+
+        <!-- Local Folder -->
+        <div class="bk-provider-card">
+          <div class="bk-provider-header">
+            <label class="bk-provider-label">
+              <input type="checkbox" id="bk-local-enabled" onchange="toggleBackupProvider('local')">
+              <span>💾 Local Folder</span>
+            </label>
+          </div>
+          <div id="bk-local-fields" style="display:none" class="bk-provider-fields">
+            <div class="settings-row">
+              <label>Folder path</label>
+              <input class="settings-input wide" type="text" id="bk-local-folder" placeholder="C:\Backups\RAPR-AI">
+            </div>
+            <div class="bk-status" id="bk-local-status">No backups yet</div>
+          </div>
+        </div>
+
+        <!-- Schedule -->
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--surface2)">
+          <div class="settings-row">
+            <label>Frequency</label>
+            <select class="settings-input" id="bk-frequency">
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="manual">Manual only</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <label>Time (hour, 0-23)</label>
+            <input class="settings-input" type="number" id="bk-hour" min="0" max="23" value="2" style="width:60px">
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--surface2);display:flex;gap:8px;align-items:center">
+          <button class="settings-pin-btn" id="bk-now-btn" onclick="triggerBackupNow()" style="flex:1">Backup Now</button>
+          <button class="settings-pin-btn" onclick="saveBackupConfig()" style="flex:1">Save Backup Settings</button>
+          <span class="settings-msg" id="bk-save-msg" style="font-size:10px"></span>
+        </div>
+
+        <!-- Job history -->
+        <div id="bk-jobs-list" style="margin-top:12px;max-height:200px;overflow-y:auto">
+        </div>
+      </div>
+
+      <!-- Diagnostics -->
+      <div class="settings-section" style="padding-bottom:14px">
+        <div class="settings-section-title">Diagnostics &amp; Bug Reporting</div>
+        <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+          <label>Export a diagnostics bundle for troubleshooting
+            <small>Contains system info, session state, CLI versions. No secrets.</small>
+          </label>
+          <button class="settings-pin-btn" onclick="exportDiagnostics()" style="margin-top:2px">Export Diagnostics JSON</button>
+        </div>
+      </div>
+
+    </div><!-- /modal-body -->
+    <div class="settings-save-row">
+      <button class="settings-logout-btn" onclick="confirmLogout()">Log out</button>
+      <span class="settings-msg" id="st-msg"></span>
+      <button class="settings-save-btn" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="dir-bar">
+  <span class="dir-icon">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
+    </svg>
+  </span>
+  <span id="session-badge" class="session-badge" title="Focused session"></span>
+  <span id="cwd-display" title="Click to change directory" onclick="startCwdEdit()">—</span>
+  <input id="cwd-input" placeholder="Enter full path and press Enter..."
+         onkeydown="cwdKey(event)" onblur="cancelCwdEdit()">
+  <button class="dir-browse-btn" onclick="openBrowse()" title="Browse folders">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+    </svg>
+  </button>
+</div>
+
+<!-- Context Window Bar -->
+<div id="context-bar" class="context-bar hidden">
+  <span class="context-label">Context</span>
+  <div class="context-progress">
+    <div id="context-fill" class="context-progress-fill ok" style="width:0%"></div>
+  </div>
+  <span id="context-pct" class="context-pct ok">0%</span>
+  <button id="context-compact-btn" class="context-compact-btn" onclick="compactContext()" title="Summarise older messages to free context space">Compact</button>
+</div>
+
+<div id="hist-banner">
+  <span id="hist-banner-icon">📖</span>
+  <span id="hist-banner-date"></span>
+  <button class="hist-live-btn" onclick="returnToLive()">↩ Back to live</button>
+</div>
+
+<div id="messages">
+  <div id="chat-logo-bg" aria-hidden="true">
+    <img src="/static/logo.png" alt="">
+  </div>
+  <div class="grp system">
+    <div class="bubble">Connecting to server...</div>
+  </div>
+</div>
+<div id="thinking">
+  <div class="dots"><span></span><span></span><span></span></div>
+  <span id="thlabel">Thinking...</span>
+</div>
+
+<div class="input-bar">
+  <!-- AI picker chip -->
+  <div class="ai-picker" id="ai-picker" onclick="toggleAiMenu(event)">
+    <div class="dot" id="dot"></div>
+    <span id="ai-label">Shell</span>
+    <svg class="chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6 9l6 6 6-6"/>
+    </svg>
+  </div>
+
+  <!-- Sessions + AI dropdown menu — sessions injected dynamically by applyState(); integrations by loadIntegrations() -->
+  <div class="ai-menu" id="ai-menu">
+    <div class="ai-menu-section">Active Sessions</div>
+    <div id="ai-menu-sessions"><!-- filled by applyState() --></div>
+    <div class="ai-menu-divider"></div>
+    <div class="ai-menu-section">New Session</div>
+    <button id="claude-menu-btn" class="ai-menu-item" onclick="cmd('new_session:claude');closeAiMenu()">
+      <span class="menu-dot claude"></span>New: Claude Code</button>
+    <!-- integration "New: ..." buttons inserted here by loadIntegrations() -->
+    <button class="ai-menu-item" id="shell-mode-btn" onclick="cmd('new_session:');closeAiMenu()">
+      <span class="menu-dot shell"></span>New: Shell</button>
+    <div class="ai-menu-divider"></div>
+    <div class="ai-menu-section">Focused Session</div>
+    <button class="ai-menu-item" onclick="cmd('interrupt');closeAiMenu()">⏸ Cancel Task</button>
+    <button class="ai-menu-item" onclick="if(confirm('Delete this session?'))cmd('delete_session');closeAiMenu()">🗑️ Delete Session</button>
+    <button class="ai-menu-item" onclick="cmd('clear');closeAiMenu()">↺ Clear Chat</button>
+  </div>
+
+  <textarea id="inp" placeholder="Type a message...  (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
+  <input type="file" id="file-input" style="display:none" onchange="handleFileUpload(this)" multiple>
+  <button id="clip-btn" onclick="document.getElementById('file-input').click()" title="Attach a file">📎</button>
+  <button id="mic-btn" onclick="toggleVoiceRec()" title="Hold to record voice message">🎙️</button>
+  <button id="send" onclick="send()">Send</button>
+</div>
+
+<!-- History modal -->
+<div class="modal-overlay" id="hist-modal" onclick="if(event.target===this)closeHistory()">
+  <div class="modal-box" style="width:min(540px,94vw)">
+    <div class="modal-header">
+      <span class="modal-title">Session History</span>
+      <button class="modal-close" onclick="closeHistory()">✖</button>
+    </div>
+    <div class="hist-search">
+      <input id="hist-search-inp" placeholder="Search sessions..." oninput="filterHistory(this.value)" autocomplete="off">
+    </div>
+    <div class="modal-body" id="hist-list"></div>
+  </div>
+</div>
+
+<!-- Browse directory modal -->
+<div class="modal-overlay" id="browse-modal" onclick="closeBrowse(event)">
+  <div class="modal-box browse-box">
+    <div class="modal-header">
+      <span class="modal-title">Browse Directory</span>
+      <button class="modal-close" onclick="closeBrowseModal()">✖</button>
+    </div>
+    <div id="browse-crumb" class="browse-crumb"></div>
+    <div class="modal-body" id="browse-list"></div>
+    <div class="browse-footer">
+      <button class="sess-action-btn" onclick="closeBrowseModal()">Cancel</button>
+      <button class="sess-action-btn resume" onclick="selectBrowsePath()">✓ Select This Folder</button>
+    </div>
+  </div>
+</div>
+
+</div><!-- /center-panel -->
+
+<!-- --- Pipeline Approval Modal --- -->
+<div id="pipeline-modal" class="modal-overlay" onclick="if(event.target===this)closePipelineModal()" style="display:none">
+  <div class="modal-box" style="width:min(640px,95vw);max-height:85vh">
+    <div class="modal-header">
+      <span class="modal-title">📋 Pipeline Plan</span>
+      <button class="modal-close" onclick="closePipelineModal()">✖</button>
+    </div>
+    <div id="pipeline-modal-prompt" style="padding:10px 18px;font-size:11px;color:var(--dim);border-bottom:1px solid var(--border);max-height:60px;overflow:hidden"></div>
+    <div class="modal-body" id="pipeline-modal-steps" style="padding:10px 18px"></div>
+    <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+      <button class="sess-action-btn" onclick="closePipelineModal()">Cancel</button>
+      <button class="sess-action-btn resume" id="pipeline-approve-btn" onclick="approvePipeline()">▶ Execute Pipeline</button>
+    </div>
+  </div>
+</div>
+
+<!-- --- Resize handle: center ↔ right sidebar --- -->
+<div class="resize-handle" id="resize-right" title="Drag to resize"></div>
+
+<!-- --- Right Sidebar: Session Dashboard --- -->
+<div id="right-sidebar">
+  <div class="rs-header">
+    <span>Active Sessions</span>
+    <span id="rs-count" style="font-size:10px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0"></span>
+  </div>
+  <div class="rs-list" id="rs-list">
+    <div class="rs-empty">No sessions yet</div>
+  </div>
+  <button class="rs-new-btn" onclick="toggleAiMenu(event)">+ New Session</button>
+</div>
+
+</div><!-- /app -->
+<script src="/js/complete.js"></script>
+<script src="/js/packages.js"></script>
+<script src="/js/memory.js"></script>
+<script src="/js/custom_ai.js"></script>
+<script src="/js/backup.js"></script>
+</body>
+</html>
