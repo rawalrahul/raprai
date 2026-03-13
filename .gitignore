@@ -22,6 +22,9 @@ credentials.json
 web_app.build/
 web_app.dist/
 
+# Inno Setup installer output
+installer_output/
+
 # Database — user-specific data
 helmhq.db
 helmhq.db-shm

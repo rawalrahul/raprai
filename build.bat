@@ -45,10 +45,40 @@ copy /Y README_DIST.md web_app.dist\ >nul 2>&1
 
 echo.
 echo  ╔══════════════════════════════════════════════╗
-echo  ║            Build complete!                   ║
+echo  ║         Nuitka build complete!               ║
 echo  ╚══════════════════════════════════════════════╝
 echo.
-echo  Output: web_app.dist\
-echo  Test:   cd web_app.dist ^& web_app.exe
+
+:: ── Inno Setup installer (optional) ──────────────────────────────────────
+set "ISCC=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+if exist "%ISCC%" (
+    echo  Inno Setup found — building installer...
+    echo.
+    "%ISCC%" installer.iss
+    if errorlevel 1 (
+        echo.
+        echo  WARNING: Installer build failed. Check errors above.
+        echo  The dist folder is still usable — just no .exe installer.
+    ) else (
+        echo.
+        echo  Installer created: installer_output\RAPR_AI_Setup_1.0.0.exe
+    )
+) else (
+    echo  Inno Setup not found — skipping installer creation.
+    echo  Install from: https://jrsoftware.org/isinfo.php
+    echo  Then rerun build.bat to generate the installer.
+)
+
 echo.
+echo  ╔══════════════════════════════════════════════╗
+echo  ║            All done!                         ║
+echo  ╚══════════════════════════════════════════════╝
+echo.
+echo  Dist folder:  web_app.dist\
+echo  Test:         cd web_app.dist ^& web_app.exe
+echo.
+if exist installer_output\RAPR_AI_Setup_1.0.0.exe (
+    echo  Installer:    installer_output\RAPR_AI_Setup_1.0.0.exe
+    echo.
+)
 pause

@@ -1,0 +1,102 @@
+; ═══════════════════════════════════════════════════════════════════════════════
+; RAPR AI — Inno Setup Installer Script
+;
+; Prerequisites:
+;   1. Run build.bat first to produce web_app.dist\
+;   2. Install Inno Setup 6: https://jrsoftware.org/isinfo.php
+;   3. Open this file in Inno Setup Compiler and click Build → Compile
+;      OR run from command line:
+;        "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+;
+; The installer will:
+;   - Copy everything from web_app.dist\ into Program Files
+;   - Create a Start Menu shortcut
+;   - Create a Desktop shortcut (optional)
+;   - Register an uninstaller
+;   - Optionally run setup_dist.bat after install (installs Node.js etc.)
+; ═══════════════════════════════════════════════════════════════════════════════
+
+#define MyAppName "RAPR AI"
+#define MyAppVersion "1.0.0"
+#define MyAppPublisher "RAPR AI"
+#define MyAppURL "https://rapr.ai"
+#define MyAppExeName "web_app.exe"
+#define MyAppIcon "logo.png"
+
+[Setup]
+; Unique AppId — DO NOT change this between versions (used for upgrades)
+AppId={{8F3A6D2E-4B71-4C9A-B8E2-1D5F7A3C9E0B}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+AppSupportURL={#MyAppURL}
+DefaultDirName={autopf}\{#MyAppName}
+DefaultGroupName={#MyAppName}
+; Allow user to choose desktop shortcut
+AllowNoIcons=yes
+; Output location and filename for the generated installer .exe
+OutputDir=installer_output
+OutputBaseFilename=RAPR_AI_Setup_{#MyAppVersion}
+; Use the app logo as the installer icon (converted to .ico at build time)
+; If you have a .ico file, replace this line:
+; SetupIconFile=logo.ico
+Compression=lzma2/ultra64
+SolidCompression=yes
+; Require Windows 10+
+MinVersion=10.0
+; Run as admin to install to Program Files
+PrivilegesRequired=admin
+; Nice modern look
+WizardStyle=modern
+; Uninstall settings
+UninstallDisplayName={#MyAppName}
+; Show a license/readme page during install
+LicenseFile=
+InfoBeforeFile=README_DIST.md
+; Allow upgrading over existing installation
+UsePreviousAppDir=yes
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "rundeps"; Description: "Run dependency setup after install (Node.js, Pandoc, etc.)"; GroupDescription: "Post-install:"; Flags: checkedonce
+
+[Files]
+; Include EVERYTHING from the Nuitka dist folder
+Source: "web_app.dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; NOTE: web_app.dist\ must exist before compiling this script.
+;       Run build.bat first!
+
+[Icons]
+; Start Menu shortcut
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Comment: "Launch RAPR AI"
+; Start Menu — open install folder
+Name: "{group}\RAPR AI Folder"; Filename: "{app}"; Comment: "Open RAPR AI installation folder"
+; Start Menu — uninstall
+Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
+; Desktop shortcut (optional)
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon; Comment: "Launch RAPR AI"
+
+[Run]
+; Run setup_dist.bat after install (if user checked the option)
+Filename: "{app}\setup_dist.bat"; Description: "Install external dependencies (Node.js, Pandoc, etc.)"; Flags: nowait postinstall skipifsilent shellexec; Tasks: rundeps
+; Offer to launch the app after install
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName} now"; Flags: nowait postinstall skipifsilent unchecked; WorkingDir: "{app}"
+
+[UninstallDelete]
+; Clean up runtime files that RAPR AI creates (not part of the install)
+Type: files; Name: "{app}\.env"
+Type: files; Name: "{app}\.vault_key"
+Type: files; Name: "{app}\helmhq.db"
+Type: files; Name: "{app}\helmhq.db-shm"
+Type: files; Name: "{app}\helmhq.db-wal"
+Type: files; Name: "{app}\.heartbeat_last"
+Type: filesandordirs; Name: "{app}\chat_logs"
+Type: filesandordirs; Name: "{app}\logs"
+Type: filesandordirs; Name: "{app}\helmpack_cache"
+Type: filesandordirs; Name: "{app}\packages_cache"
+Type: dirifempty; Name: "{app}"
+
