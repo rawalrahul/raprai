@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>RAPR AI</title>
 <link rel="icon" href="/static/logo.png" type="image/png">
+<!-- PWA support -->
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#1A1A2E">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="RAPR AI">
+<link rel="apple-touch-icon" href="/static/logo.png">
+<meta name="description" content="RAPR AI — Your AI Control Center">
 <link rel="stylesheet" href="/css/design-system.css">
 <link rel="stylesheet" href="/css/original.css">
 <link rel="stylesheet" href="/css/premium.css">
@@ -895,5 +903,15 @@
 <script src="/js/memory.js"></script>
 <script src="/js/custom_ai.js"></script>
 <script src="/js/backup.js"></script>
+<script>
+// Register PWA service worker
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').then(function(reg) {
+    console.log('RAPR AI service worker registered:', reg.scope);
+  }).catch(function(err) {
+    console.log('SW registration skipped:', err.message);
+  });
+}
+</script>
 </body>
 </html>

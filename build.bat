@@ -35,6 +35,8 @@ python -m nuitka --standalone --enable-plugin=tk-inter ^
     --include-package=openpyxl ^
     --include-package=reportlab ^
     --include-package=pypdf ^
+    --include-package=pystray ^
+    --include-package=PIL ^
     web_app.py
 
 if errorlevel 1 (

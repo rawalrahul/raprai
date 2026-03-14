@@ -6,6 +6,10 @@ Run with:  python web_app.py
 """
 
 import asyncio
+import os
+import shutil
+import subprocess
+import sys
 import webbrowser
 
 import uvicorn
@@ -359,9 +363,39 @@ async def _main():
     url = f"http://{'localhost' if WEB_HOST in ('0.0.0.0', '127.0.0.1') else WEB_HOST}:{actual_port}"
     logger.info("Starting web UI at %s", url)
 
+    # --- System tray icon + hide console (Windows) ---
+    try:
+        from helm.tray import hide_console, start_tray, stop_tray
+        hide_console()
+        start_tray(actual_port, shutdown_callback=lambda: os._exit(0))
+    except Exception as exc:
+        logger.info("Tray icon not available: %s (console will remain visible)", exc)
+
     async def _open_browser():
         await asyncio.sleep(1.2)
-        webbrowser.open(url)
+        # Try to open in Chrome/Edge "app mode" (standalone window, no tabs/address bar)
+        # This gives the PWA-like experience without requiring a manual install
+        opened = False
+        if sys.platform == "win32":
+            for browser_path in [
+                shutil.which("chrome"),
+                os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+                os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+                os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+                shutil.which("msedge"),
+                os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
+                os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
+            ]:
+                if browser_path and os.path.isfile(browser_path):
+                    try:
+                        subprocess.Popen([browser_path, f"--app={url}"])
+                        opened = True
+                        logger.info("Opened in app mode via %s", browser_path)
+                        break
+                    except Exception as exc:
+                        logger.debug("Could not launch %s: %s", browser_path, exc)
+        if not opened:
+            webbrowser.open(url)
 
     # Load persisted scheduled tasks and start the cron runner
     load_scheduled_tasks()

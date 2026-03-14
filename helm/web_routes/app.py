@@ -37,7 +37,7 @@ app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 # ---------------------------------------------------------------------------
 
 # Paths that are always public (no PIN required)
-_PUBLIC_PREFIXES = ("/login", "/setup", "/static", "/health")
+_PUBLIC_PREFIXES = ("/login", "/setup", "/static", "/health", "/manifest.json", "/sw.js")
 
 # MCP endpoints are NOT fully public — they require localhost origin
 # and a bearer token that's auto-generated at startup.
@@ -343,6 +343,24 @@ if _USE_SEPARATED_FRONTEND:
         sub_dir = _FRONTEND_DIR / sub
         if sub_dir.exists():
             app.mount(f"/{sub}", StaticFiles(directory=str(sub_dir)), name=f"frontend-{sub}")
+
+    # Serve PWA manifest.json and service worker from frontend root
+    from fastapi.responses import FileResponse
+
+    @app.get("/manifest.json")
+    async def pwa_manifest():
+        mf = _FRONTEND_DIR / "manifest.json"
+        if mf.exists():
+            return FileResponse(str(mf), media_type="application/manifest+json")
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    @app.get("/sw.js")
+    async def pwa_service_worker():
+        sw = _FRONTEND_DIR / "sw.js"
+        if sw.exists():
+            return FileResponse(str(sw), media_type="application/javascript",
+                                headers={"Service-Worker-Allowed": "/"})
+        return JSONResponse({"error": "not found"}, status_code=404)
 
 
 # ---------------------------------------------------------------------------
