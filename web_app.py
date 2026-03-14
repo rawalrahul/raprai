@@ -344,6 +344,8 @@ async def _main():
     # --- Resolve port conflicts ---
     from helm.resilience import find_free_port
     actual_port = find_free_port(WEB_HOST, WEB_PORT)
+    # Store actual port so OAuth callbacks use the right port
+    os.environ["WEB_PORT"] = str(actual_port)
 
     # --- Build uvicorn server ---
     config = uvicorn.Config(

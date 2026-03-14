@@ -17,13 +17,25 @@ if exist web_app.build (
     echo  Removing old build cache...
     rmdir /s /q web_app.build
 )
+if exist installer_output (
+    echo  Removing old installer...
+    rmdir /s /q installer_output
+)
 
 echo.
 echo  Starting Nuitka compilation...
 echo  (This may take 10-20 minutes)
 echo.
 
-python -m nuitka --standalone --enable-plugin=tk-inter --include-data-dir=helm/frontend=helm/frontend --include-data-files=logo.png=logo.png web_app.py
+python -m nuitka --standalone --enable-plugin=tk-inter ^
+    --include-data-dir=helm/frontend=helm/frontend ^
+    --include-data-files=logo.png=logo.png ^
+    --include-package=pptx ^
+    --include-package=docx ^
+    --include-package=openpyxl ^
+    --include-package=reportlab ^
+    --include-package=pypdf ^
+    web_app.py
 
 if errorlevel 1 (
     echo.
@@ -38,6 +50,22 @@ echo  Copying additional files into dist...
 :: Copy integrations (dynamically loaded .py files)
 xcopy /E /I /Q integrations web_app.dist\integrations
 if errorlevel 1 echo  WARNING: Could not copy integrations folder.
+
+:: Copy plugins (manifest.json + instructions.md per plugin)
+xcopy /E /I /Q helm\plugins web_app.dist\helm\plugins
+if errorlevel 1 echo  WARNING: Could not copy plugins folder.
+
+:: Copy frontend2 (separated frontend served at runtime)
+if exist frontend2 (
+    xcopy /E /I /Q frontend2 web_app.dist\frontend2
+    if errorlevel 1 echo  WARNING: Could not copy frontend2 folder.
+)
+
+:: Copy MCP server configuration
+if exist mcp_servers.json (
+    copy /Y mcp_servers.json web_app.dist\ >nul
+    echo  Copied mcp_servers.json
+)
 
 :: Copy setup and readme for end users
 copy /Y setup_dist.bat web_app.dist\ >nul 2>&1

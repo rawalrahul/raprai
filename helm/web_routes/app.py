@@ -51,7 +51,7 @@ if not MCP_BEARER_TOKEN:
     MCP_BEARER_TOKEN = secrets.token_urlsafe(32)
     _MCP_TOKEN_IS_NEW = True
 os.environ["MCP_BEARER_TOKEN"] = MCP_BEARER_TOKEN
-logger.info("MCP bearer token: %s", MCP_BEARER_TOKEN)
+logger.info("MCP bearer token: %s…%s", MCP_BEARER_TOKEN[:4], MCP_BEARER_TOKEN[-4:])
 
 
 def _is_localhost(request: Request) -> bool:

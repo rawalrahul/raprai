@@ -27,7 +27,7 @@ from helm.config import logger
 # ---------------------------------------------------------------------------
 
 # Default catalog URL — override with RAPR_CATALOG_URL env var
-_DEFAULT_CATALOG_URL = "https://rapr.ai/marketplace/catalog.json"
+_DEFAULT_CATALOG_URL = "https://rapr-ai-website.vercel.app/marketplace/catalog.json"
 
 _CACHE_TTL = 3600  # 1 hour
 
@@ -110,7 +110,7 @@ def _fetch_remote_catalog() -> list[dict]:
 
         if isinstance(data, dict):
             _cached_full_response = data
-            return data.get("packages", [])
+            return data.get("packages", data.get("items", []))
         if isinstance(data, list):
             _cached_full_response = {"packages": data}
             return data

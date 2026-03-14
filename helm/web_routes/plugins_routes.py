@@ -23,7 +23,7 @@ from helm.config import logger
 from helm.plugins import list_plugins, set_plugin_enabled, _registry
 from helm.plugin_oauth import (
     start_oauth, start_oauth_provider, handle_callback,
-    check_connected, disconnect,
+    handle_token_direct, check_connected, disconnect,
 )
 
 router = APIRouter()
@@ -66,10 +66,27 @@ async def toggle_plugin(plugin_id: str, request: Request):
 
 @router.get("/plugins/{plugin_id}/connect")
 async def connect_page(plugin_id: str):
-    """Show a connect page where users paste their token/API key."""
+    """Show a connect page where users paste their token/API key.
+
+    For OAuth2 plugins with a client_id available (embedded or env var),
+    auto-redirect to the OAuth flow instead of showing the token-paste page.
+    """
     info = _registry.get(plugin_id.lower())
     if not info:
         return JSONResponse({"error": f"Plugin '{plugin_id}' not found"}, status_code=404)
+
+    # Auto-redirect OAuth2 plugins that have a client_id ready
+    auth = info.get("auth", {})
+    if auth.get("type") == "oauth2":
+        # Check if client_id is available (embedded or env var)
+        client_id = auth.get("client_id", "")
+        if not client_id:
+            client_id_env = auth.get("env_client_id", "")
+            client_id = os.environ.get(client_id_env, "") if client_id_env else ""
+        if client_id:
+            # Client ID available — redirect straight to OAuth flow
+            return RedirectResponse(url=f"/plugins/{plugin_id}/oauth/start")
+
     return HTMLResponse(_connect_page(info))
 
 
@@ -229,11 +246,27 @@ async def oauth_start_provider(plugin_id: str, provider: str):
 
 
 @router.get("/plugins/oauth/callback")
-async def oauth_callback(code: str = "", state: str = "", error: str = ""):
-    """OAuth callback — exchanges code for token and shows success/failure page."""
+async def oauth_callback(
+    code: str = "", state: str = "", error: str = "",
+    token: str = "", refresh_token: str = "",
+):
+    """OAuth callback — handles both:
+    1. code + state: local token exchange (app exchanges code for token)
+    2. token + state: proxy-exchanged token (proxy already did the exchange)
+    """
     if error:
         return HTMLResponse(_callback_page(False, f"Authorization denied: {error}"))
 
+    # Proxy-exchanged token: proxy already exchanged the code for a token
+    if token and state:
+        result = handle_token_direct(token, state, refresh_token)
+        if "error" in result:
+            return HTMLResponse(_callback_page(False, result["error"]))
+        plugin_id = result.get("plugin_id", "")
+        set_plugin_enabled(plugin_id, True)
+        return HTMLResponse(_callback_page(True, f"Successfully connected! Plugin '{plugin_id}' is now enabled."))
+
+    # Local exchange: app exchanges code for token
     if not code or not state:
         return HTMLResponse(_callback_page(False, "Missing code or state parameter"))
 

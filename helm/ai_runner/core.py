@@ -247,10 +247,12 @@ def _ensure_doc_packages():
         except Exception:
             logger.warning("Could not pre-install %s — skills may install it on demand", pkg)
 
-try:
-    _ensure_doc_packages()
-except Exception:
-    pass
+from helm.paths import is_bundled as _is_bundled
+if not _is_bundled():
+    try:
+        _ensure_doc_packages()
+    except Exception:
+        pass
 
 
 def run_ai_popen(cmd: list[str], cwd: str, name: str, sess: dict,

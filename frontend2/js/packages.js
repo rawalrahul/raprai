@@ -265,6 +265,8 @@ function _renderInstalledCard(item){
         <div class="plg-body-desc">${escHtml(p.description)}</div>
         <div class="plg-body-meta">
           <span class="plugin-cat">${escHtml(p.category||'general')}</span>
+          ${connectable && connected ? `<button class="plg-disconnect-btn" onclick="event.stopPropagation();disconnectPlugin('${id}')" title="Disconnect">Disconnect</button>` : ''}
+          ${connectable && !connected ? `<button class="plg-reconnect-btn" onclick="event.stopPropagation();connectPlugin('${id}')" title="Connect">Connect</button>` : ''}
         </div>
       </div>
     </div>`;

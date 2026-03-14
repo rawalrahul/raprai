@@ -1264,6 +1264,41 @@ header {
   color: #fff;
 }
 
+.plg-disconnect-btn {
+  font-size: 9px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid #ef4444;
+  background: transparent;
+  color: #ef4444;
+  cursor: pointer;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.15s;
+  margin-left: auto;
+}
+.plg-disconnect-btn:hover {
+  background: #ef4444;
+  color: #fff;
+}
+.plg-reconnect-btn {
+  font-size: 9px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-primary);
+  background: transparent;
+  color: var(--color-primary);
+  cursor: pointer;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.15s;
+  margin-left: auto;
+}
+.plg-reconnect-btn:hover {
+  background: var(--color-primary);
+  color: #fff;
+}
+
 /* RAPR Package cards */
 .rp-toolbar input {
   border-radius: var(--radius-md);

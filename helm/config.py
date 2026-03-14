@@ -31,6 +31,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("helm")
 
+# Suppress httpx INFO logs (they leak Telegram bot tokens in URLs)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 # ---------------------------------------------------------------------------
 # Telegram / auth
 # ---------------------------------------------------------------------------

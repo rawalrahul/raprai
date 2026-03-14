@@ -102,13 +102,29 @@ def _cleanup_stale_flows():
         pass
 
 
-def get_callback_url() -> str:
-    """Build the OAuth callback URL based on configured host/port."""
+OAUTH_PROXY_URL = os.environ.get(
+    "OAUTH_PROXY_URL", "https://rapr-oauth-proxy.raprai.workers.dev"
+)
+
+
+def get_local_callback_url() -> str:
+    """Build the LOCAL OAuth callback URL (where the proxy redirects back to)."""
     host = os.environ.get("WEB_HOST", "0.0.0.0")
     port = os.environ.get("WEB_PORT", "3456")
-    # For OAuth callbacks, use localhost (provider redirects to user's browser)
     display_host = "127.0.0.1" if host == "0.0.0.0" else host
     return f"http://{display_host}:{port}/plugins/oauth/callback"
+
+
+def get_callback_url() -> str:
+    """Build the OAuth callback URL.
+
+    If the proxy is configured, returns the proxy's /callback URL
+    (so providers redirect to the public proxy, not localhost).
+    Otherwise falls back to the local URL.
+    """
+    if OAUTH_PROXY_URL:
+        return f"{OAUTH_PROXY_URL}/callback"
+    return get_local_callback_url()
 
 
 def generate_pkce_pair() -> tuple[str, str]:
@@ -140,12 +156,16 @@ def start_oauth(plugin_info: dict) -> dict:
         return {"error": "No authorize_url configured"}
 
     plugin_id = plugin_info.get("id", "")
+
+    # Resolve client_id: embedded in manifest first, then env var fallback
+    client_id = auth.get("client_id", "")
     client_id_env = auth.get("env_client_id", "")
-    client_id = os.environ.get(client_id_env, "")
+    if not client_id and client_id_env:
+        client_id = os.environ.get(client_id_env, "")
 
     if not client_id:
         return {
-            "error": f"Missing {client_id_env} in .env.",
+            "error": f"No client_id configured for {plugin_id}.",
             "needs_setup": True,
             "plugin_id": plugin_id,
             "plugin_name": plugin_info.get("name", plugin_id),
@@ -157,34 +177,25 @@ def start_oauth(plugin_info: dict) -> dict:
             "callback_url": get_callback_url(),
         }
 
+    # Whether proxy should handle token exchange (secret stored on proxy)
+    proxy_exchange = auth.get("proxy_exchange", False) and OAUTH_PROXY_URL
+
     # Generate state token
     state = secrets.token_urlsafe(32)
 
-    # Build params
-    params = {
-        "client_id": client_id,
-        "redirect_uri": get_callback_url(),
-        "state": state,
-        "response_type": "code",
-    }
-
-    # Add scopes
+    # Scopes
     scopes = auth.get("scopes", "")
-    if scopes:
-        params["scope"] = scopes
 
     # PKCE support
-    flow_data = {"plugin_id": plugin_id, "auth": auth}
+    flow_data = {"plugin_id": plugin_id, "auth": auth, "proxy_exchange": bool(proxy_exchange)}
+    pkce_challenge = ""
     if auth.get("pkce"):
         verifier, challenge = generate_pkce_pair()
-        params["code_challenge"] = challenge
-        params["code_challenge_method"] = "S256"
+        pkce_challenge = challenge
         flow_data["code_verifier"] = verifier
 
     # Extra params (e.g., Google's access_type=offline)
     extra = auth.get("extra_params", {})
-    if extra:
-        params.update(extra)
 
     # Store pending flow (memory + DB)
     flow_data["_created_at"] = time.time()
@@ -192,7 +203,49 @@ def start_oauth(plugin_info: dict) -> dict:
     _persist_flow(state, flow_data)
     _cleanup_stale_flows()
 
-    url = f"{authorize_url}?{urlencode(params)}"
+    # If proxy is configured, redirect through the proxy
+    if OAUTH_PROXY_URL:
+        host = os.environ.get("WEB_HOST", "0.0.0.0")
+        port = os.environ.get("WEB_PORT", "8000")
+        display_host = "127.0.0.1" if host == "0.0.0.0" else host
+        return_host = f"{display_host}:{port}"
+
+        proxy_params = {
+            "authorize_url": authorize_url,
+            "client_id": client_id,
+            "state": state,
+            "return_host": return_host,
+        }
+        if scopes:
+            proxy_params["scopes"] = scopes
+        if pkce_challenge:
+            proxy_params["pkce_challenge"] = pkce_challenge
+        if extra:
+            proxy_params["extra_params"] = json.dumps(extra)
+        # If proxy handles token exchange, pass token_url and provider id
+        if proxy_exchange:
+            proxy_params["proxy_exchange"] = "1"
+            proxy_params["token_url"] = auth.get("token_url", "")
+            proxy_params["provider"] = plugin_id
+
+        url = f"{OAUTH_PROXY_URL}/authorize?{urlencode(proxy_params)}"
+    else:
+        # Direct flow (no proxy) — fallback for local dev
+        params = {
+            "client_id": client_id,
+            "redirect_uri": get_local_callback_url(),
+            "state": state,
+            "response_type": "code",
+        }
+        if scopes:
+            params["scope"] = scopes
+        if pkce_challenge:
+            params["code_challenge"] = pkce_challenge
+            params["code_challenge_method"] = "S256"
+        if extra:
+            params.update(extra)
+        url = f"{authorize_url}?{urlencode(params)}"
+
     logger.info("OAuth: starting flow for %s (state=%s...)", plugin_id, state[:8])
     return {"authorize_url": url, "state": state}
 
@@ -219,8 +272,44 @@ def start_oauth_provider(plugin_info: dict, provider_key: str) -> dict:
     return start_oauth(synth)
 
 
+def handle_token_direct(access_token: str, state: str, refresh_token: str = "") -> dict:
+    """Handle a token received directly from the proxy (proxy did the exchange).
+
+    Returns: {"ok": True, "plugin_id": "...", "connected": True}
+    """
+    flow = _pop_flow(state)
+    if not flow:
+        return {"error": "Invalid or expired state. Please try connecting again."}
+
+    plugin_id = flow["plugin_id"]
+    auth = flow["auth"]
+
+    if not access_token:
+        return {"error": "No access token received from proxy"}
+
+    # Store token in encrypted vault
+    token_env = auth.get("token_env", "")
+    if token_env:
+        from helm.token_vault import store_token
+        from helm.web_routes.app import update_env
+        store_token(token_env, access_token)
+        update_env(token_env, "vault-managed")
+        logger.info("OAuth: stored proxy-exchanged token for %s in vault (%s)", plugin_id, token_env)
+
+    # Store refresh token if present
+    refresh_env = auth.get("refresh_token_env", "")
+    if refresh_token and refresh_env:
+        from helm.token_vault import store_token as _store
+        from helm.web_routes.app import update_env as _update
+        _store(refresh_env, refresh_token)
+        _update(refresh_env, "vault-managed")
+        logger.info("OAuth: stored proxy-exchanged refresh token for %s in vault (%s)", plugin_id, refresh_env)
+
+    return {"ok": True, "plugin_id": plugin_id, "connected": True}
+
+
 def handle_callback(code: str, state: str) -> dict:
-    """Exchange authorization code for access token.
+    """Exchange authorization code for access token (local exchange).
 
     Returns: {"ok": True, "plugin_id": "...", "connected": True}
     """
@@ -232,13 +321,19 @@ def handle_callback(code: str, state: str) -> dict:
     auth = flow["auth"]
 
     token_url = auth.get("token_url", "")
+
+    # Resolve client_id: embedded first, then env var
+    client_id = auth.get("client_id", "")
     client_id_env = auth.get("env_client_id", "")
+    if not client_id and client_id_env:
+        client_id = os.environ.get(client_id_env, "")
+
     client_secret_env = auth.get("env_client_secret", "")
-    client_id = os.environ.get(client_id_env, "")
-    client_secret = os.environ.get(client_secret_env, "")
+    client_secret = os.environ.get(client_secret_env, "") if client_secret_env else ""
 
     if not client_id or not client_secret:
-        return {"error": f"Missing {client_id_env} or {client_secret_env} in .env"}
+        return {"error": f"Missing client credentials for {plugin_id}. "
+                f"If using proxy exchange, ensure the proxy handled the token exchange."}
 
     # Build token request
     token_data = {
