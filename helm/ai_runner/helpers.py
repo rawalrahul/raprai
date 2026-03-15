@@ -59,7 +59,8 @@ async def tg_update_focus():
 _tg_update_focus = tg_update_focus  # legacy alias
 
 
-async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: str) -> None:
+async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: str,
+                             prompt_text: str = "") -> None:
     """Send a compact Telegram ping when a session finishes a task."""
     if not (_st.telegram_app and _st.telegram_chat_id):
         return
@@ -70,6 +71,16 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
 
     if not multi and not web_src:
         return  # single session via Telegram — reply already serves as notification
+
+    # For web-sourced messages: forward the user's input first
+    if web_src and prompt_text:
+        try:
+            await _st.telegram_app.bot.send_message(
+                chat_id=_st.telegram_chat_id,
+                text=f"🖥️ You (web): {prompt_text}",
+            )
+        except Exception:
+            pass
 
     # Format elapsed time
     if elapsed < 60:

@@ -89,10 +89,8 @@ async def ws_endpoint(websocket: WebSocket):
                     _sid: str = _dispatch_sid,
                 ) -> None:
                     response = await process_message(_text, source="web", session_id=_sid)
-                    await forward_to_telegram(f"🖥️ You (web): {_text}")
-                    for chunk in [response[i:i+3800]
-                                  for i in range(0, len(response), 3800)]:
-                        await forward_to_telegram(chunk)
+                    # Telegram notification is handled by tg_progress_notify()
+                    # inside process_message — no need to forward again here.
 
                 asyncio.create_task(_fire_and_forward())
 

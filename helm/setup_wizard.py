@@ -138,17 +138,17 @@ html,body{height:100%;background:var(--bg);color:var(--text);
       <div class="step-title">Gemini <span class="free-tag">FREE</span> <span style="color:var(--muted);font-size:12px;font-weight:400">(optional)</span></div>
       <div class="step-desc">
         <strong style="color:var(--text)">Google Gemini CLI</strong> is a free AI backend for RAPR AI.
-        No paid subscription required — just a free API key from Google AI Studio.
+        No paid subscription required — just install the CLI and sign in with your Gmail account.
         You can skip this if you're using Claude or another AI instead.
       </div>
 
       <div id="gemini-badge" class="status-badge checking">⟳ Checking...</div>
       <div id="gemini-details"></div>
 
-      <div class="field">
-        <label>GEMINI_API_KEY</label>
+      <div class="field" id="gemini-key-field" style="display:none">
+        <label>GEMINI_API_KEY <span style="color:var(--muted);font-size:11px">(optional fallback)</span></label>
         <input id="gemini-key-0" type="password" placeholder="AIzaSy..." autocomplete="off">
-        <small>Get a free key at <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com/app/apikey</a></small>
+        <small>Only needed if you can't use Gemini CLI. Get a key at <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com/app/apikey</a></small>
       </div>
       <div id="gemini-msg"></div>
 
@@ -321,14 +321,18 @@ async function checkGemini() {
     _geminiStatus = {ready: false, cli_installed: false, api_key_set: false};
   }
 
+  const keyField = document.getElementById('gemini-key-field');
   if (_geminiStatus.cli_installed) {
     // CLI present = ready; API key is optional (CLI handles its own auth)
     badge.className   = 'status-badge ok';
     badge.textContent = '✓ Gemini CLI ready';
+    keyField.style.display = 'none';
     _saved.gemini = true;
   } else {
     badge.className   = 'status-badge err';
     badge.textContent = '✗ Gemini CLI not found';
+    // Show API key field as fallback only when CLI is missing
+    keyField.style.display = '';
     details.innerHTML = `
       <div class="alert alert-warn">
         Install the Gemini CLI, then click <strong>Re-check</strong>.
@@ -586,14 +590,32 @@ function copyCode(btn) {
     if (st.codex_ready)    _saved.codex  = true;
     if (st.ollama_ready)   _saved.ollama = true;
 
-    if (!st.env_exists || !st.has_bot_token) {
-      // Fresh install or missing Telegram credentials — jump straight to Telegram step
-      goStep(1);
+    if (!st.env_exists) {
+      // True first install — start at Gemini
+      checkGemini();
       return;
     }
-  } catch (e) { /* fallthrough */ }
-  // .env exists and has a bot token — start at Gemini check
-  checkGemini();
+
+    // .env exists — check what still needs setup
+    if (st.gemini_ready && st.has_bot_token) {
+      // Both Gemini and Telegram configured — go to summary
+      checkGemini();        // update badges
+      buildSummary();
+      goStep(4);
+    } else if (st.gemini_ready && !st.has_bot_token) {
+      // Gemini OK but no Telegram — jump to Telegram step
+      checkGemini();
+      goStep(1);
+    } else if (!st.gemini_ready && st.has_bot_token) {
+      // Telegram OK but no Gemini — show Gemini step
+      checkGemini();
+    } else {
+      // Nothing configured — start from beginning
+      checkGemini();
+    }
+  } catch (e) {
+    checkGemini();
+  }
 })();
 </script>
 </body>

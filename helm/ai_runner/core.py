@@ -690,7 +690,7 @@ async def process_message(text: str, source: str = "web",
         sess["busy"]       = False
         sess["task_start"] = None
         await push_state()  # flip session back to idle
-        await tg_progress_notify(sess, output, elapsed, source)
+        await tg_progress_notify(sess, output, elapsed, source, prompt_text=text)
 
     return output
 

@@ -17,7 +17,7 @@
 ; ═══════════════════════════════════════════════════════════════════════════════
 
 #define MyAppName "RAPR AI"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "2.0.0"
 #define MyAppPublisher "RAPR AI"
 #define MyAppURL "https://rapr.ai"
 #define MyAppExeName "web_app.exe"
@@ -56,6 +56,11 @@ LicenseFile=
 InfoBeforeFile=README_DIST.md
 ; Allow upgrading over existing installation
 UsePreviousAppDir=yes
+; Auto-close the running app before install/uninstall (uses Restart Manager)
+CloseApplications=force
+CloseApplicationsFilter=*.exe
+; Also register the exe name so Inno can detect it
+AppMutex=RAPR_AI_SingleInstance
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

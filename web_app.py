@@ -6,6 +6,7 @@ Run with:  python web_app.py
 """
 
 import asyncio
+import ctypes
 import os
 import shutil
 import subprocess
@@ -13,6 +14,15 @@ import sys
 import webbrowser
 
 import uvicorn
+
+
+# ── Windows: Create a named mutex so Inno Setup can detect the running app ──
+_win_mutex = None
+if sys.platform == "win32":
+    try:
+        _win_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "RAPR_AI_SingleInstance")
+    except Exception:
+        pass
 
 # Load environment variables first (helm/config.py does this via dotenv)
 from helm.config import BOT_TOKEN, WEB_HOST, WEB_PORT, logger
@@ -420,6 +430,10 @@ async def _main():
             await _st.telegram_app.start()
             await _st.telegram_app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
             logger.info("Telegram bot started. Polling for updates...")
+            if _st.telegram_chat_id:
+                logger.info("Telegram chat_id pre-set to %s — web→Telegram forwarding ready", _st.telegram_chat_id)
+            else:
+                logger.warning("No ALLOWED_USER_IDS configured — web→Telegram forwarding disabled until first Telegram message")
             await server.serve()           # blocks until Ctrl+C
             await _st.telegram_app.updater.stop()
             await _st.telegram_app.stop()
