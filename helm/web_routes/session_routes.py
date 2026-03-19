@@ -90,7 +90,16 @@ async def list_integrations_endpoint():
     def _build():
         result = []
         for key, info in _st.integrations.items():
-            cli_ok = _find_cli(key)
+            # NemoClaw lives in WSL — _find_cli won't find it on Windows PATH,
+            # so use the bridge's cached detection instead
+            if key == "nemoclaw":
+                try:
+                    from helm.ai_runner.nemoclaw_bridge import is_available
+                    cli_ok = is_available()
+                except Exception:
+                    cli_ok = False
+            else:
+                cli_ok = _find_cli(key)
             env_vars_ok = all(os.environ.get(v, "").strip() for v in info.get("env_vars", []))
             ready = cli_ok and env_vars_ok
             result.append({
@@ -192,38 +201,84 @@ async def debug_integration(name: str):
 @router.get("/integrations/rescan")
 async def rescan_integrations():
     """
-    Re-run CLI detection for all known AI tools and return a fresh status map.
-    Called by the Settings panel's 'Re-scan' button.
-    Runs in a background thread to avoid blocking the event loop.
+    Re-run CLI detection for all loaded AI integrations and return a fresh
+    status map. Includes all file-based and custom integrations dynamically —
+    not just the hardcoded built-ins.
     """
     from .app import _find_cli_cache
 
+    # Static metadata for built-in CLIs (name, emoji, install hint)
+    _BUILTIN_META = {
+        "claude": {"name": "Claude Code", "emoji": "🤖", "hint": "Install: npm install -g @anthropic-ai/claude-code"},
+        "gemini": {"name": "Gemini CLI",  "emoji": "✨", "hint": "Install: npm install -g @google/gemini-cli"},
+        "codex":  {"name": "Codex CLI",   "emoji": "🧠", "hint": "Install: npm install -g @openai/codex"},
+        "ollama": {"name": "Ollama",      "emoji": "🦙", "hint": "Download from https://ollama.com/download"},
+    }
+
     def _run_rescan():
         import subprocess
-        # Bust the cache so we actually re-probe
         _find_cli_cache.clear()
+        items = []
 
-        ollama_cli = _find_cli("ollama")
-        ollama_models: list[str] = []
-        if ollama_cli:
-            try:
-                r = subprocess.run(
-                    ["ollama", "list"], capture_output=True, text=True, timeout=5,
-                )
-                for line in r.stdout.splitlines()[1:]:
-                    parts = line.split()
-                    if parts:
-                        ollama_models.append(parts[0])
-            except Exception:
-                pass
+        # Built-in CLIs first
+        for key, meta in _BUILTIN_META.items():
+            found = _find_cli(key)
+            item = {
+                "key": key, "name": meta["name"], "emoji": meta["emoji"],
+                "found": found, "hint": meta["hint"] if not found else "",
+                "models": [],
+            }
+            if key == "ollama" and found:
+                try:
+                    r = subprocess.run(
+                        ["ollama", "list"], capture_output=True, text=True, timeout=5,
+                    )
+                    for line in r.stdout.splitlines()[1:]:
+                        parts = line.split()
+                        if parts:
+                            item["models"].append(parts[0])
+                except Exception:
+                    pass
+            items.append(item)
 
-        return {
-            "claude":  _find_cli("claude"),
-            "gemini":  _find_cli("gemini"),
-            "codex":   _find_cli("codex"),
-            "ollama":  ollama_cli,
-            "ollama_models": ollama_models,
-        }
+        # All other integrations loaded in state (file-based + custom)
+        handled = set(_BUILTIN_META.keys())
+        for key, info in _st.integrations.items():
+            if key in handled:
+                continue
+            # NemoClaw uses WSL — use the bridge's own detection logic
+            if key == "nemoclaw":
+                found = False
+                try:
+                    from helm.ai_runner.nemoclaw_bridge import detect_nemoclaw
+                    nc = detect_nemoclaw(auto_launch_docker=False)
+                    found = nc.get("available", False)
+                except Exception:
+                    pass
+            else:
+                # Detect by probing the first element of the integration's command
+                found = False
+                try:
+                    cmd = info["build_command"]("test", model=None)
+                    found = _find_cli(cmd[0]) if cmd else False
+                except Exception:
+                    pass
+            items.append({
+                "key":    key,
+                "name":   info.get("name", key.title()),
+                "emoji":  info.get("emoji", "🤖"),
+                "found":  found,
+                "hint":   info.get("setup_hint", "") if not found else "",
+                "models": [],
+            })
+
+        # Keep flat legacy keys for backward compat + add rich _items list
+        result = {item["key"]: item["found"] for item in items}
+        result["ollama_models"] = next(
+            (i["models"] for i in items if i["key"] == "ollama"), []
+        )
+        result["_items"] = items
+        return result
 
     result = await asyncio.to_thread(_run_rescan)
     return JSONResponse(result)

@@ -212,9 +212,11 @@ const _onboardingSteps = [
 ];
 
 function initOnboarding(){
-  if(localStorage.getItem('helmOnboarded') !== '1'){
+  if(localStorage.getItem('helmOnboarded') === '1') return;
+  fetch('/prefs').then(r=>r.json()).then(prefs=>{
+    if(prefs.onboarded){ localStorage.setItem('helmOnboarded','1'); return; }
     showOnboardingStep(0);
-  }
+  }).catch(()=>{ showOnboardingStep(0); });
 }
 
 function showOnboardingStep(step){
@@ -252,6 +254,8 @@ function closeOnboarding(){
   const overlay = document.getElementById('onboarding-overlay');
   if(overlay) overlay.classList.remove('show');
   localStorage.setItem('helmOnboarded', '1');
+  fetch('/prefs',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({onboarded:true})}).catch(()=>{});
 }
 
 function showHelpTour(){
@@ -1928,17 +1932,23 @@ const _AI_INT_META = {
 function _renderIntegrationList(data){
   const list = document.getElementById('ai-int-list');
   if(!list) return;
-  const rows = Object.entries(_AI_INT_META).map(([key, meta])=>{
-    const found = !!data[key];
+  const items = data._items || Object.entries(_AI_INT_META).map(([key, meta]) => ({
+    key, name: meta.name, emoji: meta.emoji,
+    found: !!data[key],
+    hint: !data[key] ? meta.hint : '',
+    models: key === 'ollama' && Array.isArray(data.ollama_models) ? data.ollama_models : [],
+  }));
+  const rows = items.map(item => {
+    const found = item.found;
     const dotCls = found ? 'ok' : 'miss';
     let hint = '';
-    if(!found) hint = `<span class="ai-int-hint" title="${escHtml(meta.hint)}">${escHtml(meta.hint)}</span>`;
-    else if(key === 'ollama' && Array.isArray(data.ollama_models) && data.ollama_models.length){
-      hint = `<span class="ai-int-hint" style="color:var(--dim)">${data.ollama_models.join(', ')}</span>`;
+    if(!found && item.hint) hint = `<span class="ai-int-hint" title="${escHtml(item.hint)}">${escHtml(item.hint)}</span>`;
+    else if(found && Array.isArray(item.models) && item.models.length){
+      hint = `<span class="ai-int-hint" style="color:var(--dim)">${item.models.join(', ')}</span>`;
     }
     return `<div class="ai-int-row">
       <span class="ai-int-dot ${dotCls}"></span>
-      <span class="ai-int-name">${escHtml(meta.emoji+' '+meta.name)}</span>
+      <span class="ai-int-name">${escHtml((item.emoji||'🤖')+' '+item.name)}</span>
       ${hint}
       <span style="font-size:11px;color:${found?'#22c55e':'#6b7280'};white-space:nowrap">
         ${found ? '✓ Detected' : '✗ Not found'}

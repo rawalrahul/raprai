@@ -70,6 +70,18 @@ async def _main():
     # Load AI integration plugins from integrations/ folder
     load_integrations()
 
+    # Check NemoClaw availability (WSL + Docker + OpenShell + NemoClaw)
+    # Non-blocking: if anything is missing, NemoClaw just doesn't appear.
+    if sys.platform == "win32":
+        try:
+            from helm.ai_runner.nemoclaw_bridge import startup_check as _nemoclaw_startup
+            import concurrent.futures as _ncf
+            _nc_pool = _ncf.ThreadPoolExecutor(max_workers=1)
+            _nc_pool.submit(_nemoclaw_startup)
+            logger.info("NemoClaw: startup check launched in background")
+        except Exception as exc:
+            logger.info("NemoClaw: startup check skipped (%s)", exc)
+
     # Load default models per AI from .env (DEFAULT_MODEL_OLLAMA, etc.)
     import os
     for key, val in os.environ.items():

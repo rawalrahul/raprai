@@ -6,6 +6,7 @@ Covers: forward_to_telegram, tg_update_focus, tg_progress_notify, change_cwd.
 
 import asyncio
 import pathlib
+import re
 import time
 from typing import Optional
 
@@ -14,6 +15,26 @@ from helm.broadcast import push_message, push_state
 from helm.config import logger
 from helm.history import save_cwd_to_log, save_last_state
 from helm.session_mgr import focused_session
+
+
+# Lines matching these patterns are stderr noise (Node.js warnings, SSH
+# banners, etc.) and should be stripped from AI output before displaying
+# on Telegram or building previews.
+_NOISE_RE = re.compile(
+    r"^\(node:\d+\)|"               # (node:5199) …
+    r"^UNDICI-|"                     # UNDICI-EHPA Warning …
+    r"^Warning:|"                    # generic Warning: lines
+    r"^\(Use node --trace-warnings", # (Use node --trace-warnings …)
+    re.IGNORECASE,
+)
+
+
+def _clean_output(text: str) -> str:
+    """Remove stderr noise lines (Node.js warnings etc.) from AI output."""
+    return "\n".join(
+        line for line in text.splitlines()
+        if not _NOISE_RE.match(line.strip())
+    ).strip()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -61,7 +82,12 @@ _tg_update_focus = tg_update_focus  # legacy alias
 
 async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: str,
                              prompt_text: str = "") -> None:
-    """Send a compact Telegram ping when a session finishes a task."""
+    """Send a Telegram notification when a session finishes a task.
+
+    For web-sourced messages: forwards the full AI response to Telegram
+    (not just a preview) so the user sees the same content on both UI and
+    Telegram.  Noise lines (Node.js warnings etc.) are stripped first.
+    """
     if not (_st.telegram_app and _st.telegram_chat_id):
         return
 
@@ -90,28 +116,48 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
     else:
         elapsed_str = f"{elapsed/3600:.1f}h"
 
-    # Truncate output preview to one readable line
-    preview = " ".join(output.strip().splitlines()[:3])
-    if len(preview) > 300:
-        preview = preview[:297] + "..."
+    # Clean noise lines (Node.js warnings, SSH banners, etc.)
+    clean = _clean_output(output) if output else ""
 
-    lines = [f"✨ *{sess['name']}* — {elapsed_str}"]
-    if preview:
-        lines.append(preview)
+    # ── Send the full response to Telegram (chunked if needed) ────────
+    # Header line
+    header = f"✨ {sess['name']} — {elapsed_str}"
 
-    # Check if all running sessions are now idle (busy == False)
+    # Check if all running sessions are now idle
     still_busy = [s for s in running if s.get("busy")]
     if not still_busy and multi:
-        lines.append(f"\n🏁 All {len(running)} sessions idle")
+        header += f"\n🏁 All {len(running)} sessions idle"
 
     try:
         await _st.telegram_app.bot.send_message(
             chat_id=_st.telegram_chat_id,
-            text="\n".join(lines),
-            parse_mode="Markdown",
+            text=header,
         )
     except Exception as e:
-        logger.warning("Progress notify failed: %s", e)
+        logger.warning("Progress notify header failed: %s", e)
+
+    # Send the full cleaned response in Telegram-safe chunks
+    if clean:
+        max_len = 3800
+        chunks = [clean[i:i + max_len] for i in range(0, len(clean), max_len)]
+        for chunk in chunks:
+            try:
+                await _st.telegram_app.bot.send_message(
+                    chat_id=_st.telegram_chat_id,
+                    text=chunk,
+                )
+            except Exception as e:
+                logger.warning("Progress notify chunk failed: %s", e)
+                break
+    elif not clean and output:
+        # Output was entirely noise — send a note instead of nothing
+        try:
+            await _st.telegram_app.bot.send_message(
+                chat_id=_st.telegram_chat_id,
+                text="(response contained only system warnings — check the UI for details)",
+            )
+        except Exception:
+            pass
 
 
 _tg_progress_notify = tg_progress_notify  # legacy alias

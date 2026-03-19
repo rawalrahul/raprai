@@ -379,6 +379,16 @@ async def graceful_shutdown():
     except Exception as e:
         logger.error("Error stopping backup scheduler: %s", e)
 
+    # Stop NemoClaw gateway (if it was auto-started by us)
+    try:
+        from helm.ai_runner.nemoclaw_bridge import _gateway_started, stop_gateway
+        if _gateway_started:
+            logger.info("Stopping NemoClaw gateway...")
+            stop_gateway()
+            logger.info("NemoClaw gateway stopped")
+    except Exception as e:
+        logger.debug("NemoClaw shutdown: %s", e)
+
     # Close database connections
     try:
         from helm.db import close_all

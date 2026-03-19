@@ -110,6 +110,14 @@ HISTORY_ID_RE  = re.compile(r"^\d{4}-\d{2}-\d{2}$|^p_[a-f0-9]{12}$")
 
 BROWSE_PAGE_SIZE = 8
 
+# ---------------------------------------------------------------------------
+# NemoClaw (NVIDIA sandboxed AI via WSL + OpenShell)
+# ---------------------------------------------------------------------------
+
+NEMOCLAW_SANDBOX    = os.environ.get("NEMOCLAW_SANDBOX", "mynemo")
+NEMOCLAW_AUTO_START = os.environ.get("NEMOCLAW_AUTO_START", "1").strip().lower() in ("1", "true", "yes")
+NEMOCLAW_TIMEOUT    = float(os.environ.get("NEMOCLAW_TIMEOUT", "300"))  # 5 min default
+
 # Croniter availability flag (populated once in scheduler.py)
 try:
     from croniter import croniter as _Croniter

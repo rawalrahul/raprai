@@ -640,12 +640,11 @@ header {
 .input-bar {
   padding: 16px 20px;
   border-top: 1px solid rgba(255,255,255,0.05);
-  background: rgba(12,12,16,0.6);
-  backdrop-filter: blur(12px);
+  background: rgb(12,12,16);
 }
 
 [data-theme="light"] .input-bar {
-  background: rgba(255,255,255,0.8);
+  background: rgb(255,255,255);
   border-top-color: rgba(0,0,0,0.06);
 }
 
@@ -666,18 +665,17 @@ header {
 .ai-picker.active-gemini { border-color: rgba(91,156,245,0.25); background: rgba(91,156,245,0.06); }
 .ai-picker.active-codex { border-color: rgba(52,211,153,0.25); background: rgba(52,211,153,0.06); }
 
-/* AI menu — frosted glass dropdown */
+/* AI menu dropdown */
 .ai-menu {
   border-radius: 14px;
-  background: rgba(16,16,20,0.92);
+  background: rgb(16,16,20);
   border: 1px solid rgba(255,255,255,0.08);
   box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  z-index: 200;
 }
 
 [data-theme="light"] .ai-menu {
-  background: rgba(255,255,255,0.95);
+  background: rgb(255,255,255);
   border-color: rgba(0,0,0,0.08);
   box-shadow: 0 20px 60px rgba(0,0,0,0.15);
 }

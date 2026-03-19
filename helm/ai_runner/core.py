@@ -28,7 +28,7 @@ from helm.mcp.inject import inject_mcp_context
 from helm.context_manager import update_token_count, check_and_compact
 
 from .claude import build_claude_cmd, parse_claude_json_output
-from .helpers import tg_progress_notify
+from .helpers import tg_progress_notify, _clean_output
 
 
 # ---------------------------------------------------------------------------
@@ -1096,6 +1096,9 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
                             ai, cli_tokens["input"], cli_tokens["output"])
 
         await push_thinking(False, session_id=sid)
+
+        # Clean stderr noise (Node.js warnings etc.) from integration output
+        output = _clean_output(output) or output
 
         if not _is_failure(output):
             await push_message("assistant", output, ai=ai, source=source, session_id=sid)

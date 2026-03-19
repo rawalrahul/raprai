@@ -269,3 +269,42 @@ async def list_api_keys():
             status[key] = {"configured": False, "preview": ""}
 
     return JSONResponse(status)
+
+
+# ---------------------------------------------------------------------------
+# User prefs — lightweight server-side key/value store for UI state that
+# must survive localStorage resets (e.g. Electron profile wipes, port changes)
+# ---------------------------------------------------------------------------
+
+def _prefs_file() -> pathlib.Path:
+    return user_data_dir() / "user_prefs.json"
+
+def _load_prefs() -> dict:
+    try:
+        return json.loads(_prefs_file().read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+def _save_prefs(prefs: dict) -> None:
+    _prefs_file().write_text(json.dumps(prefs, indent=2), encoding="utf-8")
+
+
+@router.get("/prefs")
+async def get_prefs():
+    """Return persisted user preferences."""
+    return JSONResponse(await asyncio.to_thread(_load_prefs))
+
+
+@router.post("/prefs")
+async def set_prefs(request: Request):
+    """Merge supplied key/value pairs into persisted user preferences."""
+    updates = await request.json()
+    if not isinstance(updates, dict):
+        return JSONResponse({"error": "expected object"}, status_code=400)
+    def _merge():
+        prefs = _load_prefs()
+        prefs.update(updates)
+        _save_prefs(prefs)
+        return prefs
+    result = await asyncio.to_thread(_merge)
+    return JSONResponse(result)
