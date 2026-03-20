@@ -757,6 +757,7 @@ header{
   outline:none;font-family:inherit;text-align:right;transition:border-color .15s}
 .settings-input:focus{border-color:#3a3a3a}
 .settings-input.wide{width:170px;text-align:left}
+.settings-input option,select.settings-input option{background:var(--surface);color:var(--text)}
 .settings-save-row{
   padding:12px 18px 16px;border-top:1px solid var(--border);
   display:flex;justify-content:space-between;align-items:center;flex-shrink:0;

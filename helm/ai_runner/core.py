@@ -21,7 +21,7 @@ from helm.history import save_cwd_to_log
 from helm.session_mgr import focused_session, record_usage_task
 from helm.skills import (
     inject_skill_prefix, detect_skill, auto_create_skill_template,
-    claude_generate_skill,
+    generate_skill,
 )
 from helm.plugins import inject_plugin_context
 from helm.mcp.inject import inject_mcp_context
@@ -45,10 +45,28 @@ def _auto_switch_enabled() -> bool:
 
 RETRY_DELAY = 2.0        # seconds between retries
 
-# Patterns in AI output that indicate a failure worth retrying
-_FAILURE_PATTERNS = re.compile(
+# ---------------------------------------------------------------------------
+# Failure detection — two tiers
+# ---------------------------------------------------------------------------
+#
+# Tier 1: INFRASTRUCTURE failures — the CLI itself broke (not in PATH, network
+#     down, auth expired, etc.).  These warrant retries and fallback to another
+#     AI because the problem is environmental, not task-related.
+#
+# Tier 2: GENERAL failures (superset of Tier 1) — also includes patterns like
+#     API-key mentions and non-zero exit codes.  Used only for legacy callers;
+#     self-healing and retry logic use Tier 1 exclusively.
+#
+# The key principle: if the AI actually ran and produced a substantive response
+# (even if it says "I can't do that"), that is NOT a failure — it is the AI
+# communicating.  We only intervene when the CLI infrastructure broke.
+# ---------------------------------------------------------------------------
+
+# Tier 1 — infrastructure / CLI failures only
+_INFRA_FAILURE_PATTERNS = re.compile(
     r"(?i)("
     r"error:.*not found in PATH"
+    r"|Error: '[\w.-]+' not found in PATH"         # run_ai_popen FileNotFoundError
     r"|timed out after \d+s"
     r"|FileNotFoundError"
     r"|ConnectionRefusedError"
@@ -66,25 +84,68 @@ _FAILURE_PATTERNS = re.compile(
     r"|too many requests"
     r"|429"
     r"|oauth token has expired"
-    r"|\(error:"
     r"|could not connect"
     r"|network.?error"
-    r"|api.?key.*(missing|invalid|not set)"
-    r"|OPENAI_API_KEY"
-    r"|GEMINI_API_KEY"
-    r"|exited [1-9]"
     r")"
 )
+
+# Match the exact format produced by run_ai_popen when the CLI process
+# crashes: "(codex exited 1)" — only at the END of the output.
+_EXIT_CODE_PATTERN = re.compile(r"\(\w+ exited [1-9]\d*\)\s*$")
+
+# Match run_ai_popen's error wrapper: "(error: ...)"
+_POPEN_ERROR_PATTERN = re.compile(r"^\(error:")
 
 # Built-in AI keys (always available if CLI is installed)
 _BUILTIN_AIS = ["claude", "ollama"]
 
 
-def _is_failure(output: str) -> bool:
-    """Check if AI output indicates a recoverable failure."""
+def _is_infra_failure(output: str) -> bool:
+    """Check if AI output indicates an INFRASTRUCTURE failure.
+
+    Returns True only for CLI-level problems (binary not found, network errors,
+    auth expired, process crashed, etc.) — NOT for cases where the AI ran
+    successfully but said "I can't do that".
+
+    This is the primary check used by the retry/fallback/self-healing logic.
+    It intentionally does NOT flag:
+      - Normal AI responses that mention error-like keywords in their content
+      - AI responses declining a task ("I can't create images")
+      - Long outputs where the AI clearly did work
+    """
     if not output or output == "(no output)":
         return False
-    return bool(_FAILURE_PATTERNS.search(output))
+
+    stripped = output.strip()
+
+    # If the AI produced a long, substantive response, the CLI worked fine.
+    # The AI may have declined the task or mentioned errors, but that's the
+    # AI communicating, not an infrastructure failure.
+    if len(stripped) > 800:
+        return False
+
+    # run_ai_popen wraps errors in "(error: ...)"
+    if _POPEN_ERROR_PATTERN.match(stripped):
+        return True
+
+    # CLI process exited non-zero: "(codex exited 1)" at end of output
+    if _EXIT_CODE_PATTERN.search(stripped):
+        return True
+
+    # Known infrastructure error patterns
+    if _INFRA_FAILURE_PATTERNS.search(stripped):
+        return True
+
+    return False
+
+
+def _is_failure(output: str) -> bool:
+    """Legacy/compat wrapper — delegates to _is_infra_failure.
+
+    All retry, fallback, and self-healing logic now uses _is_infra_failure
+    which only triggers on genuine CLI/infrastructure problems.
+    """
+    return _is_infra_failure(output)
 
 
 def _find_available_ais(exclude: str) -> list[str]:
@@ -823,23 +884,38 @@ async def _self_heal_with_skill(ai: str, sess: dict, text: str, safe_text: str,
     if len(_heal_attempts) > 500:
         _heal_attempts.clear()
 
+    # Check that at least one other AI is available for skill generation
+    _available_for_heal = _find_available_ais(ai)
+    if not _available_for_heal and not shutil.which("claude"):
+        await push_message(
+            "system",
+            f"⚠️ {ai} couldn't complete this task and no other AI is "
+            f"available to generate a skill. Try retrying manually.",
+            source=source, session_id=sid,
+        )
+        return None
+
     await push_message(
         "system",
-        f"🔧 **Self-healing:** {ai} couldn't complete this task. "
-        f"Asking Claude to create a skill for it…",
+        f"🔧 **Self-healing:** {ai} encountered an infrastructure error. "
+        f"Generating a skill to help with this task…",
         source=source, session_id=sid,
     )
 
-    # Invoke Claude in a background thread to generate the skill
+    # generate_skill tries Claude first, then falls back to any available AI
     skill_name = await asyncio.to_thread(
-        claude_generate_skill, text, ai, error_output
+        generate_skill, text, ai, error_output
     )
 
     if not skill_name:
+        _alt_msg = ""
+        if _available_for_heal:
+            _alt_names = ", ".join(f"**{a}**" for a in _available_for_heal[:3])
+            _alt_msg = f" Available AIs you can switch to: {_alt_names}."
         await push_message(
             "system",
-            "⚠️ Could not auto-generate a skill (Claude CLI unavailable or timed out). "
-            "Try switching to Claude or retry manually.",
+            f"⚠️ Could not auto-generate a skill for this task.{_alt_msg} "
+            f"Try switching AI or retry manually.",
             source=source, session_id=sid,
         )
         return None

@@ -930,26 +930,98 @@ def create_skill(name: str, description: str, content: str) -> bool:
     return True
 
 
-def claude_generate_skill(prompt: str, ai: str, error_output: str = "",
-                          regenerate: bool = False) -> Optional[str]:
-    """
-    Invoke Claude CLI to generate a high-quality SKILL.md for a task the AI failed.
+def _build_skill_gen_cmd(generator_ai: str, prompt_text: str) -> tuple[list[str], str | None]:
+    """Build the CLI command + optional stdin text for a skill-generation AI.
 
-    This is the "self-healing" path: when a non-Claude AI encounters a task it
-    cannot handle and no skill exists, Claude is asked to create a reusable skill
-    so the original AI can retry (and future tasks succeed immediately).
+    Returns (cmd_argv, stdin_text_or_None).
+    """
+    import sys
+
+    if generator_ai == "claude":
+        return (
+            ["claude", "-p", prompt_text, "--output-format", "text"],
+            None,  # prompt is on the command line
+        )
+
+    if generator_ai == "gemini":
+        _ext = ".cmd" if sys.platform == "win32" else ""
+        return ([f"gemini{_ext}", "--yolo"], prompt_text)
+
+    if generator_ai == "codex":
+        _ext = ".cmd" if sys.platform == "win32" else ""
+        return ([f"codex{_ext}", "exec", "--skip-git-repo-check", "--full-auto"], prompt_text)
+
+    if generator_ai == "ollama":
+        model = os.environ.get("OLLAMA_MODEL") or os.environ.get("DEFAULT_MODEL_OLLAMA") or "qwen3:4b"
+        return (["ollama", "run", model, "--nowordwrap"], prompt_text)
+
+    # Unknown AI — try to find it in registered integrations
+    import helm.state as _st
+    info = _st.integrations.get(generator_ai)
+    if info:
+        cmd = info["build_command"](prompt_text, model=None)
+        use_stdin = info.get("stdin_prompt", False)
+        return (cmd, prompt_text if use_stdin else None)
+
+    return ([], None)
+
+
+def generate_skill(prompt: str, ai: str, error_output: str = "",
+                   regenerate: bool = False,
+                   generator_ai: str | None = None) -> Optional[str]:
+    """
+    Invoke an available AI CLI to generate a high-quality SKILL.md for a task
+    that failed.
+
+    This is the "self-healing" path: when an AI encounters an infrastructure
+    failure, another available AI is asked to create a reusable skill so the
+    original AI can retry (and future tasks succeed immediately).
+
+    *generator_ai*: which AI to use for generation.  If None, tries Claude
+    first, then falls back to any available AI.
 
     If *regenerate* is True and the skill already exists with an "AI-generated"
     description, it will be overwritten with a new version incorporating the
     latest error context.
 
-    Returns the skill name on success, None on failure or if Claude CLI unavailable.
+    Returns the skill name on success, None on failure.
     """
     import shutil
     import subprocess as sp
 
-    if not shutil.which("claude"):
-        logger.warning("claude_generate_skill: 'claude' CLI not found — skipping")
+    # Determine which AI to use for generation
+    if generator_ai:
+        candidates = [generator_ai]
+    else:
+        # Try Claude first (best at generating structured instructions),
+        # then any other available AI.
+        candidates = []
+        if shutil.which("claude"):
+            candidates.append("claude")
+        # Check other AIs
+        for ai_key in ["gemini", "codex", "ollama"]:
+            if ai_key == ai:  # skip the one that failed
+                continue
+            if ai_key in candidates:
+                continue
+            cli_name = ai_key
+            if shutil.which(cli_name):
+                candidates.append(ai_key)
+        # Also check registered integrations
+        import helm.state as _st
+        for ai_key, info in _st.integrations.items():
+            if ai_key == ai or ai_key in candidates:
+                continue
+            try:
+                test_cmd = info["build_command"]("test", model=None)
+                cli_name = test_cmd[0] if test_cmd else ai_key
+                if shutil.which(cli_name):
+                    candidates.append(ai_key)
+            except Exception:
+                pass
+
+    if not candidates:
+        logger.warning("generate_skill: no AI CLI available for skill generation")
         return None
 
     skill_name = _skill_name_from_prompt(prompt)
@@ -960,16 +1032,16 @@ def claude_generate_skill(prompt: str, ai: str, error_output: str = "",
         existing = _registry[skill_name]
         is_auto = existing.get("description", "").startswith("AI-generated")
         if not regenerate or not is_auto:
-            logger.info("claude_generate_skill: skill '%s' already exists (auto=%s, regen=%s) — skipping",
+            logger.info("generate_skill: skill '%s' already exists (auto=%s, regen=%s) — skipping",
                         skill_name, is_auto, regenerate)
             return skill_name
 
-        logger.info("claude_generate_skill: regenerating auto-generated skill '%s' with new error context",
+        logger.info("generate_skill: regenerating auto-generated skill '%s' with new error context",
                     skill_name)
 
     display_task = task_type.replace("_", " ").title()
 
-    claude_prompt = textwrap.dedent(f"""\
+    skill_prompt = textwrap.dedent(f"""\
         You are a skill author for RAPR AI, a multi-AI orchestration platform.
         An AI ({ai}) failed the following user task. Create a reusable SKILL.md
         that will help ANY AI model (including small local models like qwen2.5-coder:7b)
@@ -998,40 +1070,60 @@ def claude_generate_skill(prompt: str, ai: str, error_output: str = "",
         Output ONLY the Markdown content for the SKILL.md file. No preamble, no explanation.
     """)
 
-    try:
-        result = sp.run(
-            ["claude", "-p", claude_prompt, "--output-format", "text"],
-            capture_output=True, text=True, timeout=180,
-            env={**os.environ, "CLAUDE_AUTO_APPROVE": "1"},
-        )
-        if result.returncode != 0 or not result.stdout.strip():
-            logger.warning("claude_generate_skill: Claude returned code=%d, output=%d chars",
-                           result.returncode, len(result.stdout or ""))
-            return None
+    # Try each candidate AI until one succeeds
+    for gen_ai in candidates:
+        logger.info("generate_skill: trying '%s' for skill generation…", gen_ai)
 
-        content = result.stdout.strip()
+        cmd, stdin_text = _build_skill_gen_cmd(gen_ai, skill_prompt)
+        if not cmd:
+            logger.warning("generate_skill: could not build command for '%s' — skipping", gen_ai)
+            continue
 
-        # Validate: reject skills that are too short (likely generic/useless)
-        line_count = len(content.splitlines())
-        if line_count < 20:
-            logger.warning("claude_generate_skill: generated skill too short (%d lines) — rejecting",
-                           line_count)
-            return None
+        env = {**os.environ}
+        if gen_ai == "claude":
+            env["CLAUDE_AUTO_APPROVE"] = "1"
 
-        description = f"AI-generated skill for {display_task.lower()} tasks (created by Claude for {ai})."
-        success = create_skill(skill_name, description, content)
-        if success:
-            logger.info("claude_generate_skill: created skill '%s' (%d lines) via Claude CLI",
-                        skill_name, line_count)
-            return skill_name
-        return None
+        try:
+            result = sp.run(
+                cmd,
+                input=stdin_text,
+                capture_output=True, text=True, timeout=180,
+                env=env,
+            )
+            if result.returncode != 0 or not result.stdout.strip():
+                logger.warning("generate_skill: %s returned code=%d, output=%d chars — trying next",
+                               gen_ai, result.returncode, len(result.stdout or ""))
+                continue
 
-    except sp.TimeoutExpired:
-        logger.warning("claude_generate_skill: Claude CLI timed out (180s)")
-        return None
-    except Exception as exc:
-        logger.warning("claude_generate_skill: unexpected error — %s", exc)
-        return None
+            content = result.stdout.strip()
+
+            # Validate: reject skills that are too short (likely generic/useless)
+            line_count = len(content.splitlines())
+            if line_count < 20:
+                logger.warning("generate_skill: %s produced skill too short (%d lines) — trying next",
+                               gen_ai, line_count)
+                continue
+
+            description = f"AI-generated skill for {display_task.lower()} tasks (created by {gen_ai} for {ai})."
+            success = create_skill(skill_name, description, content)
+            if success:
+                logger.info("generate_skill: created skill '%s' (%d lines) via %s CLI",
+                            skill_name, line_count, gen_ai)
+                return skill_name
+
+        except sp.TimeoutExpired:
+            logger.warning("generate_skill: %s CLI timed out (180s) — trying next", gen_ai)
+            continue
+        except Exception as exc:
+            logger.warning("generate_skill: %s error — %s — trying next", gen_ai, exc)
+            continue
+
+    logger.warning("generate_skill: all candidate AIs failed for skill generation")
+    return None
+
+
+# Legacy alias — callers that still reference the old name will work
+claude_generate_skill = generate_skill
 
 
 def auto_create_skill_template(prompt: str, ai: str, output: str = "") -> Optional[str]:

@@ -212,11 +212,21 @@ const _onboardingSteps = [
 ];
 
 function initOnboarding(){
+  // Primary guard: localStorage persists across sessions
   if(localStorage.getItem('helmOnboarded') === '1') return;
+  // Secondary guard: server-side prefs survive localStorage clears
   fetch('/prefs').then(r=>r.json()).then(prefs=>{
-    if(prefs.onboarded){ localStorage.setItem('helmOnboarded','1'); return; }
+    if(prefs.onboarded){
+      // Server says already onboarded — sync localStorage and skip
+      localStorage.setItem('helmOnboarded','1');
+      return;
+    }
     showOnboardingStep(0);
-  }).catch(()=>{ showOnboardingStep(0); });
+  }).catch(()=>{
+    // Network/fetch error — do NOT show onboarding on failure.
+    // If the user truly never onboarded, it will show on next successful load.
+    // This prevents random re-triggering when /prefs is temporarily unreachable.
+  });
 }
 
 function showOnboardingStep(step){

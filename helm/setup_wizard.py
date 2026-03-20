@@ -59,13 +59,16 @@ html,body{height:100%;background:var(--bg);color:var(--text);
 .status-badge.err{background:rgba(239,68,68,.1);color:var(--err)}
 
 .code-block{
-  background:var(--surface2);border:1px solid var(--border);border-radius:6px;
-  padding:10px 36px 10px 14px;font-family:'Courier New',monospace;font-size:12px;color:#9ca3af;
-  margin-bottom:12px;position:relative;word-break:break-all}
+  background:#1a1a2e;border:1px solid rgba(99,102,241,0.25);border-radius:8px;
+  padding:12px 44px 12px 16px;font-family:'Courier New','Fira Code',monospace;font-size:13px;
+  color:#e0e0f0;font-weight:500;letter-spacing:0.02em;
+  margin-bottom:12px;position:relative;word-break:break-all;
+  box-shadow:0 2px 8px rgba(0,0,0,0.2)}
 .code-copy{
-  position:absolute;right:8px;top:7px;background:var(--border);border:none;
-  border-radius:4px;color:var(--dim);font-size:10px;padding:3px 7px;cursor:pointer;font-family:inherit}
-.code-copy:hover{color:var(--text);background:#2a2a2a}
+  position:absolute;right:8px;top:8px;background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.3);
+  border-radius:5px;color:#a5b4fc;font-size:11px;font-weight:600;padding:4px 10px;cursor:pointer;
+  font-family:inherit;transition:all 0.15s ease}
+.code-copy:hover{color:#fff;background:rgba(99,102,241,0.4);border-color:rgba(99,102,241,0.5)}
 
 .alert{padding:10px 14px;border-radius:7px;font-size:12px;margin-bottom:14px;line-height:1.65}
 .alert-warn{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.18);color:#fbbf24}
@@ -110,6 +113,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);
 .sum-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .sum-dot.ok{background:var(--ok)}
 .sum-dot.off{background:var(--border)}
+/* Ensure select dropdown options are visible in dark mode */
+select option{background:var(--surface);color:var(--text)}
 </style>
 </head>
 <body>
@@ -153,7 +158,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);
       <div id="gemini-msg"></div>
 
       <div class="btn-row">
-        <button class="btn btn-secondary" onclick="checkGemini()">Re-check</button>
         <button class="btn btn-primary" onclick="saveGeminiAndContinue()">Save & Continue →</button>
         <button class="btn-skip" onclick="goStep(1)">Skip for now</button>
       </div>
@@ -199,11 +203,13 @@ html,body{height:100%;background:var(--bg);color:var(--text);
           <span class="integ-name">Claude (Anthropic)</span>
           <span class="integ-badge off" id="claude-badge-2">not configured</span>
         </div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Install CLI:</div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:6px;font-weight:600">Install CLI:</div>
         <div class="code-block">npm install -g @anthropic-ai/claude-code<button class="code-copy" onclick="copyCode(this)">copy</button></div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Then authenticate:</div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:6px;font-weight:600">Then authenticate:</div>
         <div class="code-block">claude login<button class="code-copy" onclick="copyCode(this)">copy</button></div>
-        <div style="font-size:11px;color:var(--muted)">Click <strong>Re-check</strong> after logging in.</div>
+        <div class="alert alert-info" style="margin-top:8px;font-size:11px">
+          After installing and authenticating, <strong>relaunch RAPR AI</strong> to detect Claude.
+        </div>
       </div>
 
       <div class="integ-card">
@@ -212,7 +218,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);
           <span class="integ-name">OpenAI Codex</span>
           <span class="integ-badge off" id="codex-badge-2">not configured</span>
         </div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Install CLI:</div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:6px;font-weight:600">Install CLI:</div>
         <div class="code-block">npm install -g @openai/codex<button class="code-copy" onclick="copyCode(this)">copy</button></div>
         <div class="field" style="margin-top:8px;margin-bottom:0">
           <label>OPENAI_API_KEY</label>
@@ -239,17 +245,19 @@ html,body{height:100%;background:var(--bg);color:var(--text);
           </select>
         </div>
         <div id="ollama-install-hint" style="display:none">
-          <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Install Ollama:</div>
+          <div style="font-size:12px;color:var(--dim);margin-bottom:6px;font-weight:600">Install Ollama:</div>
           <div class="code-block">winget install Ollama.Ollama<button class="code-copy" onclick="copyCode(this)">copy</button></div>
-          <div style="font-size:12px;color:var(--muted);margin:8px 0 4px">Then pull a model:</div>
+          <div style="font-size:12px;color:var(--dim);margin:8px 0 4px;font-weight:600">Then pull a model:</div>
           <div class="code-block">ollama pull qwen3:4b<button class="code-copy" onclick="copyCode(this)">copy</button></div>
+          <div class="alert alert-info" style="margin-top:8px;font-size:11px">
+            After installing, <strong>relaunch RAPR AI</strong> to detect Ollama.
+          </div>
         </div>
       </div>
 
       <div id="optional-msg"></div>
       <div class="btn-row">
         <button class="btn btn-secondary" onclick="goStep(1)">← Back</button>
-        <button class="btn btn-secondary" onclick="checkOptionalIntegrations()">Re-check</button>
         <button class="btn btn-primary" onclick="saveOptional()">Save & Continue →</button>
         <button class="btn-skip" onclick="goStep(3)">Skip for now →</button>
       </div>
@@ -334,10 +342,11 @@ async function checkGemini() {
     // Show API key field as fallback only when CLI is missing
     keyField.style.display = '';
     details.innerHTML = `
-      <div class="alert alert-warn">
-        Install the Gemini CLI, then click <strong>Re-check</strong>.
+      <div class="alert alert-info">
+        Install the Gemini CLI in a separate terminal, then <strong>relaunch RAPR AI</strong> to detect it.
+        You can skip this step for now and come back later.
       </div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Run in your terminal:</div>
+      <div style="font-size:12px;color:var(--dim);margin-bottom:6px;font-weight:600">Run in your terminal:</div>
       <div class="code-block">npm install -g @google/gemini-cli<button class="code-copy" onclick="copyCode(this)">copy</button></div>`;
   }
   return _geminiStatus;
