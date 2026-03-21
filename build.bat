@@ -22,6 +22,12 @@ if exist installer_output (
     rmdir /s /q installer_output
 )
 
+:: ── Generate self-signed cert and sign exe (bypasses Smart App Control) ──
+echo  Generating self-signed code signing certificate...
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\gen_cert.ps1"
+echo  Certificate ready.
+echo.
+
 :: ── Generate .ico from logo.png (needed by Inno Setup + shortcuts) ──────
 echo  Generating logo.ico from logo.png...
 python -c "from PIL import Image; img=Image.open('logo.png'); img.save('logo.ico', format='ICO', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
@@ -41,6 +47,7 @@ python -m nuitka --standalone --enable-plugin=tk-inter ^
     --include-data-dir=helm/frontend=helm/frontend ^
     --include-data-files=logo.png=logo.png ^
     --windows-icon-from-ico=logo.ico ^
+    --windows-console-mode=disable ^
     --include-package=pptx ^
     --include-package=docx ^
     --include-package=openpyxl ^
@@ -58,6 +65,10 @@ if errorlevel 1 (
 )
 
 echo.
+echo  Signing web_app.exe with self-signed certificate...
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\sign_exe.ps1"
+echo.
+
 echo  Copying additional files into dist...
 
 :: Copy integrations (dynamically loaded .py files)

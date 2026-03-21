@@ -52,15 +52,13 @@ WizardStyle=modern
 ; Uninstall settings
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\logo.ico
-; Show a license/readme page during install
+; Show a brief info page during install
 LicenseFile=
-InfoBeforeFile=README_DIST.md
+InfoBeforeFile=installer_info.txt
 ; Allow upgrading over existing installation
 UsePreviousAppDir=yes
-; Auto-close the running app before install/uninstall (uses Restart Manager)
-CloseApplications=force
-CloseApplicationsFilter=*.exe
-; Also register the exe name so Inno can detect it
+; Process is killed via [Code] section before install/uninstall
+CloseApplications=no
 AppMutex=RAPR_AI_SingleInstance
 
 [Languages]
@@ -68,7 +66,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
-Name: "rundeps"; Description: "Run dependency setup after install (Node.js, Pandoc, etc.)"; GroupDescription: "Post-install:"; Flags: checkedonce
+Name: "rundeps"; Description: "Install required tools (Node.js, Pandoc, FFmpeg)"; GroupDescription: "Post-install:"; Flags: checkedonce
 
 [Files]
 ; Include EVERYTHING from the Nuitka dist folder
@@ -91,6 +89,28 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDi
 Filename: "{app}\setup_dist.bat"; Description: "Install external dependencies (Node.js, Pandoc, etc.)"; Flags: nowait postinstall skipifsilent shellexec; Tasks: rundeps
 ; Offer to launch the app after install
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName} now"; Flags: nowait postinstall skipifsilent unchecked; WorkingDir: "{app}"
+
+[Code]
+// Kill any running RAPR AI process before install or uninstall
+procedure KillRAPRAI();
+var
+  ResultCode: Integer;
+begin
+  Exec('taskkill.exe', '/F /IM web_app.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(1000);
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  KillRAPRAI();
+  Result := True;
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  KillRAPRAI();
+  Result := True;
+end;
 
 [UninstallDelete]
 ; Clean up runtime files that RAPR AI creates (not part of the install)
