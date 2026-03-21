@@ -24,7 +24,7 @@ from helm.config import logger
 # ---------------------------------------------------------------------------
 
 # Default catalog URL — override with HELMPACK_CATALOG_URL env var
-_DEFAULT_CATALOG_URL = "https://rapr-ai-website.vercel.app/marketplace/catalog.json"
+_DEFAULT_CATALOG_URL = "https://raprai.com/marketplace/catalog.json"
 
 _CACHE_TTL = 3600  # 1 hour
 

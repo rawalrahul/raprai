@@ -19,7 +19,7 @@
 #define MyAppName "RAPR AI"
 #define MyAppVersion "2.0.0"
 #define MyAppPublisher "RAPR AI"
-#define MyAppURL "https://rapr.ai"
+#define MyAppURL "https://raprai.com"
 #define MyAppExeName "web_app.exe"
 #define MyAppIcon "logo.png"
 

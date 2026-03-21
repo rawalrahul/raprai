@@ -6,4 +6,4 @@ IMPORTANT: Node.js must be installed separately before setup.
 Download it from: https://nodejs.org/en/download/
 
 If you run into any issues, download the Setup Guide from:
-https://rapr-ai-website.vercel.app/download
+https://raprai.com/download

@@ -84,7 +84,7 @@ if errorlevel 1 (
 echo.
 if "%ERRORS%"=="1" (
     echo  Some tools could not be installed automatically.
-    echo  Download the Setup Guide from: rapr-ai-website.vercel.app/download
+    echo  Download the Setup Guide from: raprai.com/download
     echo.
     pause
 ) else (
