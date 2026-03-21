@@ -295,8 +295,9 @@ async def check_and_compact(sess: dict, source: str = "web") -> Optional[str]:
     ai = sess.get("ai") or "shell"
     sid = sess.get("id", "")
 
-    # Single-turn AIs don't accumulate context
-    if ai not in ("claude", "ollama"):
+    # Only Ollama needs our context management.
+    # Claude, Gemini, Codex, NemoClaw, and other AIs handle context natively.
+    if ai != "ollama":
         return None
 
     usage = context_usage(sess)
@@ -330,12 +331,8 @@ async def check_and_compact(sess: dict, source: str = "web") -> Optional[str]:
             source=source, session_id=sid,
         )
 
-        if ai == "ollama":
-            result = await _compact_ollama(sess)
-        elif ai == "claude":
-            result = await _compact_claude(sess)
-        else:
-            result = None
+        # Only Ollama reaches here (early return above for other AIs)
+        result = await _compact_ollama(sess)
 
         if result:
             ctx["summarised_at"] = time.time()
@@ -524,22 +521,17 @@ async def force_compact(sess: dict, source: str = "web") -> str:
     ai = sess.get("ai") or "shell"
     sid = sess.get("id", "")
 
-    if ai not in ("claude", "ollama"):
-        # Single-turn AIs don't have persistent context to compact,
-        # but we can reset the running token counter
+    if ai != "ollama":
+        # Claude, Gemini, Codex, NemoClaw handle context natively —
+        # no need for manual compaction. Reset the counter for the UI.
         ctx = _ensure_context_state(sess)
         ctx["total_tokens"] = 0
         ctx["warned"] = False
-        return "🗜️ Token counter reset. (Single-turn AIs don't maintain persistent context.)"
+        ai_name = ai.title() if ai else "This AI"
+        return f"ℹ️ {ai_name} manages its own context window natively — no compaction needed."
 
     before = context_usage(sess)
-
-    if ai == "ollama":
-        result = await _compact_ollama(sess)
-    elif ai == "claude":
-        result = await _compact_claude(sess)
-    else:
-        result = None
+    result = await _compact_ollama(sess)
 
     if not result:
         return "Not enough messages to compact (need at least 10)."

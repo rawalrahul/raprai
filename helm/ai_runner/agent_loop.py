@@ -1,12 +1,17 @@
 """
-helm/ai_runner/agent_loop.py — Universal text-based agent loop for MCP tools.
+helm/ai_runner/agent_loop.py — Text-based agent loop fallback for MCP tools.
 
-Wraps any single-turn AI call (Claude CLI, Gemini, Codex) with:
-1. Tool-call parsing from AI output
-2. Execution via MCPManager (parallel when possible)
-3. Re-querying with results appended
+Activates when an AI CLI can't reach MCP tools natively:
+  - Any CLI: when websocket-only servers (Chrome) are running — CLIs can't
+    connect to WebSocket, so we inject tool descriptions + parse <tool_call> tags.
+  - Custom/unknown CLIs: user-added integrations that don't support native MCP.
+  - NemoClaw: sandboxed in WSL, can't read host config files.
 
-Ollama does NOT use this — it has native tool calling.
+Native path (no agent loop) when:
+  - Claude: has subprocess MCP servers → --mcp-config flag (same as Claude Code).
+  - Gemini: servers synced to ~/.gemini/settings.json → reads them at startup.
+  - Codex: servers synced to ~/.codex/config.toml → reads them at startup.
+  - Ollama: own native tool calling via API (never uses this loop).
 """
 
 from __future__ import annotations
@@ -25,10 +30,10 @@ _TOOL_CALL_RE = re.compile(
     re.DOTALL,
 )
 
-# Safety limits — reduced from 5 to 2 to prevent slow multi-round trips
-_MAX_ITERATIONS = 2
-_TOOL_TIMEOUT = 30  # seconds per tool call (was 60)
-_MAX_RESULT_CHARS = 4000  # truncate large tool results
+# Safety limits — let the AI work as it would natively
+_MAX_ITERATIONS = 10  # generous ceiling; loop detection catches runaways
+_TOOL_TIMEOUT = 120   # seconds per tool call — tools like doc gen can be slow
+_MAX_RESULT_CHARS = 12000  # enough context for meaningful tool results
 
 
 def _extract_tool_calls(text: str) -> list[dict]:

@@ -246,6 +246,17 @@ async def run_scheduled_task(task: dict) -> None:
     # Run the prompt
     await process_message(task["prompt"], source="schedule", session_id=sess["id"])
 
+    # Track scheduled task execution
+    try:
+        from helm.device_link import track_usage
+        track_usage("scheduler", "task_run", {
+            "task_id": task.get("id"),
+            "task_name": task.get("name"),
+            "ai": task.get("ai"),
+        })
+    except Exception:
+        pass
+
     task["run_count"] = task.get("run_count", 0) + 1
     task["last_run"]  = time.time()
     save_scheduled_tasks()

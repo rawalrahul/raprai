@@ -436,6 +436,21 @@ async def _main():
     from helm.resilience import ai_watchdog
     asyncio.create_task(ai_watchdog())
 
+    # Start auto-update checker (checks every 4 hours, first check after 30s)
+    from helm.updater import auto_check_loop
+    asyncio.create_task(auto_check_loop())
+
+    # Start device link sync loop (syncs connections + flushes telemetry every 30 min)
+    from helm.device_link import device_sync_loop, track_usage
+    asyncio.create_task(device_sync_loop())
+
+    # Track app launch
+    try:
+        from helm.version import APP_VERSION
+        track_usage("app", "launched", {"version": APP_VERSION})
+    except Exception:
+        pass
+
     if _st.telegram_app:
         from telegram import Update
         async with _st.telegram_app:

@@ -62,10 +62,9 @@ MAX_WAIT            = float(os.environ.get("OUTPUT_MAX_WAIT",      "600"))  # wa
 NO_OUTPUT_TIMEOUT   = float(os.environ.get("OUTPUT_NO_RESPONSE",   "120"))  # was 5   (2 min)
 CLAUDE_TIMEOUT      = float(os.environ.get("CLAUDE_TIMEOUT",       "0"))    # 0 = unlimited
 # INTEGRATION_TIMEOUT – max seconds for non-Claude AI subprocesses (Gemini, Codex, …).
-#                       These are single-turn CLIs so a 3-min ceiling is ample.
-#                       Prevents infinite hang when an invalid --model causes the
-#                       CLI to enter an interactive picker (no terminal attached).
-INTEGRATION_TIMEOUT = float(os.environ.get("INTEGRATION_TIMEOUT", "180"))  # 3 min
+#                       0 = unlimited, matching Claude behaviour.  All modern AIs
+#                       handle arbitrarily long responses; we don't want to cut them short.
+INTEGRATION_TIMEOUT = float(os.environ.get("INTEGRATION_TIMEOUT", "0"))    # 0 = unlimited
 
 # ---------------------------------------------------------------------------
 # Paths / server

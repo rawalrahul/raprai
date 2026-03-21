@@ -371,6 +371,13 @@ async def heartbeat_runner():
                 logger.info("Heartbeat: no pending items. Sending greeting.")
                 await _notify_telegram_idle()
 
+            # Track heartbeat execution
+            try:
+                from helm.device_link import track_usage
+                track_usage("heartbeat", "scan", {"pending_count": len(pending) if pending else 0})
+            except Exception:
+                pass
+
         except asyncio.CancelledError:
             break
         except Exception as exc:

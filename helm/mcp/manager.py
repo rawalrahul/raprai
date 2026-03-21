@@ -74,6 +74,13 @@ class MCPManager:
         self._rebuild_tool_map()
         self._initialized = True
 
+        # Sync MCP configs to each CLI's native location so they discover
+        # tools on their own — as if the user configured them directly.
+        try:
+            self.sync_native_mcp_configs()
+        except Exception as exc:
+            logger.warning("MCP config sync failed (non-fatal): %s", exc)
+
     async def _start_client(self, server_id: str, client: MCPClient) -> bool:
         """Start a single client, return True on success."""
         try:
@@ -145,6 +152,13 @@ class MCPManager:
 
         # Rebuild tool map
         self._rebuild_tool_map()
+
+        # Re-sync native configs after reload
+        try:
+            self.sync_native_mcp_configs()
+        except Exception as exc:
+            logger.warning("MCP config sync failed (non-fatal): %s", exc)
+
         logger.info("MCP reload complete: %d servers active", len(self._clients))
 
     async def shutdown(self):
@@ -463,6 +477,149 @@ class MCPManager:
     def has_running_servers(self) -> bool:
         return (any(c.is_running() for c in self._clients.values())
                 or self._chrome_client.is_running())
+
+    def _get_subprocess_servers(self) -> dict[str, dict]:
+        """Return running subprocess-based servers as {id: {command, args, env}}.
+
+        Websocket servers (e.g. Chrome) are excluded — CLIs can't connect to those.
+        """
+        servers: dict[str, dict] = {}
+        for sid, client in self._clients.items():
+            if not client.is_running():
+                continue
+            cmd = client.command
+            if not cmd:
+                continue
+            entry: dict = {
+                "command": cmd[0],
+                "args": cmd[1:] if len(cmd) > 1 else [],
+            }
+            if client.extra_env:
+                entry["env"] = client.extra_env
+            servers[sid] = entry
+        return servers
+
+    def export_claude_mcp_config(self, tmp_dir: str) -> str | None:
+        """Write a temp JSON config for Claude CLI's --mcp-config flag.
+
+        Returns the path to the temp JSON file, or None if no servers qualify.
+        """
+        import json, os
+
+        mcp_servers = self._get_subprocess_servers()
+        if not mcp_servers:
+            return None
+
+        config = {"mcpServers": mcp_servers}
+        path = os.path.join(tmp_dir, "_claude_mcp.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(config, f)
+        logger.info("Claude MCP config written: %s (%d servers)", path, len(mcp_servers))
+        return path
+
+    def sync_native_mcp_configs(self) -> None:
+        """Write MCP server configs to each CLI's native config location.
+
+        This lets every CLI discover tools as if the user configured them
+        directly — the CLI never knows it's running through RAPR AI.
+
+        Targets:
+          Gemini  → ~/.gemini/settings.json  (mcpServers key)
+          Codex   → ~/.codex/config.toml     ([[mcp.servers.NAME]] sections)
+
+        Claude uses --mcp-config at invocation time (handled by export_claude_mcp_config).
+        Ollama has its own native tool calling via the API.
+        """
+        import json, os
+
+        servers = self._get_subprocess_servers()
+        if not servers:
+            logger.info("sync_native_mcp_configs: no subprocess MCP servers — skipping")
+            return
+
+        home = os.path.expanduser("~")
+
+        # ── Gemini: ~/.gemini/settings.json ─────────────────────────────
+        try:
+            gemini_dir = os.path.join(home, ".gemini")
+            os.makedirs(gemini_dir, exist_ok=True)
+            gemini_path = os.path.join(gemini_dir, "settings.json")
+
+            # Preserve existing settings
+            existing: dict = {}
+            if os.path.isfile(gemini_path):
+                try:
+                    with open(gemini_path, "r", encoding="utf-8") as f:
+                        existing = json.load(f)
+                except Exception:
+                    existing = {}
+
+            # Build mcpServers — same format as Claude (Gemini uses identical schema)
+            existing["mcpServers"] = servers
+            with open(gemini_path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+            logger.info("Gemini MCP config synced: %s (%d servers)", gemini_path, len(servers))
+        except Exception as exc:
+            logger.warning("Failed to sync Gemini MCP config: %s", exc)
+
+        # ── Codex: ~/.codex/config.toml ─────────────────────────────────
+        try:
+            codex_dir = os.path.join(home, ".codex")
+            os.makedirs(codex_dir, exist_ok=True)
+            codex_path = os.path.join(codex_dir, "config.toml")
+
+            # Read existing config to preserve non-MCP settings
+            existing_lines: list[str] = []
+            if os.path.isfile(codex_path):
+                with open(codex_path, "r", encoding="utf-8") as f:
+                    existing_lines = f.readlines()
+
+            # Strip existing [mcp_servers.*] blocks (we'll rewrite them)
+            cleaned: list[str] = []
+            in_mcp_block = False
+            for line in existing_lines:
+                stripped = line.strip()
+                if stripped.startswith("[mcp_servers."):
+                    in_mcp_block = True
+                    continue
+                if in_mcp_block:
+                    # End of block: next section header or blank line after content
+                    if stripped.startswith("[") or (stripped == "" and cleaned and cleaned[-1].strip() == ""):
+                        in_mcp_block = False
+                        if stripped.startswith("["):
+                            cleaned.append(line)
+                    continue
+                cleaned.append(line)
+
+            # Append MCP server blocks
+            # Codex format: [mcp_servers.NAME]
+            #               command = "cmd"
+            #               args = ["arg1", "arg2"]
+            #
+            #               [mcp_servers.NAME.env]
+            #               KEY = "val"
+            mcp_lines: list[str] = []
+            for sid, srv in servers.items():
+                mcp_lines.append(f"\n[mcp_servers.{sid}]")
+                mcp_lines.append(f'command = "{srv["command"]}"')
+                if srv.get("args"):
+                    args_str = ", ".join(f'"{a}"' for a in srv["args"])
+                    mcp_lines.append(f"args = [{args_str}]")
+                if srv.get("env"):
+                    mcp_lines.append(f"\n[mcp_servers.{sid}.env]")
+                    for k, v in srv["env"].items():
+                        mcp_lines.append(f'{k} = "{v}"')
+                mcp_lines.append("")
+
+            with open(codex_path, "w", encoding="utf-8") as f:
+                f.write("".join(cleaned))
+                if mcp_lines:
+                    f.write("\n".join(mcp_lines))
+                    f.write("\n")
+            logger.info("Codex MCP config synced: %s (%d servers)", codex_path, len(servers))
+        except Exception as exc:
+            logger.warning("Failed to sync Codex MCP config: %s", exc)
 
     def is_mcp_tool(self, tool_name: str) -> bool:
         """Check if a tool name belongs to an MCP server."""

@@ -731,6 +731,21 @@ async def process_message(text: str, source: str = "web",
             logger.info("Token handoff: ai=%s — no actual tokens captured", actual_ai)
         record_usage_task(actual_ai, elapsed, prompt=text, output=output,
                           input_tokens=_tok_in, output_tokens=_tok_out)
+
+        # Track AI usage for telemetry
+        try:
+            from helm.device_link import track_usage
+            track_usage("ai_response", "completed", {
+                "ai": actual_ai,
+                "model": sess.get("model") if sess else None,
+                "elapsed_sec": round(elapsed, 1),
+                "input_tokens": _tok_in,
+                "output_tokens": _tok_out,
+                "source": source,
+            })
+        except Exception:
+            pass
+
         # Audit: log any destructive file commands in the AI output
         if output:
             _log_deletion_warning(actual_ai, sid or "", output)
@@ -993,29 +1008,61 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
 
         sess["claude_msgs"].append(text)
 
-        # Check if MCP tools are available — use agent loop if so
+        # ── Claude MCP strategy ────────────────────────────────────────────
+        # Give Claude ALL tools — let it behave as it would natively.
+        #
+        # --mcp-config: subprocess MCP servers (direct protocol, unlimited)
+        # Agent loop: tool descriptions in prompt (catches anything native misses)
+        # CLI skills: bash commands injected via skill prefix
+        #
+        # All three layers active simultaneously. Claude decides what to use.
+        # If it handles everything natively, agent loop exits immediately.
+        #
         from helm.mcp import get_manager as _get_mcp_mgr
         _mcp_mgr = _get_mcp_mgr()
         _has_mcp = _mcp_mgr and _mcp_mgr.has_running_servers()
+        _mcp_config_path = None
+        _needs_agent_loop = False
 
         if _has_mcp:
-            # Inject MCP context ONLY when agent loop will process tool calls
-            enriched_text = inject_mcp_context(enriched_text, code_exec=False)
-            logger.info("Claude: MCP context injected, agent loop enabled (%d servers)",
-                        len(_mcp_mgr.list_servers()))
+            # Give Claude ALL tools — let it decide what to use.
+            # Native MCP (--mcp-config) for subprocess servers,
+            # agent loop (tool descriptions in prompt) as a safety net.
+            # If Claude handles everything natively, the agent loop wrapper
+            # sees no <tool_call> tags and exits immediately — zero overhead.
+            _mcp_config_path = _mcp_mgr.export_claude_mcp_config(cwd)
+            if _mcp_config_path:
+                logger.info("Claude: native MCP via --mcp-config (%d subprocess servers)",
+                            len(_mcp_mgr._get_subprocess_servers()))
 
-            # Agent loop: AI can call MCP tools via <tool_call> tags
+            # Always inject tool descriptions so Claude CAN use agent loop
+            # if native tools can't reach something (WS servers, edge cases).
+            enriched_text = inject_mcp_context(enriched_text, code_exec=False)
+            logger.info("Claude: all tool layers active (CLI skill + native MCP + agent loop)")
+
+        # Build command — with native MCP if subprocess servers exist
+        cmd = build_claude_cmd(
+            enriched_text, has_history,
+            model=sess.get("model"),
+            auto_approve=True,
+            mcp_config=_mcp_config_path,
+        )
+
+        if _has_mcp:
+            # Agent loop wrapper: watches for <tool_call> XML in output.
+            # If Claude uses native MCP for everything, wrapper exits on
+            # first iteration (no tool calls found) — no interference.
             from .agent_loop import run_with_tools
 
             async def _claude_run_fn(prompt: str) -> str:
-                cmd = build_claude_cmd(
+                _cmd = build_claude_cmd(
                     prompt, has_history,
                     model=sess.get("model"),
                     auto_approve=True,
+                    mcp_config=_mcp_config_path,
                 )
-                raw = await asyncio.to_thread(run_ai_popen, cmd, cwd, "claude", sess)
+                raw = await asyncio.to_thread(run_ai_popen, _cmd, cwd, "claude", sess)
                 parsed = parse_claude_json_output(raw)
-                # Track tokens from latest call
                 if parsed.get("input_tokens") is not None or parsed.get("output_tokens") is not None:
                     sess["_last_tokens"] = {
                         "input": parsed.get("input_tokens", 0),
@@ -1035,12 +1082,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
             )
             after = await asyncio.to_thread(snapshot_dir, cwd)
         else:
-            # Single-turn: no MCP tools available
-            cmd = build_claude_cmd(
-                enriched_text, has_history,
-                model=sess.get("model"),
-                auto_approve=True,
-            )
+            # No MCP servers — pure Claude, no tool wrappers needed
             before = await asyncio.to_thread(snapshot_dir, cwd)
             raw_output = await asyncio.to_thread(run_ai_popen, cmd, cwd, "claude", sess)
             after  = await asyncio.to_thread(snapshot_dir, cwd)
@@ -1057,6 +1099,13 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
                 logger.info("Claude tokens: %s in + %s out, cost=$%s",
                             parsed.get("input_tokens"), parsed.get("output_tokens"),
                             parsed.get("cost_usd"))
+
+        # Clean up temp MCP config
+        if _mcp_config_path:
+            try:
+                os.remove(_mcp_config_path)
+            except OSError:
+                pass
 
         await push_thinking(False, session_id=sid)
 
@@ -1122,16 +1171,33 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
             hist_block += "[Current request]\n"
             enriched_text = hist_block + enriched_text
 
-        # Check if MCP tools are available — use agent loop if so
+        # ── MCP tool strategy ──────────────────────────────────────────────
+        #
+        # Give the AI ALL tools and let it behave natively.
+        #
+        # CLIs with native MCP (Gemini, Codex) already have servers synced
+        # to their config files.  We ALSO inject tool descriptions into the
+        # prompt so the agent loop can catch anything native can't reach.
+        # If the AI handles everything natively, the agent loop wrapper
+        # exits on first iteration (no <tool_call> tags) — zero overhead.
+        #
+        # This way: CLI skill + native MCP + agent loop are ALL available.
+        # The AI picks the best approach — we don't limit or choose for it.
+        _NATIVE_MCP_AIS = {"gemini", "codex"}
+
         from helm.mcp import get_manager as _get_mcp_mgr2
         _mcp_mgr2 = _get_mcp_mgr2()
         _has_mcp2 = _mcp_mgr2 and _mcp_mgr2.has_running_servers()
 
         if _has_mcp2:
-            # Inject MCP context ONLY when agent loop will process tool calls
-            # Code-executing AIs (Codex, Gemini) get HTTP API instructions
+            # Always inject tool descriptions — gives AI the option to
+            # use agent loop for tools not covered by native config
             enriched_text = inject_mcp_context(enriched_text, code_exec=use_stdin)
-            logger.info("%s: MCP context injected (code_exec=%s), agent loop enabled", ai, use_stdin)
+            _cli_has_native_mcp = ai in _NATIVE_MCP_AIS
+            if _cli_has_native_mcp:
+                logger.info("%s: all tool layers active (CLI skill + native MCP + agent loop)", ai)
+            else:
+                logger.info("%s: all tool layers active (CLI skill + agent loop; no native MCP)", ai)
 
             from .agent_loop import run_with_tools
 
@@ -1156,6 +1222,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
             )
             after = await asyncio.to_thread(snapshot_dir, cwd)
         else:
+            # No MCP servers — pure CLI, no tool wrappers needed
             cmd    = integration["build_command"](enriched_text, model=sess.get("model"))
             before = await asyncio.to_thread(snapshot_dir, cwd)
             output = await asyncio.to_thread(

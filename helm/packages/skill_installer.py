@@ -94,6 +94,16 @@ def install_skill(
         if backup_dir and backup_dir.exists():
             shutil.rmtree(str(backup_dir))
 
+        # Track skill installation
+        try:
+            from helm.device_link import track_usage
+            track_usage("skill", "installed", {
+                "skill_id": skill_id,
+                "version": manifest.version if hasattr(manifest, 'version') else None,
+            })
+        except Exception:
+            pass
+
         return {
             "ok": True,
             "install_path": str(install_dir),

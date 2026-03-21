@@ -84,6 +84,18 @@ async def ws_endpoint(websocket: WebSocket):
                 # Allow client to target a specific session (e.g. voice auto-send)
                 _dispatch_sid = data.get("session_id") or _st.focused_id
 
+                # Track chat message usage
+                try:
+                    from helm.device_link import track_usage
+                    sess = _st.sessions.get(_dispatch_sid) if _dispatch_sid else None
+                    track_usage("chat", "message_sent", {
+                        "source": "web",
+                        "ai": sess.get("ai") if sess else None,
+                        "model": sess.get("model") if sess else None,
+                    })
+                except Exception:
+                    pass
+
                 async def _fire_and_forward(
                     _text: str = content,
                     _sid: str = _dispatch_sid,
@@ -148,6 +160,13 @@ async def handle_web_command(command: str, ws: WebSocket):
         _st.focused_id = sess["id"]
         await push_state()
         label = sess["emoji"] + " " + sess["name"]
+
+        # Track session creation
+        try:
+            from helm.device_link import track_usage
+            track_usage("session", "created", {"ai": ai_key or "shell", "model": chosen_model})
+        except Exception:
+            pass
         actual_model = sess.get("model")
         if chosen_model:
             model_note = f" [{chosen_model}]"

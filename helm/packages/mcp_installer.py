@@ -113,6 +113,13 @@ def install_mcp(
         except Exception as e:
             logger.warning("MCP hot-reload failed: %s", e)
 
+        # Track MCP installation
+        try:
+            from helm.device_link import track_usage
+            track_usage("mcp", "installed", {"server_id": server_id})
+        except Exception:
+            pass
+
         return {
             "ok": True,
             "server_id": server_id,

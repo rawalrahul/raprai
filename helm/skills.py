@@ -204,7 +204,8 @@ def scan_skills(skills_bases=None) -> dict[str, dict]:
                 return False
 
             description = meta.get("description", "")
-            keywords    = _extract_keywords(name, description)
+            explicit_kw = meta.get("keywords", "")
+            keywords    = _extract_keywords(name, description, explicit_kw)
             new_registry[name] = {
                 "name":        name,
                 "description": description,
@@ -418,10 +419,12 @@ _EXTRA_KEYWORDS: dict[str, list[str]] = {
 }
 
 
-def _extract_keywords(name: str, description: str) -> list[str]:
+def _extract_keywords(name: str, description: str,
+                       explicit_keywords: str = "") -> list[str]:
     """Build a deduplicated keyword list for prompt matching.
 
     Sources (in priority order):
+      0. Explicit keywords from frontmatter `keywords:` field (comma-separated)
       1. Full skill name (e.g. "invoice-organizer")
       2. Individual hyphen-split parts (e.g. "invoice", "organizer")
       3. File extensions found in description  (e.g. ".docx", "docx")
@@ -429,6 +432,13 @@ def _extract_keywords(name: str, description: str) -> list[str]:
       5. Hand-curated extras from _EXTRA_KEYWORDS
     """
     keywords: list[str] = [name.lower()]
+
+    # 0. Explicit keywords from frontmatter — highest signal
+    if explicit_keywords:
+        for kw in re.split(r'[,\s]+', explicit_keywords.strip()):
+            kw = kw.strip().lower()
+            if kw and len(kw) >= 2:
+                keywords.append(kw)
 
     # 2. Split name on hyphens and add each meaningful part
     name_parts = [p for p in name.lower().split("-") if len(p) >= 3 and p not in _STOP_WORDS]
@@ -586,14 +596,26 @@ def _build_prefix(skill_name: str, ai: str = "") -> str:
     # (Ollama has its own tool-calling system prompt that handles this)
     cli_preamble = ""
     if ai and ai != "ollama":
-        has_code = "```python" in snippet or "```bash" in snippet
+        has_bash = "```bash" in snippet
+        has_code = "```python" in snippet or has_bash
         if has_code:
+            # CLI-first priority: if skill provides CLI commands, prefer those
+            # over MCP tools for the same service (CLI is faster & more capable)
+            cli_priority_note = ""
+            if has_bash:
+                cli_priority_note = (
+                    "• PREFER the CLI commands in this skill over MCP tools for the "
+                    "same service. The CLI is faster and more capable. Only fall back "
+                    "to MCP tools if the CLI is not installed or the command fails.\n"
+                )
+
             # Skill has code templates → instruct AI to write & execute code
             cli_preamble = (
                 "\n[IMPORTANT — EXECUTION INSTRUCTIONS]\n"
                 "You MUST write and execute a complete, self-contained Python script "
                 "to complete this task. Copy the code templates above, adapt them for "
                 "the user's specific request, and RUN the script.\n"
+                f"{cli_priority_note}"
                 "• Install packages silently: subprocess.check_call([sys.executable, "
                 '"-m", "pip", "install", "package-name", "-q"])\n'
                 "• Save output files to the current working directory.\n"

@@ -37,7 +37,7 @@ app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 # ---------------------------------------------------------------------------
 
 # Paths that are always public (no PIN required)
-_PUBLIC_PREFIXES = ("/login", "/setup", "/static", "/health", "/manifest.json", "/sw.js")
+_PUBLIC_PREFIXES = ("/login", "/setup", "/static", "/health", "/manifest.json", "/sw.js", "/update/check")
 
 # MCP endpoints are NOT fully public — they require localhost origin
 # and a bearer token that's auto-generated at startup.

@@ -10,13 +10,17 @@ import re
 
 def build_claude_cmd(prompt: str, has_history: bool,
                      model: str | None = None,
-                     auto_approve: bool = False) -> list[str]:
+                     auto_approve: bool = False,
+                     mcp_config: str | None = None) -> list[str]:
     """Build the command-line arguments to invoke the Claude CLI.
 
     Uses --output-format json to get structured output including token counts.
     auto_approve: if True, adds --dangerously-skip-permissions so Claude
                   won't pause for file/command approvals (required for
                   non-interactive pipeline steps and background sessions).
+    mcp_config:   path to a JSON file for --mcp-config (native MCP tool
+                  calling — lets Claude connect to MCP servers directly
+                  instead of going through the text-based agent loop).
     """
     cmd = ["claude"]
     if model:
@@ -25,6 +29,8 @@ def build_claude_cmd(prompt: str, has_history: bool,
         cmd.append("--continue")
     if auto_approve:
         cmd.append("--dangerously-skip-permissions")
+    if mcp_config:
+        cmd.extend(["--mcp-config", mcp_config])
     cmd.extend(["--output-format", "json", "-p", prompt])
     return cmd
 

@@ -58,7 +58,8 @@ InfoBeforeFile=installer_info.txt
 ; Allow upgrading over existing installation
 UsePreviousAppDir=yes
 ; Process is killed via [Code] section before install/uninstall
-CloseApplications=no
+CloseApplications=force
+RestartApplications=yes
 AppMutex=RAPR_AI_SingleInstance
 
 [Languages]
@@ -87,10 +88,18 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDi
 [Run]
 ; Run setup_dist.bat after install (if user checked the option)
 Filename: "{app}\setup_dist.bat"; Description: "Install external dependencies (Node.js, Pandoc, etc.)"; Flags: nowait postinstall skipifsilent shellexec; Tasks: rundeps
-; Offer to launch the app after install
+; Offer to launch the app after install (interactive mode — user chooses)
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName} now"; Flags: nowait postinstall skipifsilent unchecked; WorkingDir: "{app}"
+; Auto-launch after silent upgrade (no user interaction)
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait postinstall skipifdoesntexist; WorkingDir: "{app}"; Check: IsSilentInstall
 
 [Code]
+// Return True if the installer was launched with /SILENT or /VERYSILENT
+function IsSilentInstall(): Boolean;
+begin
+  Result := WizardSilent();
+end;
+
 // Kill any running RAPR AI process before install or uninstall
 procedure KillRAPRAI();
 var
