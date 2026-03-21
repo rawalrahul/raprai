@@ -35,7 +35,7 @@ goto :skip_helper
 :: ════════════════════════════════════════════════════════════════════════════
 :: 1. NODE.JS  (needed for Word/PowerPoint file creation)
 :: ════════════════════════════════════════════════════════════════════════════
-echo  [1/5]  Checking Node.js...
+echo  [1/6]  Checking Node.js...
 node --version >nul 2>&1
 if errorlevel 1 (
     echo.
@@ -84,7 +84,7 @@ echo.
 :: ════════════════════════════════════════════════════════════════════════════
 :: 2. NPM PACKAGES  (docx + pptxgenjs for document/slide creation)
 :: ════════════════════════════════════════════════════════════════════════════
-echo  [2/5]  Installing Node packages...
+echo  [2/6]  Installing Node packages...
 if defined NODE_MISSING (
     echo   Skipping — Node.js was not installed.
 ) else (
@@ -109,7 +109,7 @@ echo.
 :: ════════════════════════════════════════════════════════════════════════════
 :: 3. PANDOC  (optional — for reading existing .docx files)
 :: ════════════════════════════════════════════════════════════════════════════
-echo  [3/5]  Checking Pandoc (optional)...
+echo  [3/6]  Checking Pandoc (optional)...
 pandoc --version >nul 2>&1
 if errorlevel 1 (
     echo   Pandoc not found.  Attempting automatic install via winget...
@@ -131,7 +131,7 @@ echo.
 :: ════════════════════════════════════════════════════════════════════════════
 :: 4. FFMPEG  (optional — for voice message transcription)
 :: ════════════════════════════════════════════════════════════════════════════
-echo  [4/5]  Checking FFmpeg (optional — for voice messages)...
+echo  [4/6]  Checking FFmpeg (optional — for voice messages)...
 ffmpeg -version >nul 2>&1
 if errorlevel 1 (
     echo   FFmpeg not found.  Attempting automatic install via winget...
@@ -153,7 +153,7 @@ echo.
 :: ════════════════════════════════════════════════════════════════════════════
 :: 5. TESSERACT OCR  (optional — for scanned PDF documents)
 :: ════════════════════════════════════════════════════════════════════════════
-echo  [5/5]  Checking Tesseract OCR (optional)...
+echo  [5/6]  Checking Tesseract OCR (optional)...
 tesseract --version >nul 2>&1
 if errorlevel 1 (
     echo   Tesseract not found.  Attempting automatic install via winget...
@@ -168,6 +168,43 @@ if errorlevel 1 (
     )
 ) else (
     echo     Tesseract found.
+)
+echo.
+
+
+:: ════════════════════════════════════════════════════════════════════════════
+:: 6. PLAYWRIGHT CLI  (optional — for AI-driven browser automation)
+:: ════════════════════════════════════════════════════════════════════════════
+echo  [6/6]  Checking Playwright CLI (optional — for browser automation)...
+if defined NODE_MISSING (
+    echo   Skipping — Node.js was not installed.
+) else (
+    node --version >nul 2>&1
+    if errorlevel 1 (
+        echo   Skipping — Node.js not available in this session.
+    ) else (
+        npx @playwright/cli --version >nul 2>&1
+        if errorlevel 1 (
+            echo   Installing Playwright CLI and Chromium browser...
+            call npm install -g @playwright/cli@latest --silent
+            if errorlevel 1 (
+                echo   WARNING: Playwright CLI install failed.
+                echo   Browser automation tasks will not be available.
+                echo   Install later: npm install -g @playwright/cli@latest
+            ) else (
+                echo   Installing Chromium for Playwright...
+                npx playwright install chromium >nul 2>&1
+                if errorlevel 1 (
+                    echo   WARNING: Chromium install failed. Run manually:
+                    echo     npx playwright install chromium
+                ) else (
+                    echo   Playwright CLI + Chromium installed.
+                )
+            )
+        ) else (
+            echo     Playwright CLI found.
+        )
+    )
 )
 echo.
 

@@ -22,6 +22,16 @@ if exist installer_output (
     rmdir /s /q installer_output
 )
 
+:: ── Generate .ico from logo.png (needed by Inno Setup + shortcuts) ──────
+echo  Generating logo.ico from logo.png...
+python -c "from PIL import Image; img=Image.open('logo.png'); img.save('logo.ico', format='ICO', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+if errorlevel 1 (
+    echo  WARNING: Could not generate logo.ico — Pillow may not be installed.
+    echo  Run: pip install Pillow
+) else (
+    echo  logo.ico created successfully.
+)
+
 echo.
 echo  Starting Nuitka compilation...
 echo  (This may take 10-20 minutes)
@@ -30,6 +40,7 @@ echo.
 python -m nuitka --standalone --enable-plugin=tk-inter ^
     --include-data-dir=helm/frontend=helm/frontend ^
     --include-data-files=logo.png=logo.png ^
+    --windows-icon-from-ico=logo.ico ^
     --include-package=pptx ^
     --include-package=docx ^
     --include-package=openpyxl ^
@@ -73,6 +84,12 @@ if exist mcp_servers.json (
 copy /Y setup_dist.bat web_app.dist\ >nul 2>&1
 copy /Y README_DIST.md web_app.dist\ >nul 2>&1
 
+:: Copy app icon into dist (used by shortcuts)
+if exist logo.ico (
+    copy /Y logo.ico web_app.dist\ >nul
+    echo  Copied logo.ico into dist
+)
+
 echo.
 echo  ╔══════════════════════════════════════════════╗
 echo  ║         Nuitka build complete!               ║
@@ -91,7 +108,7 @@ if exist "%ISCC%" (
         echo  The dist folder is still usable — just no .exe installer.
     ) else (
         echo.
-        echo  Installer created: installer_output\RAPR_AI_Setup_1.0.0.exe
+        echo  Installer created: installer_output\RAPR_AI_Setup_2.0.0.exe
     )
 ) else (
     echo  Inno Setup not found — skipping installer creation.
@@ -107,8 +124,8 @@ echo.
 echo  Dist folder:  web_app.dist\
 echo  Test:         cd web_app.dist ^& web_app.exe
 echo.
-if exist installer_output\RAPR_AI_Setup_1.0.0.exe (
-    echo  Installer:    installer_output\RAPR_AI_Setup_1.0.0.exe
+if exist installer_output\RAPR_AI_Setup_2.0.0.exe (
+    echo  Installer:    installer_output\RAPR_AI_Setup_2.0.0.exe
     echo.
 )
 pause

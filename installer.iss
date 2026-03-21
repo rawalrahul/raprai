@@ -9,7 +9,7 @@
 ;        "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
 ;
 ; The installer will:
-;   - Copy everything from web_app.dist\ into Program Files
+;   - Copy everything from web_app.dist\ into AppData\Local
 ;   - Create a Start Menu shortcut
 ;   - Create a Desktop shortcut (optional)
 ;   - Register an uninstaller
@@ -31,26 +31,27 @@ AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
-DefaultDirName={autopf}\{#MyAppName}
+; Install to user's local AppData — no admin required
+DefaultDirName={localappdata}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 ; Allow user to choose desktop shortcut
 AllowNoIcons=yes
 ; Output location and filename for the generated installer .exe
 OutputDir=installer_output
 OutputBaseFilename=RAPR_AI_Setup_{#MyAppVersion}
-; Use the app logo as the installer icon (converted to .ico at build time)
-; If you have a .ico file, replace this line:
-; SetupIconFile=logo.ico
+; App icon (built by build.bat from logo.png → logo.ico)
+SetupIconFile=logo.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 ; Require Windows 10+
 MinVersion=10.0
-; Run as admin to install to Program Files
-PrivilegesRequired=admin
+; No admin required — installs to user-writable AppData\Local
+PrivilegesRequired=lowest
 ; Nice modern look
 WizardStyle=modern
 ; Uninstall settings
 UninstallDisplayName={#MyAppName}
+UninstallDisplayIcon={app}\logo.ico
 ; Show a license/readme page during install
 LicenseFile=
 InfoBeforeFile=README_DIST.md
@@ -76,14 +77,14 @@ Source: "web_app.dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 ;       Run build.bat first!
 
 [Icons]
-; Start Menu shortcut
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Comment: "Launch RAPR AI"
+; Start Menu shortcut (with app icon)
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\logo.ico"; Comment: "Launch RAPR AI"
 ; Start Menu — open install folder
 Name: "{group}\RAPR AI Folder"; Filename: "{app}"; Comment: "Open RAPR AI installation folder"
 ; Start Menu — uninstall
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
-; Desktop shortcut (optional)
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon; Comment: "Launch RAPR AI"
+; Desktop shortcut (with app icon)
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\logo.ico"; Tasks: desktopicon; Comment: "Launch RAPR AI"
 
 [Run]
 ; Run setup_dist.bat after install (if user checked the option)
@@ -103,5 +104,6 @@ Type: filesandordirs; Name: "{app}\chat_logs"
 Type: filesandordirs; Name: "{app}\logs"
 Type: filesandordirs; Name: "{app}\helmpack_cache"
 Type: filesandordirs; Name: "{app}\packages_cache"
+Type: filesandordirs; Name: "{app}\packages_staging"
 Type: dirifempty; Name: "{app}"
 
