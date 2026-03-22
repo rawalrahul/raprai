@@ -920,7 +920,8 @@ async def tg_voice(update, context):
     # Download the voice/audio file from Telegram
     voice = update.message.voice or update.message.audio
     if not voice:
-        await update.message.reply_text("⚠️ No audio found in message.")
+        await update.message.reply_text("⚠️ No audio found in message.",
+                                        reply_markup=session_controls_keyboard())
         return
 
     await update.message.reply_text("🎤 Transcribing voice message...")
@@ -945,7 +946,8 @@ async def tg_voice(update, context):
             pass
 
         if not transcript or not transcript.strip():
-            await update.message.reply_text("⚠️ Could not transcribe audio — no speech detected.")
+            await update.message.reply_text("⚠️ Could not transcribe audio — no speech detected.",
+                                            reply_markup=session_controls_keyboard())
             return
 
         # Show the transcript to the user
@@ -981,7 +983,8 @@ async def tg_voice(update, context):
 
     except Exception as exc:
         logger.warning("Voice transcription error: %s", exc)
-        await update.message.reply_text(f"⚠️ Voice transcription failed: {exc}")
+        await update.message.reply_text(f"⚠️ Voice transcription failed: {exc}",
+                                        reply_markup=session_controls_keyboard())
 
 
 def _ensure_ffmpeg():
@@ -1077,7 +1080,8 @@ async def tg_file(update, context):
         file_obj = await document.get_file()
         filename = document.file_name or f"telegram_file_{int(time.time())}"
     else:
-        await update.message.reply_text("⚠️ Unsupported attachment type.")
+        await update.message.reply_text("⚠️ Unsupported attachment type.",
+                                        reply_markup=session_controls_keyboard())
         return
 
     # Save to session CWD
@@ -1085,7 +1089,8 @@ async def tg_file(update, context):
     try:
         await file_obj.download_to_drive(save_path)
     except Exception as exc:
-        await update.message.reply_text(f"⚠️ Failed to save file: {exc}")
+        await update.message.reply_text(f"⚠️ Failed to save file: {exc}",
+                                        reply_markup=session_controls_keyboard())
         return
 
     fs = focused_session()
