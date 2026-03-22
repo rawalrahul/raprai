@@ -41,11 +41,24 @@ def _clean_output(text: str) -> str:
 # Telegram notification helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def forward_to_telegram(text: str):
-    """Send a message to the user's Telegram chat (fire-and-forget)."""
+async def forward_to_telegram(text: str, reply_markup=None):
+    """Send a message to the user's Telegram chat (fire-and-forget).
+
+    If *reply_markup* is not supplied, the session-controls keyboard is
+    attached automatically so the user always has action buttons visible.
+    """
     if _st.telegram_app and _st.telegram_chat_id:
+        if reply_markup is None:
+            try:
+                from helm.telegram_bot import session_controls_keyboard
+                reply_markup = session_controls_keyboard()
+            except Exception:
+                pass
         try:
-            await _st.telegram_app.bot.send_message(chat_id=_st.telegram_chat_id, text=text)
+            await _st.telegram_app.bot.send_message(
+                chat_id=_st.telegram_chat_id, text=text,
+                reply_markup=reply_markup,
+            )
         except Exception as e:
             logger.warning("Telegram forward failed: %s", e)
 
@@ -87,9 +100,19 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
     For web-sourced messages: forwards the full AI response to Telegram
     (not just a preview) so the user sees the same content on both UI and
     Telegram.  Noise lines (Node.js warnings etc.) are stripped first.
+
+    The **last** message in every notification always carries the session-
+    controls inline keyboard so the user never has to scroll up for buttons.
     """
     if not (_st.telegram_app and _st.telegram_chat_id):
         return
+
+    # Resolve the controls keyboard once — attached to the final message
+    try:
+        from helm.telegram_bot import session_controls_keyboard
+        _kb = session_controls_keyboard()
+    except Exception:
+        _kb = None
 
     running = [s for s in _st.sessions.values() if s["status"] == "running"]
     multi   = len(running) >= 2
@@ -98,7 +121,7 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
     if not multi and not web_src:
         return  # single session via Telegram — reply already serves as notification
 
-    # For web-sourced messages: forward the user's input first
+    # For web-sourced messages: forward the user's input first (no buttons)
     if web_src and prompt_text:
         try:
             await _st.telegram_app.bot.send_message(
@@ -128,10 +151,13 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
     if not still_busy and multi:
         header += f"\n🏁 All {len(running)} sessions idle"
 
+    # If there's no body to send, attach keyboard to the header itself
+    has_body = bool(clean) or (not clean and output)
     try:
         await _st.telegram_app.bot.send_message(
             chat_id=_st.telegram_chat_id,
             text=header,
+            reply_markup=_kb if not has_body else None,
         )
     except Exception as e:
         logger.warning("Progress notify header failed: %s", e)
@@ -140,11 +166,13 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
     if clean:
         max_len = 3800
         chunks = [clean[i:i + max_len] for i in range(0, len(clean), max_len)]
-        for chunk in chunks:
+        for idx, chunk in enumerate(chunks):
+            is_last = idx == len(chunks) - 1
             try:
                 await _st.telegram_app.bot.send_message(
                     chat_id=_st.telegram_chat_id,
                     text=chunk,
+                    reply_markup=_kb if is_last else None,
                 )
             except Exception as e:
                 logger.warning("Progress notify chunk failed: %s", e)
@@ -155,6 +183,7 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
             await _st.telegram_app.bot.send_message(
                 chat_id=_st.telegram_chat_id,
                 text="(response contained only system warnings — check the UI for details)",
+                reply_markup=_kb,
             )
         except Exception:
             pass

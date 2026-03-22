@@ -200,7 +200,15 @@ async def emit_session_end_summary(sess: dict, ended_as: str, source: str) -> No
 
     if _st.telegram_app and _st.telegram_chat_id:
         try:
-            await _st.telegram_app.bot.send_message(chat_id=_st.telegram_chat_id, text=summary)
+            from helm.telegram_bot import sessions_keyboard
+            _kb = sessions_keyboard()
+        except Exception:
+            _kb = None
+        try:
+            await _st.telegram_app.bot.send_message(
+                chat_id=_st.telegram_chat_id, text=summary,
+                reply_markup=_kb,
+            )
         except Exception as e:
             logger.warning("Session summary Telegram notify failed: %s", e)
 

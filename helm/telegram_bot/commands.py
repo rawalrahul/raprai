@@ -869,7 +869,10 @@ async def tg_text(update, context):
         except Exception as exc:
             logger.warning("tg_fire error: %s", exc)
             try:
-                await _update.message.reply_text(f"⚠️ Error: {exc}")
+                await _update.message.reply_text(
+                    f"⚠️ Error: {exc}",
+                    reply_markup=session_controls_keyboard(),
+                )
             except Exception:
                 pass
 
@@ -967,7 +970,10 @@ async def tg_voice(update, context):
             except Exception as exc:
                 logger.warning("tg_voice_fire error: %s", exc)
                 try:
-                    await _update.message.reply_text(f"⚠️ Error: {exc}")
+                    await _update.message.reply_text(
+                        f"⚠️ Error: {exc}",
+                        reply_markup=session_controls_keyboard(),
+                    )
                 except Exception:
                     pass
 
@@ -1106,7 +1112,10 @@ async def tg_file(update, context):
             except Exception as exc:
                 logger.warning("tg_file_fire error: %s", exc)
                 try:
-                    await _update.message.reply_text(f"⚠️ Error: {exc}")
+                    await _update.message.reply_text(
+                        f"⚠️ Error: {exc}",
+                        reply_markup=session_controls_keyboard(),
+                    )
                 except Exception:
                     pass
 
