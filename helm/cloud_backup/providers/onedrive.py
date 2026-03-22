@@ -31,16 +31,26 @@ class OneDriveBackupProvider(BackupProvider):
 
     VAULT_KEY = "BACKUP_ONEDRIVE_TOKEN"
 
+    # Bundled OAuth app credentials (registered by RAPR AI developer).
+    # Users can override via env vars or the Settings UI (token vault).
+    _DEFAULT_CLIENT_ID = "REDACTED"
+    _DEFAULT_CLIENT_SECRET = "REDACTED"
+
     def __init__(self):
+        # Priority: env var → token vault → bundled default
         self.client_id = os.getenv("BACKUP_ONEDRIVE_CLIENT_ID", "")
         self.client_secret = os.getenv("BACKUP_ONEDRIVE_CLIENT_SECRET", "")
-        self._token_data: Optional[dict] = None
-
         if not self.client_id or not self.client_secret:
-            logger.warning(
-                "OneDrive credentials not configured. "
-                "Set BACKUP_ONEDRIVE_CLIENT_ID and BACKUP_ONEDRIVE_CLIENT_SECRET."
-            )
+            try:
+                from helm.token_vault import load_token
+                self.client_id = self.client_id or load_token("BACKUP_ONEDRIVE_CLIENT_ID")
+                self.client_secret = self.client_secret or load_token("BACKUP_ONEDRIVE_CLIENT_SECRET")
+            except Exception:
+                pass
+        # Fall back to bundled defaults
+        self.client_id = self.client_id or self._DEFAULT_CLIENT_ID
+        self.client_secret = self.client_secret or self._DEFAULT_CLIENT_SECRET
+        self._token_data: Optional[dict] = None
 
     # ── Token helpers ────────────────────────────────────────────────────
 

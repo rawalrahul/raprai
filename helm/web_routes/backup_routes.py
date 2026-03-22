@@ -21,6 +21,22 @@ router = APIRouter()
 
 PROVIDERS = ("onedrive", "gdrive", "dropbox", "local")
 
+# Env-var names for each provider's OAuth app credentials
+_CREDENTIAL_KEYS: dict[str, dict[str, str]] = {
+    "onedrive": {
+        "client_id": "BACKUP_ONEDRIVE_CLIENT_ID",
+        "client_secret": "BACKUP_ONEDRIVE_CLIENT_SECRET",
+    },
+    "gdrive": {
+        "client_id": "BACKUP_GDRIVE_CLIENT_ID",
+        "client_secret": "BACKUP_GDRIVE_CLIENT_SECRET",
+    },
+    "dropbox": {
+        "client_id": "BACKUP_DROPBOX_APP_KEY",
+        "client_secret": "BACKUP_DROPBOX_APP_SECRET",
+    },
+}
+
 
 def _get_provider(name: str):
     """Lazy-load and return a provider instance."""
@@ -127,6 +143,79 @@ def _update_next_backup(db, provider: str):
                 (next_at.isoformat(), provider)
             )
             db.commit()
+
+
+# ---------------------------------------------------------------------------
+# OAuth app credentials (client ID / secret per provider)
+# ---------------------------------------------------------------------------
+
+@router.get("/backups/credentials/{provider}")
+async def get_backup_credentials(provider: str):
+    """Return whether OAuth app credentials are configured for a provider."""
+    keys = _CREDENTIAL_KEYS.get(provider)
+    if not keys:
+        return JSONResponse({"configured": False, "has_client_id": False, "has_client_secret": False})
+
+    # Check env vars / token vault
+    cid = os.getenv(keys["client_id"], "")
+    csec = os.getenv(keys["client_secret"], "")
+
+    # Also check if the provider has bundled defaults
+    if not (cid and csec):
+        try:
+            p = _get_provider(provider)
+            if p and getattr(p, 'client_id', None) and getattr(p, 'client_secret', None):
+                cid = cid or p.client_id
+                csec = csec or p.client_secret
+            elif p and getattr(p, 'app_key', None) and getattr(p, 'app_secret', None):
+                cid = cid or p.app_key
+                csec = csec or p.app_secret
+        except Exception:
+            pass
+
+    return JSONResponse({
+        "configured": bool(cid and csec),
+        "has_client_id": bool(cid),
+        "has_client_secret": bool(csec),
+        # Never return the actual values — just whether they're set
+    })
+
+
+@router.post("/backups/credentials/{provider}")
+async def save_backup_credentials(provider: str, request: Request):
+    """Save OAuth app credentials for a provider into the token vault."""
+    keys = _CREDENTIAL_KEYS.get(provider)
+    if not keys:
+        return JSONResponse({"ok": False, "error": f"Unknown provider: {provider}"}, status_code=400)
+
+    body = await request.json()
+    client_id = (body.get("client_id") or "").strip()
+    client_secret = (body.get("client_secret") or "").strip()
+
+    if not client_id or not client_secret:
+        return JSONResponse({"ok": False, "error": "Both Client ID and Client Secret are required"})
+
+    from helm.token_vault import store_token
+    store_token(keys["client_id"], client_id)
+    store_token(keys["client_secret"], client_secret)
+    logger.info("cloud_backup: saved OAuth credentials for %s", provider)
+
+    return JSONResponse({"ok": True})
+
+
+@router.delete("/backups/credentials/{provider}")
+async def delete_backup_credentials(provider: str):
+    """Remove OAuth app credentials for a provider."""
+    keys = _CREDENTIAL_KEYS.get(provider)
+    if not keys:
+        return JSONResponse({"ok": False, "error": f"Unknown provider: {provider}"}, status_code=400)
+
+    from helm.token_vault import delete_token
+    delete_token(keys["client_id"])
+    delete_token(keys["client_secret"])
+    logger.info("cloud_backup: removed OAuth credentials for %s", provider)
+
+    return JSONResponse({"ok": True})
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +389,18 @@ async def backup_oauth_connect(provider: str, request: Request):
 
     url = p.get_oauth_url(redirect_uri, state)
     if not url:
-        return JSONResponse({"error": "OAuth not supported by this provider"})
+        html = f"""<!DOCTYPE html><html><head><title>Setup Required</title>
+<style>body{{font-family:system-ui;background:#1a1a2e;color:#e0e0e0;display:flex;
+align-items:center;justify-content:center;min-height:100vh;margin:0}}
+.box{{text-align:center;padding:40px;max-width:400px}}
+h2{{color:#f59e0b}}p{{font-size:14px;line-height:1.6;color:#a0a0b0}}</style>
+</head><body><div class="box">
+<h2>API Credentials Required</h2>
+<p>To connect {provider.title()}, you need to set up OAuth app credentials first.</p>
+<p>Close this window, click the 🔑 button next to {provider.title()}, enter your Client ID and Secret, then try Connect again.</p>
+<script>setTimeout(()=>window.close(),8000);</script>
+</div></body></html>"""
+        return HTMLResponse(html)
 
     # Store state for verification
     db = get_db()
