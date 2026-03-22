@@ -55,11 +55,14 @@ def make_session(ai: Optional[str], cwd: Optional[str] = None,
     if ai == "claude":
         claude_msgs = [m["content"] for m in history if m.get("role") == "user"]
 
+    import asyncio as _asyncio
     sess: dict = {
         "id": sid, "ai": ai, "cwd": target_cwd, "status": "running",
         "terminal": t, "claude_msgs": claude_msgs, "name": name, "emoji": emoji,
         "color": color, "created": time.time(), "last_used": time.time(),
         "busy": False, "task_start": None,
+        # Per-session lock: prevents concurrent web + Telegram messages from racing
+        "_lock": _asyncio.Lock(),
         "session_started": time.time(), "total_task_seconds": 0.0, "task_count": 0,
         "changes": {"new": [], "modified": [], "deleted": []},
         "proc": None,

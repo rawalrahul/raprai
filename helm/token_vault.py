@@ -172,16 +172,25 @@ def load_all_tokens() -> dict[str, str]:
         rows = db.execute("SELECT env_key, cipher FROM token_vault").fetchall()
         f = _fernet()
         for row in rows:
-            env_key, cipher = row["env_key"], row["cipher"]
-            if f:
-                try:
-                    plain = f.decrypt(cipher.encode("ascii")).decode("utf-8")
-                except InvalidToken:
-                    plain = cipher  # stored as plaintext before
-            else:
-                plain = cipher
-            os.environ[env_key] = plain
-            loaded[env_key] = plain
+            try:
+                env_key, cipher = row["env_key"], row["cipher"]
+                if not cipher:
+                    continue
+                if f:
+                    try:
+                        plain = f.decrypt(cipher.encode("ascii")).decode("utf-8")
+                    except InvalidToken:
+                        plain = cipher  # stored as plaintext before
+                else:
+                    plain = cipher
+                os.environ[env_key] = plain
+                loaded[env_key] = plain
+            except Exception as row_exc:
+                # Per-row error: log and continue so one bad row doesn't
+                # prevent ALL other tokens from being restored.
+                logger.warning("token_vault: skipping key %s: %s",
+                               row.get("env_key", "?") if hasattr(row, "get") else "?",
+                               row_exc)
     except Exception as exc:
         logger.warning("token_vault: load_all failed: %s", exc)
     return loaded

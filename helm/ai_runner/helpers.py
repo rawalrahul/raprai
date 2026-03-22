@@ -41,11 +41,17 @@ def _clean_output(text: str) -> str:
 # Telegram notification helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Module-level lock prevents interleaved Telegram messages when multiple
+# sessions finish at roughly the same time.
+_tg_send_lock = asyncio.Lock()
+
+
 async def forward_to_telegram(text: str, reply_markup=None):
     """Send a message to the user's Telegram chat (fire-and-forget).
 
     If *reply_markup* is not supplied, the session-controls keyboard is
     attached automatically so the user always has action buttons visible.
+    Acquires ``_tg_send_lock`` to prevent interleaved messages.
     """
     if _st.telegram_app and _st.telegram_chat_id:
         if reply_markup is None:
@@ -54,13 +60,14 @@ async def forward_to_telegram(text: str, reply_markup=None):
                 reply_markup = session_controls_keyboard()
             except Exception:
                 pass
-        try:
-            await _st.telegram_app.bot.send_message(
-                chat_id=_st.telegram_chat_id, text=text,
-                reply_markup=reply_markup,
-            )
-        except Exception as e:
-            logger.warning("Telegram forward failed: %s", e)
+        async with _tg_send_lock:
+            try:
+                await _st.telegram_app.bot.send_message(
+                    chat_id=_st.telegram_chat_id, text=text,
+                    reply_markup=reply_markup,
+                )
+            except Exception as e:
+                logger.warning("Telegram forward failed: %s", e)
 
 
 _forward_to_telegram = forward_to_telegram  # legacy alias
@@ -79,15 +86,16 @@ async def tg_update_focus():
         msg = "No session focused."
         markup = sessions_keyboard()
 
-    try:
-        await _st.telegram_app.bot.send_message(
-            chat_id=_st.telegram_chat_id,
-            text=msg,
-            parse_mode="Markdown",
-            reply_markup=markup
-        )
-    except Exception as e:
-        logger.warning("Telegram focus update failed: %s", e)
+    async with _tg_send_lock:
+        try:
+            await _st.telegram_app.bot.send_message(
+                chat_id=_st.telegram_chat_id,
+                text=msg,
+                parse_mode="Markdown",
+                reply_markup=markup
+            )
+        except Exception as e:
+            logger.warning("Telegram focus update failed: %s", e)
 
 
 _tg_update_focus = tg_update_focus  # legacy alias
@@ -103,6 +111,9 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
 
     The **last** message in every notification always carries the session-
     controls inline keyboard so the user never has to scroll up for buttons.
+
+    The entire notification sequence is wrapped in ``_tg_send_lock`` so
+    messages from different sessions never interleave.
     """
     if not (_st.telegram_app and _st.telegram_chat_id):
         return
@@ -121,72 +132,75 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
     if not multi and not web_src:
         return  # single session via Telegram — reply already serves as notification
 
-    # For web-sourced messages: forward the user's input first (no buttons)
-    if web_src and prompt_text:
-        try:
-            await _st.telegram_app.bot.send_message(
-                chat_id=_st.telegram_chat_id,
-                text=f"🖥️ You (web): {prompt_text}",
-            )
-        except Exception:
-            pass
-
-    # Format elapsed time
-    if elapsed < 60:
-        elapsed_str = f"{elapsed:.0f}s"
-    elif elapsed < 3600:
-        elapsed_str = f"{elapsed/60:.1f}m"
-    else:
-        elapsed_str = f"{elapsed/3600:.1f}h"
-
-    # Clean noise lines (Node.js warnings, SSH banners, etc.)
-    clean = _clean_output(output) if output else ""
-
-    # ── Send the full response to Telegram (chunked if needed) ────────
-    # Header line
-    header = f"✨ {sess['name']} — {elapsed_str}"
-
-    # Check if all running sessions are now idle
-    still_busy = [s for s in running if s.get("busy")]
-    if not still_busy and multi:
-        header += f"\n🏁 All {len(running)} sessions idle"
-
-    # If there's no body to send, attach keyboard to the header itself
-    has_body = bool(clean) or (not clean and output)
-    try:
-        await _st.telegram_app.bot.send_message(
-            chat_id=_st.telegram_chat_id,
-            text=header,
-            reply_markup=_kb if not has_body else None,
-        )
-    except Exception as e:
-        logger.warning("Progress notify header failed: %s", e)
-
-    # Send the full cleaned response in Telegram-safe chunks
-    if clean:
-        max_len = 3800
-        chunks = [clean[i:i + max_len] for i in range(0, len(clean), max_len)]
-        for idx, chunk in enumerate(chunks):
-            is_last = idx == len(chunks) - 1
+    # Hold the lock for the entire notification sequence so multi-message
+    # notifications from different sessions don't interleave.
+    async with _tg_send_lock:
+        # For web-sourced messages: forward the user's input first (no buttons)
+        if web_src and prompt_text:
             try:
                 await _st.telegram_app.bot.send_message(
                     chat_id=_st.telegram_chat_id,
-                    text=chunk,
-                    reply_markup=_kb if is_last else None,
+                    text=f"🖥️ You (web): {prompt_text}",
                 )
-            except Exception as e:
-                logger.warning("Progress notify chunk failed: %s", e)
-                break
-    elif not clean and output:
-        # Output was entirely noise — send a note instead of nothing
+            except Exception:
+                pass
+
+        # Format elapsed time
+        if elapsed < 60:
+            elapsed_str = f"{elapsed:.0f}s"
+        elif elapsed < 3600:
+            elapsed_str = f"{elapsed/60:.1f}m"
+        else:
+            elapsed_str = f"{elapsed/3600:.1f}h"
+
+        # Clean noise lines (Node.js warnings, SSH banners, etc.)
+        clean = _clean_output(output) if output else ""
+
+        # ── Send the full response to Telegram (chunked if needed) ────────
+        # Header line
+        header = f"✨ {sess['name']} — {elapsed_str}"
+
+        # Check if all running sessions are now idle
+        still_busy = [s for s in running if s.get("busy")]
+        if not still_busy and multi:
+            header += f"\n🏁 All {len(running)} sessions idle"
+
+        # If there's no body to send, attach keyboard to the header itself
+        has_body = bool(clean) or (not clean and output)
         try:
             await _st.telegram_app.bot.send_message(
                 chat_id=_st.telegram_chat_id,
-                text="(response contained only system warnings — check the UI for details)",
-                reply_markup=_kb,
+                text=header,
+                reply_markup=_kb if not has_body else None,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Progress notify header failed: %s", e)
+
+        # Send the full cleaned response in Telegram-safe chunks
+        if clean:
+            max_len = 3800
+            chunks = [clean[i:i + max_len] for i in range(0, len(clean), max_len)]
+            for idx, chunk in enumerate(chunks):
+                is_last = idx == len(chunks) - 1
+                try:
+                    await _st.telegram_app.bot.send_message(
+                        chat_id=_st.telegram_chat_id,
+                        text=chunk,
+                        reply_markup=_kb if is_last else None,
+                    )
+                except Exception as e:
+                    logger.warning("Progress notify chunk failed: %s", e)
+                    break
+        elif not clean and output:
+            # Output was entirely noise — send a note instead of nothing
+            try:
+                await _st.telegram_app.bot.send_message(
+                    chat_id=_st.telegram_chat_id,
+                    text="(response contained only system warnings — check the UI for details)",
+                    reply_markup=_kb,
+                )
+            except Exception:
+                pass
 
 
 _tg_progress_notify = tg_progress_notify  # legacy alias

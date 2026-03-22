@@ -125,6 +125,12 @@ async def _main():
         if uid.strip()
     )
 
+    # Sync telegram_chat_id with the post-vault ALLOWED_USER_IDS so
+    # web→Telegram forwarding works even if state.py was imported before
+    # vault decryption populated the real user IDs.
+    if _cfg.ALLOWED_USER_IDS:
+        _st.telegram_chat_id = next(iter(_cfg.ALLOWED_USER_IDS), None)
+
     # Re-bind the local names used later in this function so they
     # reflect the post-vault-decryption values (the line-14 import
     # captured stale values before load_all_tokens ran).
@@ -311,6 +317,9 @@ async def _main():
             return
         _cfg.BOT_TOKEN = token
         _cfg.ALLOWED_USER_IDS = user_ids
+        # Pre-set chat_id so web→Telegram forwarding works immediately
+        # without waiting for the user to send the first Telegram message.
+        _st.telegram_chat_id = next(iter(user_ids), None)
         try:
             from telegram import Update as _Upd
             from telegram.ext import (
@@ -388,10 +397,53 @@ async def _main():
     logger.info("Starting web UI at %s", url)
 
     # --- System tray icon + hide console (Windows) ---
+    def _tray_shutdown():
+        """Graceful shutdown when user clicks Quit in the system tray.
+
+        Runs in the tray thread — performs critical synchronous cleanup
+        (save state, kill AI processes, close DB) before exiting.
+        """
+        logger.info("Tray shutdown: saving state and cleaning up...")
+        # 1. Save session state so sessions survive restart
+        try:
+            from helm.history import save_last_state
+            save_last_state()
+        except Exception:
+            pass
+        # 2. Extract memories from active sessions
+        try:
+            from helm.memory import save_extracted_memories
+            for sess in list(_st.sessions.values()):
+                try:
+                    save_extracted_memories(sess)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # 3. Kill running AI subprocesses so they don't get orphaned
+        try:
+            for sess in list(_st.sessions.values()):
+                proc = sess.get("proc")
+                if proc:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # 4. Close database connections
+        try:
+            from helm.db import close_all
+            close_all()
+        except Exception:
+            pass
+        logger.info("Tray shutdown: cleanup complete, exiting.")
+        os._exit(0)
+
     try:
         from helm.tray import hide_console, start_tray, stop_tray
         hide_console()
-        start_tray(actual_port, shutdown_callback=lambda: os._exit(0))
+        start_tray(actual_port, shutdown_callback=_tray_shutdown)
     except Exception as exc:
         logger.info("Tray icon not available: %s (console will remain visible)", exc)
 

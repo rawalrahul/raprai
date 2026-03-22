@@ -278,14 +278,33 @@ def reload_env():
     codebase, so that encrypted vault tokens aren't clobbered by the
     "vault-managed" placeholders stored in .env.
     """
+    from helm.security import VAULT_ELIGIBLE_KEYS
+
+    # Snapshot live decrypted values for vault-managed keys BEFORE
+    # load_dotenv clobbers them with the "vault-managed" placeholder.
+    _vault_backup: dict[str, str] = {}
+    for key in VAULT_ELIGIBLE_KEYS:
+        val = os.environ.get(key, "")
+        if val and val != "vault-managed":
+            _vault_backup[key] = val
+
     from dotenv import load_dotenv
     load_dotenv(dotenv_path=str(user_data_dir() / ".env"), override=True)
+
     # Re-apply decrypted tokens so vault-managed placeholders don't stick
     try:
         from helm.token_vault import load_all_tokens
         load_all_tokens()
     except Exception:
         pass
+
+    # Safety net: if any key is STILL "vault-managed" after load_all_tokens
+    # (e.g. vault DB error), restore the pre-reload decrypted value so the
+    # running process keeps working (Telegram bot stays connected, etc.)
+    for key, original in _vault_backup.items():
+        if os.environ.get(key) == "vault-managed":
+            logger.warning("reload_env: restoring %s from backup (vault reload failed)", key)
+            os.environ[key] = original
 
 
 # ---------------------------------------------------------------------------

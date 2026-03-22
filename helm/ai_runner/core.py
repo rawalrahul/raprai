@@ -417,6 +417,13 @@ async def process_message(text: str, source: str = "web",
         await push_message("system", msg, source=source)
         return msg
 
+    # ── Per-session lock — prevent concurrent web + Telegram races ────────
+    _sess_lock = sess.get("_lock")
+    if _sess_lock and _sess_lock.locked():
+        msg = f"⏳ **{sess['name']}** is already processing a task. Please wait."
+        await push_message("system", msg, source=source, session_id=sid)
+        return msg
+
     # ── Budget guardrail — block if AI has exceeded its daily cap ──────────
     ai_for_budget = sess.get("ai")
     if ai_for_budget and ai_for_budget != "shell":
@@ -694,6 +701,10 @@ async def process_message(text: str, source: str = "web",
         return msg
     # ── end /remember ────────────────────────────────────────────────────────
 
+    # Acquire per-session lock to serialise concurrent messages safely
+    if _sess_lock:
+        await _sess_lock.acquire()
+
     task_started_at = time.time()
     sess["last_used"] = task_started_at
     sess["busy"]       = True
@@ -769,6 +780,8 @@ async def process_message(text: str, source: str = "web",
                 logger.warning("Context compaction failed: %s", _ctx_err)
         sess["busy"]       = False
         sess["task_start"] = None
+        if _sess_lock and _sess_lock.locked():
+            _sess_lock.release()
         await push_state()  # flip session back to idle
         await tg_progress_notify(sess, output, elapsed, source, prompt_text=text)
 

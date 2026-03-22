@@ -245,9 +245,20 @@ async def set_pin_endpoint(request: Request):
         update_env("PIN_SALT", salt)
         update_env("PIN_HASH", hashed)
 
-        # Reload env so the in-process check picks up the new values immediately
+        # Guarantee in-memory values are correct *before* reload_env(),
+        # so pin_is_set() returns True immediately — reload_env() may
+        # clobber os.environ via load_dotenv if the .env write hasn't
+        # fully flushed or if load_all_tokens() encounters an error.
+        os.environ["PIN_SALT"] = salt
+        os.environ["PIN_HASH"] = hashed
+
+        # Reload env so other env vars stay in sync
         from helm.web_routes.app import reload_env
         reload_env()
+
+        # Re-assert after reload in case load_dotenv overwrote with stale values
+        os.environ["PIN_SALT"] = salt
+        os.environ["PIN_HASH"] = hashed
 
         return JSONResponse({"ok": True})
     except Exception as exc:
