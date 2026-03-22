@@ -17,6 +17,7 @@ import time
 from typing import Optional
 
 from helm.config import logger
+from helm.subprocess_utils import hidden_kwargs
 
 
 class MCPClient:
@@ -164,6 +165,7 @@ class MCPClient:
                         errors="replace",
                         env=proc_env,
                         shell=False,
+                        **hidden_kwargs(),
                     )
                 )
             except FileNotFoundError:

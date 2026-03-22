@@ -15,6 +15,8 @@ import webbrowser
 
 import uvicorn
 
+from helm.subprocess_utils import hidden_kwargs
+
 
 # ── Windows: Create a named mutex so Inno Setup can detect the running app ──
 _win_mutex = None
@@ -410,7 +412,7 @@ async def _main():
             ]:
                 if browser_path and os.path.isfile(browser_path):
                     try:
-                        subprocess.Popen([browser_path, f"--app={url}"])
+                        subprocess.Popen([browser_path, f"--app={url}"], **hidden_kwargs())
                         opened = True
                         logger.info("Opened in app mode via %s", browser_path)
                         break

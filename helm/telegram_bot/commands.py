@@ -981,6 +981,7 @@ async def tg_voice(update, context):
 def _ensure_ffmpeg():
     """Make sure ffmpeg is on PATH. Uses static-ffmpeg as fallback on Windows."""
     import shutil, subprocess, sys
+    from helm.subprocess_utils import hidden_kwargs
     if shutil.which("ffmpeg"):
         return  # already available
     # Install static-ffmpeg which bundles the binary
@@ -990,6 +991,7 @@ def _ensure_ffmpeg():
         subprocess.check_call(
             [sys.executable, "-m", "pip", "install", "static-ffmpeg", "-q"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            **hidden_kwargs(),
         )
         import static_ffmpeg
     static_ffmpeg.add_paths()
@@ -1003,9 +1005,11 @@ def _transcribe_audio(audio_path: str) -> str:
         import whisper
     except ImportError:
         import subprocess, sys
+        from helm.subprocess_utils import hidden_kwargs
         subprocess.check_call(
             [sys.executable, "-m", "pip", "install", "openai-whisper", "-q"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            **hidden_kwargs(),
         )
         import whisper
 

@@ -167,6 +167,7 @@
         <span class="sb-section-arrow">▶</span>
         <span class="sb-section-label">Memory</span>
         <span class="sb-section-count" id="sb-count-memory"></span>
+        <button onclick="event.stopPropagation();openKnowledgeTransfer()" class="sb-section-action" title="Import knowledge from other AIs" style="font-size:11px">🔄 Transfer</button>
         <button onclick="event.stopPropagation();loadMemoryPanel()" class="sb-section-action" title="Refresh">⟳</button>
       </div>
       <div class="sb-section-body" id="sb-panel-memory">
@@ -372,6 +373,95 @@
   </div>
 </div>
 
+<!-- --- Knowledge Transfer modal --- -->
+<div id="kt-modal" class="modal-overlay" onclick="if(event.target===this)closeKnowledgeTransfer()">
+  <div class="modal-box" style="max-width:640px">
+    <div class="modal-header">
+      <span class="modal-title">🔄 Knowledge Transfer</span>
+      <button class="modal-close" onclick="closeKnowledgeTransfer()">✖</button>
+    </div>
+    <div class="modal-body" style="overflow-y:auto;max-height:70vh">
+
+      <div style="font-size:13px;color:var(--dim);margin-bottom:16px;line-height:1.6">
+        Import knowledge from ChatGPT, Claude, Gemini, or any other AI you use.
+        This lets all your AI providers in RAPR AI share the same context about you, your projects, and your preferences.
+      </div>
+
+      <!-- Step 1: Export -->
+      <div class="settings-section" id="kt-step1">
+        <div class="settings-section-title" style="display:flex;align-items:center;gap:6px">
+          <span style="background:var(--accent);color:#fff;font-size:11px;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700">1</span>
+          Copy this prompt
+        </div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:10px;line-height:1.5">
+          Copy the prompt below and paste it into ChatGPT, Claude, Gemini, or any AI that knows you.
+          It will ask that AI to list everything it knows about you.
+        </div>
+        <div style="position:relative">
+          <textarea id="kt-export-prompt" readonly style="
+            width:100%;min-height:160px;max-height:250px;resize:vertical;
+            background:#1a1a2e;border:1px solid rgba(99,102,241,0.25);border-radius:8px;
+            padding:12px 14px;font-size:11px;color:#e0e0f0;font-family:'Courier New',monospace;
+            line-height:1.5;outline:none;cursor:text" placeholder="Loading prompt..."></textarea>
+          <button onclick="ktCopyPrompt()" style="
+            position:absolute;right:8px;top:8px;background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.3);
+            border-radius:5px;color:#a5b4fc;font-size:11px;font-weight:600;padding:4px 10px;cursor:pointer;
+            font-family:inherit;transition:all 0.15s ease" id="kt-copy-btn">Copy</button>
+        </div>
+      </div>
+
+      <!-- Step 2: Import -->
+      <div class="settings-section" id="kt-step2">
+        <div class="settings-section-title" style="display:flex;align-items:center;gap:6px">
+          <span style="background:var(--accent);color:#fff;font-size:11px;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700">2</span>
+          Paste the response
+        </div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:10px;line-height:1.5">
+          Paste the AI's response here. We'll parse it and add each item to your shared memory.
+          All your AI providers will then have access to this knowledge.
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:10px">
+          <select id="kt-source" style="
+            background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+            padding:6px 10px;font-size:12px;color:var(--text);font-family:inherit;outline:none">
+            <option value="chatgpt">ChatGPT</option>
+            <option value="claude-web">Claude (web)</option>
+            <option value="gemini-web">Gemini (web)</option>
+            <option value="copilot">GitHub Copilot</option>
+            <option value="other">Other AI</option>
+          </select>
+        </div>
+        <textarea id="kt-import-text" style="
+          width:100%;min-height:160px;max-height:300px;resize:vertical;
+          background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+          padding:12px 14px;font-size:12px;color:var(--text);font-family:inherit;
+          line-height:1.6;outline:none" placeholder="Paste the AI's response here...
+
+Example:
+[preference] Prefers TypeScript over JavaScript
+[fact] Works at Acme Corp as a senior developer
+[project] Building a React dashboard with Next.js
+[instruction] Always use async/await instead of .then()"></textarea>
+        <div style="padding:10px 0;display:flex;align-items:center;gap:10px">
+          <button onclick="ktImport()" style="
+            padding:8px 18px;border-radius:6px;font-size:13px;font-weight:600;
+            cursor:pointer;border:none;background:var(--accent);color:#fff;font-family:inherit">
+            Import Memories
+          </button>
+          <span id="kt-import-msg" style="font-size:12px;color:var(--dim)"></span>
+        </div>
+      </div>
+
+      <!-- Results -->
+      <div id="kt-results" style="display:none" class="settings-section">
+        <div class="settings-section-title" style="color:var(--ok)">Import Results</div>
+        <div id="kt-results-body" style="font-size:12px;line-height:1.6"></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
 <!-- --- Settings modal --- -->
 <div id="settings-modal" class="modal-overlay" onclick="if(event.target===this)closeSettings()">
   <div class="modal-box">
@@ -401,6 +491,48 @@
             <small>Days before you need to log in again</small>
           </label>
           <input class="settings-input" type="number" id="st-SESSION_DAYS" min="1" max="365" step="1">
+        </div>
+      </div>
+
+      <!-- Personalization -->
+      <div class="settings-section">
+        <div class="settings-section-title">Personalization</div>
+        <div class="settings-row">
+          <label>Your Name
+            <small>AI assistants will use this to greet and address you</small>
+          </label>
+          <input class="settings-input wide" type="text" id="st-user-name" placeholder="e.g. Aashima" autocomplete="name">
+        </div>
+        <div class="settings-row">
+          <label>AI Assistant Name
+            <small>What your AI assistant calls itself</small>
+          </label>
+          <input class="settings-input wide" type="text" id="st-ai-name" placeholder="e.g. Jarvis, Nova" autocomplete="off">
+        </div>
+        <div style="padding:8px 0">
+          <button class="settings-save-btn" onclick="savePersonalization()" style="font-size:11px;padding:4px 12px">Save Names</button>
+          <span id="personalization-msg" style="font-size:11px;color:var(--accent);margin-left:8px"></span>
+        </div>
+      </div>
+
+      <!-- Custom Instructions -->
+      <div class="settings-section">
+        <div class="settings-section-title">Custom Instructions
+          <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:9px">(applied to all AIs)</span>
+        </div>
+        <div class="settings-row" style="flex-direction:column;align-items:stretch">
+          <label style="margin-bottom:8px">Tell your AI how to behave
+            <small>These instructions are sent to every AI provider (Claude, Gemini, Ollama, Codex). Think of it like a personal system prompt — you can specify your coding style, preferred language, tone, or anything else.</small>
+          </label>
+          <textarea id="st-custom-instructions" style="
+            width:100%;min-height:120px;max-height:300px;resize:vertical;
+            background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+            padding:10px 12px;font-size:12px;color:var(--text);font-family:inherit;
+            line-height:1.6;outline:none" placeholder="e.g. I'm a senior Python developer. Always use type hints. Prefer functional patterns. Keep explanations concise. Use pytest for testing."></textarea>
+        </div>
+        <div style="padding:8px 0">
+          <button class="settings-save-btn" onclick="saveCustomInstructions()" style="font-size:11px;padding:4px 12px">Save Instructions</button>
+          <span id="custom-instr-msg" style="font-size:11px;color:var(--accent);margin-left:8px"></span>
         </div>
       </div>
 

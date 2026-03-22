@@ -22,6 +22,7 @@ import time
 from typing import Optional
 
 from helm.config import logger
+from helm.subprocess_utils import hidden_kwargs
 
 # ── File-based debug logger ──────────────────────────────────────────────────
 _nc_log = logging.getLogger("nemoclaw_bridge")
@@ -65,6 +66,7 @@ def _run_wsl(cmd: str, timeout: int = 15) -> tuple[int, str, str]:
             [_wsl_exe(), "-e", "bash", "-lc", full_cmd],
             capture_output=True, text=True, timeout=timeout,
             encoding="utf-8", errors="replace",
+            **hidden_kwargs(),
         )
         _nc_log.debug("_run_wsl result: rc=%d stdout=%r stderr=%r",
                        r.returncode, r.stdout.strip()[:200], r.stderr.strip()[:200])
@@ -93,6 +95,7 @@ def check_wsl_available() -> bool:
         r = subprocess.run(
             [_wsl_exe(), "--status"],
             capture_output=True, text=True, timeout=10,
+            **hidden_kwargs(),
         )
         return r.returncode == 0
     except Exception:
@@ -151,6 +154,7 @@ def _is_docker_desktop_process_running() -> bool:
         r = subprocess.run(
             ["tasklist", "/FI", "IMAGENAME eq Docker Desktop.exe", "/NH"],
             capture_output=True, text=True, timeout=10,
+            **hidden_kwargs(),
         )
         return "Docker Desktop.exe" in r.stdout
     except Exception:

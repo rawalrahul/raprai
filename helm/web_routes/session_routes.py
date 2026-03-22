@@ -175,9 +175,11 @@ async def debug_integration(name: str):
 
         probe = {}
         try:
+            from helm.subprocess_utils import hidden_kwargs
             r = subprocess.run(
-                f"{name} --version",
-                shell=True, capture_output=True, timeout=5, text=True,
+                [name, "--version"],
+                shell=False, capture_output=True, timeout=5, text=True,
+                **hidden_kwargs(),
             )
             probe["returncode"] = r.returncode
             probe["stdout"]     = r.stdout[:500]
@@ -217,6 +219,7 @@ async def rescan_integrations():
 
     def _run_rescan():
         import subprocess
+        from helm.subprocess_utils import hidden_kwargs
         _find_cli_cache.clear()
         items = []
 
@@ -231,7 +234,7 @@ async def rescan_integrations():
             if key == "ollama" and found:
                 try:
                     r = subprocess.run(
-                        ["ollama", "list"], capture_output=True, text=True, timeout=5,
+                        ["ollama", "list"], capture_output=True, text=True, timeout=5, **hidden_kwargs(),
                     )
                     for line in r.stdout.splitlines()[1:]:
                         parts = line.split()
@@ -326,6 +329,7 @@ async def rescan_skills():
 async def ollama_status():
     """Check whether Ollama is installed, running, and has at least one model pulled."""
     import shutil, subprocess
+    from helm.subprocess_utils import hidden_kwargs
 
     cli_ok = shutil.which("ollama") is not None
 
@@ -337,7 +341,7 @@ async def ollama_status():
         try:
             result = subprocess.run(
                 ["ollama", "list"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, timeout=5, **hidden_kwargs(),
             )
             for line in result.stdout.splitlines()[1:]:   # skip header row
                 parts = line.split()

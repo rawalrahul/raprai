@@ -2,10 +2,12 @@
 helm/setup_wizard.py — Embedded HTML for the first-run setup wizard.
 
 Flow:
-  Step 0 — Gemini CLI (optional, free)
-  Step 1 — Telegram Bot (optional)
-  Step 2 — Claude + Codex (optional)
-  Step 3 — Done / summary
+  Step 0 — Welcome & Personalization (name, AI name)
+  Step 1 — Gemini CLI (optional, free)
+  Step 2 — Telegram Bot (optional)
+  Step 3 — Claude + Codex + Ollama (optional)
+  Step 4 — PIN Protection
+  Step 5 — Done / summary
 """
 
 _SETUP_HTML = r"""<!DOCTYPE html>
@@ -133,13 +135,37 @@ select option{background:var(--surface);color:var(--text)}
       <div class="step-dot" id="dot2"></div>
       <div class="step-dot" id="dot3"></div>
       <div class="step-dot" id="dot4"></div>
+      <div class="step-dot" id="dot5"></div>
     </div>
   </div>
 
   <div class="card-body">
 
-    <!-- ─── STEP 0: Gemini (Required) ─── -->
+    <!-- ─── STEP 0: Welcome & Personalization ─── -->
     <div class="step active" id="step0">
+      <div class="step-title">Welcome! Let's personalize your experience</div>
+      <div class="step-desc">
+        Tell us a bit about yourself so your AI assistant can greet you by name.
+        You can also give your assistant a custom name!
+      </div>
+      <div class="field">
+        <label>Your Name</label>
+        <input id="user-name" type="text" placeholder="e.g. Aashima" autocomplete="name">
+        <small>Your AI will use this to greet you and personalize responses.</small>
+      </div>
+      <div class="field">
+        <label>Name Your AI Assistant</label>
+        <input id="ai-name" type="text" placeholder="e.g. Jarvis, Nova, Atlas..." autocomplete="off" value="RAPR AI">
+        <small>Give your AI assistant a fun name, or leave the default.</small>
+      </div>
+      <div id="welcome-msg"></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="saveWelcome()">Continue →</button>
+      </div>
+    </div>
+
+    <!-- ─── STEP 1: Gemini ─── -->
+    <div class="step" id="step1">
       <div class="step-title">Gemini <span class="free-tag">FREE</span> <span style="color:var(--muted);font-size:12px;font-weight:400">(optional)</span></div>
       <div class="step-desc">
         <strong style="color:var(--text)">Google Gemini CLI</strong> is a free AI backend for RAPR AI.
@@ -158,13 +184,14 @@ select option{background:var(--surface);color:var(--text)}
       <div id="gemini-msg"></div>
 
       <div class="btn-row">
+        <button class="btn btn-secondary" onclick="goStep(0)">← Back</button>
         <button class="btn btn-primary" onclick="saveGeminiAndContinue()">Save & Continue →</button>
-        <button class="btn-skip" onclick="goStep(1)">Skip for now</button>
+        <button class="btn-skip" onclick="goStep(2)">Skip for now</button>
       </div>
     </div>
 
-    <!-- ─── STEP 1: Telegram (optional) ─── -->
-    <div class="step" id="step1">
+    <!-- ─── STEP 2: Telegram (optional) ─── -->
+    <div class="step" id="step2">
       <div class="step-title">Telegram Bot <span style="color:var(--muted);font-size:12px;font-weight:400">(optional)</span></div>
       <div class="step-desc">
         Connect a Telegram bot to control RAPR AI remotely from your phone — launch sessions,
@@ -183,14 +210,14 @@ select option{background:var(--surface);color:var(--text)}
       </div>
       <div id="tg-msg"></div>
       <div class="btn-row">
-        <button class="btn btn-secondary" onclick="goStep(0)">← Back</button>
+        <button class="btn btn-secondary" onclick="goStep(1)">← Back</button>
         <button class="btn btn-primary" onclick="saveTelegram()">Save & Continue →</button>
-        <button class="btn-skip" onclick="goStep(2)">Skip for now</button>
+        <button class="btn-skip" onclick="goStep(3)">Skip for now</button>
       </div>
     </div>
 
-    <!-- ─── STEP 2: Claude + Codex (optional) ─── -->
-    <div class="step" id="step2">
+    <!-- ─── STEP 3: Claude + Codex (optional) ─── -->
+    <div class="step" id="step3">
       <div class="step-title">More AI Integrations <span style="color:var(--muted);font-size:12px;font-weight:400">(optional)</span></div>
       <div class="step-desc">
         Add Claude and Codex as extra AI backends alongside Gemini. Both need their own CLI
@@ -257,14 +284,14 @@ select option{background:var(--surface);color:var(--text)}
 
       <div id="optional-msg"></div>
       <div class="btn-row">
-        <button class="btn btn-secondary" onclick="goStep(1)">← Back</button>
+        <button class="btn btn-secondary" onclick="goStep(2)">← Back</button>
         <button class="btn btn-primary" onclick="saveOptional()">Save & Continue →</button>
-        <button class="btn-skip" onclick="goStep(3)">Skip for now →</button>
+        <button class="btn-skip" onclick="goStep(4)">Skip for now →</button>
       </div>
     </div>
 
-    <!-- ─── STEP 3: PIN Protection ─── -->
-    <div class="step" id="step3">
+    <!-- ─── STEP 4: PIN Protection ─── -->
+    <div class="step" id="step4">
       <div class="step-title">Set a PIN 🔒</div>
       <div class="step-desc">
         RAPR AI is accessible from any browser that can reach your machine.
@@ -287,12 +314,12 @@ select option{background:var(--surface);color:var(--text)}
       </div>
       <div class="btn-row">
         <button class="btn btn-primary" onclick="savePin()">Set PIN &amp; Continue</button>
-        <button class="btn-skip" onclick="goStep(4)">Skip for now</button>
+        <button class="btn-skip" onclick="goStep(5)">Skip for now</button>
       </div>
     </div>
 
-    <!-- ─── STEP 4: Done ─── -->
-    <div class="step" id="step4">
+    <!-- ─── STEP 5: Done ─── -->
+    <div class="step" id="step5">
       <div class="step-title">You're all set! 🎉</div>
       <div class="step-desc">
         Here's a summary of what's configured. You can always update settings later by editing
@@ -313,6 +340,28 @@ select option{background:var(--surface);color:var(--text)}
 <script>
 let _geminiStatus = {};
 let _saved = {gemini: false, tg: false, claude: false, codex: false, ollama: false};
+
+// ── Welcome / Personalization (Step 0) ────────────────────────
+async function saveWelcome() {
+  const userName = document.getElementById('user-name').value.trim();
+  const aiName   = document.getElementById('ai-name').value.trim() || 'RAPR AI';
+  const msg      = document.getElementById('welcome-msg');
+  msg.innerHTML  = '';
+
+  try {
+    await fetch('/prefs', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({user_name: userName, ai_name: aiName}),
+    });
+    if (userName) {
+      msg.innerHTML = `<div class="alert alert-ok">✓ Nice to meet you, ${userName}!</div>`;
+    }
+  } catch(e) {
+    msg.innerHTML = '<div class="alert alert-warn">⚠ Could not save — will retry later.</div>';
+  }
+  setTimeout(() => goStep(1), userName ? 600 : 0);
+}
 
 // ── Gemini check ──────────────────────────────────────────────
 async function checkGemini() {
@@ -370,14 +419,14 @@ async function saveGeminiAndContinue() {
   if (st.cli_installed) {
     // CLI installed = ready (API key is optional)
     _saved.gemini = true;
-    goStep(1);
+    goStep(2);
   } else if (key) {
     // Key provided but no CLI yet
     msg.innerHTML = '<div class="alert alert-warn">⚠ API key saved, but Gemini CLI is not installed. You can install it later.</div>';
-    setTimeout(() => goStep(1), 1200);
+    setTimeout(() => goStep(2), 1200);
   } else {
     msg.innerHTML = '<div class="alert alert-warn">⚠ Gemini CLI not found — you can skip this and use Claude or another AI instead.</div>';
-    setTimeout(() => goStep(1), 1500);
+    setTimeout(() => goStep(2), 1500);
   }
 }
 
@@ -462,7 +511,7 @@ async function saveTelegram() {
       msg.innerHTML = '<div class="alert alert-warn">⚠ Could not save — check file permissions.</div>';
     }
   }
-  setTimeout(() => goStep(2), token || users ? 600 : 0);
+  setTimeout(() => goStep(3), token || users ? 600 : 0);
 }
 
 async function saveOptional() {
@@ -484,7 +533,7 @@ async function saveOptional() {
       msg.innerHTML = '<div class="alert alert-warn">⚠ Could not save — check file permissions.</div>';
     }
   }
-  setTimeout(() => goStep(3), Object.keys(payload).length ? 600 : 0);  // → PIN step
+  setTimeout(() => goStep(4), Object.keys(payload).length ? 600 : 0);  // → PIN step
 }
 
 // ── Step navigation ───────────────────────────────────────────
@@ -493,9 +542,10 @@ function goStep(n) {
   document.querySelectorAll('.step-dot').forEach((d, i) => {
     d.className = 'step-dot' + (i < n ? ' done' : i === n ? ' active' : '');
   });
-  if (n === 2) checkOptionalIntegrations();
-  if (n === 3) checkPinStatus();
-  if (n === 4) buildSummary();
+  if (n === 1) checkGemini();
+  if (n === 3) checkOptionalIntegrations();
+  if (n === 4) checkPinStatus();
+  if (n === 5) buildSummary();
 }
 
 // ── PIN step ──────────────────────────────────────────────────
@@ -533,7 +583,7 @@ async function savePin() {
       return;
     }
     msg.innerHTML = '<div class="alert alert-ok">✓ PIN set successfully!</div>';
-    setTimeout(() => goStep(4), 800);
+    setTimeout(() => goStep(5), 800);
   } catch(e) {
     msg.innerHTML = '<div class="alert alert-warn">⚠ Network error — could not save PIN.</div>';
   }
@@ -547,12 +597,15 @@ async function buildSummary() {
   let claudeReady = _saved.claude;
   let codexReady  = _saved.codex;
   let ollamaReady = _saved.ollama;
+  let userName    = document.getElementById('user-name').value.trim();
+  let aiName      = document.getElementById('ai-name').value.trim() || 'RAPR AI';
 
   // Merge with actual server-side config (catches pre-existing .env values)
   try {
-    const [authSt, setupSt] = await Promise.all([
+    const [authSt, setupSt, prefs] = await Promise.all([
       fetch('/auth/status').then(r => r.json()),
       fetch('/setup/status').then(r => r.json()),
+      fetch('/prefs').then(r => r.json()),
     ]);
     pinSet      = authSt.pin_set;
     if (setupSt.has_bot_token) tgReady     = true;
@@ -560,15 +613,19 @@ async function buildSummary() {
     if (setupSt.claude_ready)  claudeReady = true;
     if (setupSt.codex_ready)   codexReady  = true;
     if (setupSt.ollama_ready)  ollamaReady = true;
+    if (!userName && prefs.user_name) userName = prefs.user_name;
+    if (prefs.ai_name) aiName = prefs.ai_name;
   } catch(e) {}
 
   const items = [
-    {label: 'PIN Protection', ok: pinSet,       note: pinSet       ? 'Enabled — login required'         : 'Not set (recommended)'},
-    {label: 'Google Gemini',  ok: geminiReady,  note: geminiReady  ? 'CLI ready'                        : 'Not configured (optional)'},
-    {label: 'Telegram Bot',   ok: tgReady,      note: tgReady      ? 'Configured'                       : 'Not set up (optional)'},
-    {label: 'Claude',         ok: claudeReady,  note: claudeReady  ? 'CLI installed & authenticated'    : 'Not configured (optional)'},
-    {label: 'OpenAI Codex',   ok: codexReady,   note: codexReady   ? 'CLI ready'                        : 'Not configured (optional)'},
-    {label: 'Ollama (local)', ok: ollamaReady,  note: ollamaReady  ? 'Model selected, offline AI ready' : 'Not configured (optional)'},
+    {label: 'Your Name',      ok: !!userName,   note: userName     ? userName                            : 'Not set'},
+    {label: 'AI Assistant',    ok: true,         note: aiName},
+    {label: 'PIN Protection',  ok: pinSet,       note: pinSet       ? 'Enabled — login required'         : 'Not set (recommended)'},
+    {label: 'Google Gemini',   ok: geminiReady,  note: geminiReady  ? 'CLI ready'                        : 'Not configured (optional)'},
+    {label: 'Telegram Bot',    ok: tgReady,      note: tgReady      ? 'Configured'                       : 'Not set up (optional)'},
+    {label: 'Claude',          ok: claudeReady,  note: claudeReady  ? 'CLI installed & authenticated'    : 'Not configured (optional)'},
+    {label: 'OpenAI Codex',    ok: codexReady,   note: codexReady   ? 'CLI ready'                        : 'Not configured (optional)'},
+    {label: 'Ollama (local)',  ok: ollamaReady,  note: ollamaReady  ? 'Model selected, offline AI ready' : 'Not configured (optional)'},
   ];
   document.getElementById('summary').innerHTML = items.map(i => `
     <div class="summary-item">
@@ -590,6 +647,13 @@ function copyCode(btn) {
 
 // ── Init ──────────────────────────────────────────────────────
 (async function init() {
+  // Load existing prefs (user_name / ai_name) for the welcome step
+  try {
+    const prefs = await fetch('/prefs').then(r => r.json());
+    if (prefs.user_name) document.getElementById('user-name').value = prefs.user_name;
+    if (prefs.ai_name)   document.getElementById('ai-name').value   = prefs.ai_name;
+  } catch(e) {}
+
   try {
     const st = await fetch('/setup/status').then(r => r.json());
     // Pre-populate _saved with anything already in .env so the summary is accurate
@@ -600,30 +664,26 @@ function copyCode(btn) {
     if (st.ollama_ready)   _saved.ollama = true;
 
     if (!st.env_exists) {
-      // True first install — start at Gemini
-      checkGemini();
+      // True first install — start at Welcome (step 0)
       return;
     }
 
     // .env exists — check what still needs setup
     if (st.gemini_ready && st.has_bot_token) {
       // Both Gemini and Telegram configured — go to summary
-      checkGemini();        // update badges
-      buildSummary();
-      goStep(4);
+      goStep(5);
     } else if (st.gemini_ready && !st.has_bot_token) {
       // Gemini OK but no Telegram — jump to Telegram step
-      checkGemini();
-      goStep(1);
+      goStep(2);
     } else if (!st.gemini_ready && st.has_bot_token) {
       // Telegram OK but no Gemini — show Gemini step
-      checkGemini();
+      goStep(1);
     } else {
-      // Nothing configured — start from beginning
-      checkGemini();
+      // Nothing configured — start from welcome
+      goStep(0);
     }
   } catch (e) {
-    checkGemini();
+    // Default: stay on step 0 (welcome)
   }
 })();
 </script>

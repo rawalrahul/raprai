@@ -14,6 +14,8 @@ import webbrowser
 import threading
 import logging
 
+from helm.subprocess_utils import hidden_kwargs
+
 logger = logging.getLogger("helm.tray")
 
 # ---------------------------------------------------------------------------
@@ -122,7 +124,7 @@ def start_tray(port: int, shutdown_callback=None):
             ]:
                 if browser_path and os.path.isfile(browser_path):
                     try:
-                        subprocess.Popen([browser_path, f"--app={target_url}"])
+                        subprocess.Popen([browser_path, f"--app={target_url}"], **hidden_kwargs())
                         return
                     except Exception:
                         continue

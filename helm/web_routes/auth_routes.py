@@ -43,12 +43,13 @@ async def setup_status():
 
     def _check_clis():
         import subprocess
+        from helm.subprocess_utils import hidden_kwargs
         codex_ok = _find_cli("codex")
         ollama_ok = False
         if _find_cli("ollama"):
             try:
                 result = subprocess.run(
-                    ["ollama", "list"], capture_output=True, text=True, timeout=5,
+                    ["ollama", "list"], capture_output=True, text=True, timeout=5, **hidden_kwargs(),
                 )
                 lines = [l for l in result.stdout.splitlines()[1:] if l.strip()]
                 ollama_ok = len(lines) > 0

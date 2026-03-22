@@ -125,6 +125,7 @@ def _find_cli(name: str) -> bool:
         return _find_cli_cache[name]
 
     import shutil, subprocess
+    from helm.subprocess_utils import hidden_kwargs
     # 1 — fast PATH lookup
     if shutil.which(name) or shutil.which(name + ".cmd") or shutil.which(name + ".exe"):
         _find_cli_cache[name] = True
@@ -173,6 +174,7 @@ def _find_cli(name: str) -> bool:
             capture_output=True,
             timeout=3,
             text=True,
+            **hidden_kwargs(),
         )
         if r.returncode == 9009:
             _find_cli_cache[name] = False

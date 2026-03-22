@@ -11,6 +11,8 @@ import subprocess
 import urllib.request
 from typing import Optional
 
+from helm.subprocess_utils import hidden_kwargs
+
 
 def _npm_global_roots() -> list[pathlib.Path]:
     """Return candidate npm global node_modules directories (cached).
@@ -105,7 +107,7 @@ def _fetch_claude_models() -> list[str]:
         try:
             r = subprocess.run(
                 [cli, "api", "models", "list"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, text=True, timeout=10, **hidden_kwargs(),
             )
             if r.returncode == 0:
                 data = json.loads(r.stdout)
@@ -193,7 +195,7 @@ def _fetch_claude_models() -> list[str]:
     if cli:
         try:
             r = subprocess.run([cli, "--version"],
-                               capture_output=True, text=True, timeout=5)
+                               capture_output=True, text=True, timeout=5, **hidden_kwargs())
             if r.returncode == 0 and r.stdout.strip():
                 # CLI is alive — it must support the current model families.
                 # Extract version-aware model names from the version output.
@@ -215,7 +217,7 @@ def _fetch_ollama_models() -> list[str]:
     try:
         r = subprocess.run(
             ["ollama", "list"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, **hidden_kwargs(),
         )
         models = []
         for line in r.stdout.splitlines()[1:]:  # skip header

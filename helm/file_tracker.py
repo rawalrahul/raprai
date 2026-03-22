@@ -12,6 +12,7 @@ import subprocess
 import time
 from typing import Optional
 
+from helm.subprocess_utils import hidden_kwargs
 import helm.state as _st
 from helm.config import WEB_PORT, logger
 from helm.broadcast import push_message
@@ -217,6 +218,7 @@ def git_diff_stat(cwd: str) -> Optional[str]:
         r = subprocess.run(
             ["git", "diff", "--stat"],
             cwd=cwd, capture_output=True, text=True, timeout=10,
+            **hidden_kwargs(),
         )
         out = r.stdout.strip()
         return out if out else None
@@ -233,6 +235,7 @@ def git_is_repo(cwd: str) -> bool:
         r = subprocess.run(
             ["git", "rev-parse", "--is-inside-work-tree"],
             cwd=cwd, capture_output=True, text=True, timeout=5,
+            **hidden_kwargs(),
         )
         return r.returncode == 0
     except Exception:

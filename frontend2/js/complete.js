@@ -500,6 +500,41 @@ function esc(s){ return s.replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 // Track which sessions are currently "thinking" so we can show/hide the
 // indicator correctly when sessions run in parallel or the user switches focus.
 const _thinkingState = {};   // { session_id: { active: bool, ai: string } }
+let _thinkingTimer = null;
+let _thinkingMsgIdx = 0;
+
+const _thinkingMessages = [
+  "Crunching the numbers...",
+  "Consulting the digital oracle...",
+  "Teaching electrons to think...",
+  "Brewing some fresh ideas...",
+  "Asking the rubber duck...",
+  "Warming up the brain cells...",
+  "Untangling the spaghetti code...",
+  "Downloading more RAM...",
+  "Feeding the hamster that powers this...",
+  "Polishing the pixels...",
+  "Summoning the code wizards...",
+  "Rearranging the bits and bytes...",
+  "Making the magic happen...",
+  "Calibrating the flux capacitor...",
+  "Consulting Stack Overflow... just kidding",
+  "Thinking at the speed of light... almost",
+  "Rolling up the sleeves...",
+  "Channeling inner genius...",
+  "Doing the thing you asked for...",
+  "Searching for the meaning of code...",
+  "Converting caffeine to code...",
+  "Assembling the answer...",
+  "Running on pure vibes...",
+  "Almost there... probably...",
+  "Convincing the AI hamsters to run faster...",
+  "Sprinkling some AI magic...",
+  "Loading awesome sauce...",
+  "Training the minions...",
+  "Doing complicated math in my head...",
+  "Please hold, your call is important to us...",
+];
 
 function setThinking(active, ai, session_id){
   // Update per-session tracking
@@ -516,13 +551,24 @@ function _refreshThinkingUI(){
   const focused = _thinkingState[_focusedId];
   if(focused && focused.active){
     el.className = 'on';
+    // Show the first label immediately (session name + thinking)
     const k     = focused.ai || _focusedAi || activeAi || '';
     const sess  = _sessions.find(s => s.id === _focusedId);
     const label = sess ? (sess.emoji + ' ' + sess.name) : (AI_LABEL[k] || 'AI');
-    document.getElementById('thlabel').textContent = label + '...';
+    const thlabel = document.getElementById('thlabel');
+    if(!_thinkingTimer){
+      thlabel.textContent = label + ' is thinking...';
+      // After 3s, start rotating fun messages
+      _thinkingMsgIdx = Math.floor(Math.random() * _thinkingMessages.length);
+      _thinkingTimer = setInterval(() => {
+        thlabel.textContent = _thinkingMessages[_thinkingMsgIdx % _thinkingMessages.length];
+        _thinkingMsgIdx++;
+      }, 3000);
+    }
     scroll();
   } else {
     el.className = '';
+    if(_thinkingTimer){ clearInterval(_thinkingTimer); _thinkingTimer = null; }
   }
 }
 
@@ -1696,6 +1742,7 @@ function openSettings(){
   loadCustomAIs();
   loadBudget();
   loadDefaultModels();
+  loadPersonalization();
   if(typeof loadBackupConfig === 'function') loadBackupConfig();
 }
 
@@ -2278,6 +2325,40 @@ function saveBudget(){
       const msg = document.getElementById('budget-msg');
       if(msg) msg.textContent='Error saving';
     });
+}
+
+// --- Personalization & Custom Instructions -------------------------------------------------------------------
+
+function loadPersonalization(){
+  fetch('/prefs').then(r=>r.json()).then(p=>{
+    const un = document.getElementById('st-user-name');
+    const an = document.getElementById('st-ai-name');
+    const ci = document.getElementById('st-custom-instructions');
+    if(un && p.user_name) un.value = p.user_name;
+    if(an && p.ai_name)   an.value = p.ai_name;
+    if(ci && p.custom_instructions) ci.value = p.custom_instructions;
+  }).catch(()=>{});
+}
+
+function savePersonalization(){
+  const userName = (document.getElementById('st-user-name')||{}).value || '';
+  const aiName   = (document.getElementById('st-ai-name')||{}).value || '';
+  const msg = document.getElementById('personalization-msg');
+  fetch('/prefs',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({user_name: userName.trim(), ai_name: aiName.trim()})})
+    .then(r=>r.json())
+    .then(()=>{ if(msg){ msg.textContent='Saved ✓'; setTimeout(()=>msg.textContent='',2000); } })
+    .catch(()=>{ if(msg) msg.textContent='Error saving'; });
+}
+
+function saveCustomInstructions(){
+  const ci = (document.getElementById('st-custom-instructions')||{}).value || '';
+  const msg = document.getElementById('custom-instr-msg');
+  fetch('/prefs',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({custom_instructions: ci})})
+    .then(r=>r.json())
+    .then(()=>{ if(msg){ msg.textContent='Saved ✓'; setTimeout(()=>msg.textContent='',2000); } })
+    .catch(()=>{ if(msg) msg.textContent='Error saving'; });
 }
 
 // --- Pipeline UI --------------------------------------------------------------------------------------------

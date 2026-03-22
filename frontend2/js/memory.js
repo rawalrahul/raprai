@@ -128,3 +128,94 @@ function memDelete(id){
       if(d.ok) loadMemoryPanel();
     });
 }
+
+// ─── Knowledge Transfer ─────────────────────────────────────────────────────
+
+function openKnowledgeTransfer(){
+  const modal = document.getElementById('kt-modal');
+  if(!modal) return;
+  modal.style.display = 'flex';
+  // Reset state
+  document.getElementById('kt-import-text').value = '';
+  document.getElementById('kt-import-msg').textContent = '';
+  document.getElementById('kt-results').style.display = 'none';
+  // Load the export prompt
+  const ta = document.getElementById('kt-export-prompt');
+  ta.value = 'Loading prompt...';
+  fetch('/memory/transfer/export-prompt').then(r=>r.json()).then(d=>{
+    if(d.ok) ta.value = d.prompt;
+    else ta.value = 'Failed to generate prompt.';
+  }).catch(()=>{ ta.value = 'Failed to load — check server connection.'; });
+}
+
+function closeKnowledgeTransfer(){
+  document.getElementById('kt-modal').style.display = 'none';
+}
+
+function ktCopyPrompt(){
+  const ta = document.getElementById('kt-export-prompt');
+  const btn = document.getElementById('kt-copy-btn');
+  navigator.clipboard.writeText(ta.value).then(()=>{
+    btn.textContent = 'Copied!';
+    setTimeout(()=> btn.textContent = 'Copy', 2000);
+  }).catch(()=>{
+    // Fallback for older browsers
+    ta.select();
+    document.execCommand('copy');
+    btn.textContent = 'Copied!';
+    setTimeout(()=> btn.textContent = 'Copy', 2000);
+  });
+}
+
+function ktImport(){
+  const text = document.getElementById('kt-import-text').value.trim();
+  const source = document.getElementById('kt-source').value;
+  const msg = document.getElementById('kt-import-msg');
+  const results = document.getElementById('kt-results');
+  const resultsBody = document.getElementById('kt-results-body');
+
+  if(!text){
+    msg.textContent = 'Please paste the AI response first.';
+    msg.style.color = 'var(--warn)';
+    return;
+  }
+
+  // Quick sanity check — look for at least one [category] line
+  if(!text.match(/\[\w+\]/)){
+    msg.textContent = 'No [category] tags found. Make sure the AI formatted its response correctly.';
+    msg.style.color = 'var(--warn)';
+    return;
+  }
+
+  msg.textContent = 'Importing...';
+  msg.style.color = 'var(--dim)';
+
+  fetch('/memory/transfer/import', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({response: text, source: source})
+  }).then(r=>r.json()).then(d=>{
+    if(d.ok){
+      msg.textContent = '';
+      results.style.display = 'block';
+      let html = `<div style="color:var(--ok);font-weight:600;margin-bottom:6px">✓ ${d.message}</div>`;
+      if(d.skipped > 0){
+        html += `<div style="color:var(--muted)">${d.skipped} lines skipped (no category tag or too short)</div>`;
+      }
+      if(d.errors && d.errors.length > 0){
+        html += `<div style="color:var(--warn);margin-top:6px">Issues:</div>`;
+        d.errors.forEach(e => { html += `<div style="color:var(--muted);font-size:11px">• ${escHtml(e)}</div>`; });
+      }
+      html += `<div style="margin-top:10px;color:var(--dim)">All your AI providers now have access to this knowledge.</div>`;
+      resultsBody.innerHTML = html;
+      // Refresh memory panel in the sidebar
+      loadMemoryPanel();
+    } else {
+      msg.textContent = d.error || 'Import failed';
+      msg.style.color = 'var(--err)';
+    }
+  }).catch(()=>{
+    msg.textContent = 'Network error — could not import.';
+    msg.style.color = 'var(--err)';
+  });
+}

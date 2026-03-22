@@ -14,6 +14,8 @@ import sys
 import time
 from typing import Optional
 
+from helm.subprocess_utils import hidden_kwargs
+
 import helm.state as _st
 from helm.broadcast import push_message, push_state, push_thinking
 from helm.config import CLAUDE_TIMEOUT, INTEGRATION_TIMEOUT, logger
@@ -304,6 +306,7 @@ def _ensure_doc_packages():
                 [sys.executable, "-m", "pip", "install", pkg, "-q"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 timeout=60,
+                **hidden_kwargs(),
             )
         except Exception:
             logger.warning("Could not pre-install %s — skills may install it on demand", pkg)
@@ -343,6 +346,7 @@ def run_ai_popen(cmd: list[str], cwd: str, name: str, sess: dict,
             encoding="utf-8",
             errors="replace",
             cwd=cwd,
+            **hidden_kwargs(),
         )
         sess["proc"] = proc  # store so stop/interrupt can kill it
         try:
@@ -615,7 +619,7 @@ async def process_message(text: str, source: str = "web",
         try:
             _list_result = subprocess.run(
                 ["ollama", "list"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, timeout=5, **hidden_kwargs(),
             )
             _local = []
             for _line in _list_result.stdout.strip().splitlines()[1:]:
@@ -1006,6 +1010,15 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         except Exception:
             pass
 
+        # Inject user personalization and custom instructions
+        try:
+            from helm.personalization import get_personalization_block
+            _pblock = get_personalization_block()
+            if _pblock:
+                enriched_text = _pblock + enriched_text
+        except Exception:
+            pass
+
         sess["claude_msgs"].append(text)
 
         # ── Claude MCP strategy ────────────────────────────────────────────
@@ -1155,6 +1168,15 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
             _mem = get_memory_block(prompt=safe_text)
             if _mem:
                 enriched_text = _mem + enriched_text
+        except Exception:
+            pass
+
+        # Inject user personalization and custom instructions
+        try:
+            from helm.personalization import get_personalization_block
+            _pblock = get_personalization_block()
+            if _pblock:
+                enriched_text = _pblock + enriched_text
         except Exception:
             pass
 

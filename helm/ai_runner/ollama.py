@@ -13,6 +13,8 @@ import re
 import subprocess
 import sys
 import urllib.error
+
+from helm.subprocess_utils import hidden_kwargs
 import urllib.request
 
 import helm.state as _st
@@ -407,6 +409,7 @@ async def _execute_ollama_tool(name: str, args: dict, cwd: str) -> str:
                 subprocess.run,
                 [sys.executable, "-c", code],
                 capture_output=True, text=True, timeout=600, cwd=cwd,
+                **hidden_kwargs(),
             )
             out = result.stdout.strip()
             err = result.stderr.strip()
@@ -474,6 +477,7 @@ async def _execute_ollama_tool(name: str, args: dict, cwd: str) -> str:
                 subprocess.run,
                 [sys.executable, "-c", code],
                 capture_output=True, text=True, timeout=120, cwd=cwd,
+                **hidden_kwargs(),
             )
             if result.returncode != 0:
                 return f"Error creating presentation:\n{result.stderr.strip()}"
@@ -499,6 +503,7 @@ async def _execute_ollama_tool(name: str, args: dict, cwd: str) -> str:
                 subprocess.run,
                 [sys.executable, "-c", code],
                 capture_output=True, text=True, timeout=120, cwd=cwd,
+                **hidden_kwargs(),
             )
             if result.returncode != 0:
                 return f"Error creating PDF:\n{result.stderr.strip()}"
@@ -519,6 +524,7 @@ async def _execute_ollama_tool(name: str, args: dict, cwd: str) -> str:
                 subprocess.run,
                 [sys.executable, "-c", code],
                 capture_output=True, text=True, timeout=120, cwd=cwd,
+                **hidden_kwargs(),
             )
             if result.returncode != 0:
                 return f"Error creating document:\n{result.stderr.strip()}"
@@ -637,6 +643,15 @@ def _ollama_system_prompt(cwd: str, skill_content: str = "", user_prompt: str = 
     except Exception:
         pass
 
+    # Inject user personalization and custom instructions
+    try:
+        from helm.personalization import get_personalization_block
+        pblock = get_personalization_block()
+        if pblock:
+            base += f"\n{pblock}"
+    except Exception:
+        pass
+
     return base
 
 
@@ -660,6 +675,7 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
             _r = subprocess.run(
                 ["ollama", "list"],
                 capture_output=True, text=True, timeout=5,
+                **hidden_kwargs(),
             )
             for _line in _r.stdout.strip().splitlines()[1:]:
                 _parts = _line.split()
