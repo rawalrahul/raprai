@@ -12,9 +12,14 @@ Endpoints:
     POST /packages/catalog/refresh  — Force refresh catalog from remote
 """
 
+import asyncio
 import pathlib
 import shutil
+import subprocess
 import tempfile
+import threading
+import time
+import uuid
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse
@@ -22,6 +27,96 @@ from pydantic import BaseModel
 from typing import Optional
 
 from helm.config import logger
+
+# ---------------------------------------------------------------------------
+# Background install task tracking
+# ---------------------------------------------------------------------------
+
+_install_tasks: dict[str, dict] = {}  # task_id → {status, progress, steps, current_step, ...}
+
+def _run_install_background(task_id: str, package_id: str, url: str, force: bool):
+    """Run the full install in a background thread with progress tracking."""
+    task = _install_tasks[task_id]
+
+    try:
+        # Step 1: Download and install the package files
+        task["current_step"] = "Downloading package..."
+        task["progress"] = 10
+
+        from helm.packages.installer import install_package as _install
+        result = _install(url, force=force)
+
+        task["progress"] = 40
+        task["current_step"] = "Package files installed"
+        task["install_result"] = result
+
+        # Step 2: Run install_commands from catalog (for CLI skills)
+        from helm.packages.marketplace import get_catalog_entry
+        entry = get_catalog_entry(package_id)
+        install_cmds = []
+        if entry:
+            install_cmds = entry.get("install_commands") or []
+
+        if install_cmds:
+            total_cmds = len(install_cmds)
+            for i, cmd_info in enumerate(install_cmds):
+                cmd = cmd_info.get("cmd", "")
+                label = cmd_info.get("label", f"Running: {cmd[:40]}...")
+                check_cmd = cmd_info.get("check_cmd", "")
+
+                if not cmd:
+                    continue
+
+                # Check if already installed
+                if check_cmd:
+                    task["current_step"] = f"Checking: {label}..."
+                    try:
+                        check_result = subprocess.run(
+                            check_cmd, shell=True, capture_output=True, timeout=15
+                        )
+                        if check_result.returncode == 0:
+                            task["current_step"] = f"Already installed: {label}"
+                            task["progress"] = 40 + int(50 * (i + 1) / total_cmds)
+                            task["steps"].append({"label": label, "status": "skipped", "detail": "Already installed"})
+                            continue
+                    except Exception:
+                        pass  # Check failed — proceed with install
+
+                # Run the install command
+                task["current_step"] = label
+                task["progress"] = 40 + int(50 * i / total_cmds)
+                task["steps"].append({"label": label, "status": "running"})
+
+                try:
+                    proc = subprocess.run(
+                        cmd, shell=True, capture_output=True, text=True, timeout=300
+                    )
+                    if proc.returncode == 0:
+                        task["steps"][-1]["status"] = "done"
+                    else:
+                        error_msg = (proc.stderr or proc.stdout or "").strip()[-200:]
+                        task["steps"][-1]["status"] = "failed"
+                        task["steps"][-1]["detail"] = error_msg
+                        logger.warning("Install command failed for %s: %s → %s", package_id, cmd, error_msg)
+                except subprocess.TimeoutExpired:
+                    task["steps"][-1]["status"] = "failed"
+                    task["steps"][-1]["detail"] = "Timed out after 5 minutes"
+                except Exception as e:
+                    task["steps"][-1]["status"] = "failed"
+                    task["steps"][-1]["detail"] = str(e)
+
+                task["progress"] = 40 + int(50 * (i + 1) / total_cmds)
+
+        # Done
+        task["progress"] = 100
+        task["status"] = "done"
+        task["current_step"] = "Installation complete"
+
+    except Exception as e:
+        task["status"] = "failed"
+        task["current_step"] = f"Failed: {str(e)[:100]}"
+        task["error"] = str(e)
+        logger.error("Background install failed for %s: %s", package_id, e)
 
 router = APIRouter(prefix="/packages", tags=["packages"])
 
@@ -46,6 +141,12 @@ class ConfigureRequest(BaseModel):
     """Save API keys / env vars for a package."""
     package_id: str
     env_vars: dict[str, str] = {}   # {"API_KEY": "value", ...}
+
+
+class ToggleRequest(BaseModel):
+    """Enable or disable an installed package."""
+    package_id: str
+    enabled: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -188,42 +289,59 @@ async def install_history(limit: int = 50):
 
 @router.post("/install")
 async def install_package(req: InstallRequest):
-    """Install a package from catalog ID, URL, or uploaded file."""
-    from helm.packages.installer import install_package as _install
-    from helm.packages import RAPRPackagesError
+    """Install a package from catalog ID, URL, or uploaded file.
 
-    try:
-        if req.package_id:
-            # Install from catalog
-            from helm.packages.marketplace import get_download_url
-            url = get_download_url(req.package_id)
-            if not url:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Package '{req.package_id}' not found in catalog"
-                )
-            result = _install(url, force=req.force)
-
-        elif req.url:
-            # Install from URL
-            result = _install(req.url, force=req.force)
-
-        else:
+    Returns a task_id for tracking background install progress.
+    """
+    if req.package_id:
+        from helm.packages.marketplace import get_download_url
+        url = get_download_url(req.package_id)
+        if not url:
             raise HTTPException(
-                status_code=400,
-                detail="Provide either 'package_id' or 'url'"
+                status_code=404,
+                detail=f"Package '{req.package_id}' not found in catalog"
             )
+        package_id = req.package_id
+    elif req.url:
+        url = req.url
+        package_id = req.url.split("/")[-1].replace(".raprpkg", "")
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either 'package_id' or 'url'"
+        )
 
-        return result
+    # Create a background task
+    task_id = uuid.uuid4().hex[:12]
+    _install_tasks[task_id] = {
+        "task_id": task_id,
+        "package_id": package_id,
+        "status": "running",
+        "progress": 0,
+        "current_step": "Starting install...",
+        "steps": [],
+        "error": None,
+        "install_result": None,
+    }
 
-    except RAPRPackagesError as e:
-        logger.error("RAPR Packages install error: %s", e)
-        raise HTTPException(status_code=400, detail=str(e))
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("RAPR Packages install unexpected error: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    # Run in background thread
+    thread = threading.Thread(
+        target=_run_install_background,
+        args=(task_id, package_id, url, req.force),
+        daemon=True,
+    )
+    thread.start()
+
+    return {"ok": True, "task_id": task_id, "package_id": package_id, "status": "running"}
+
+
+@router.get("/install/status/{task_id}")
+async def install_status(task_id: str):
+    """Get the progress of a background install task."""
+    task = _install_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Install task not found")
+    return task
 
 
 @router.post("/install/upload")
@@ -233,7 +351,7 @@ async def install_from_upload(
 ):
     """Install a .raprpkg file uploaded directly."""
     from helm.packages.installer import install_package as _install
-    from helm.packages import RAPRPackagesError
+    from helm.packages import HelmPackError
 
     if not file.filename or not file.filename.endswith(".raprpkg"):
         raise HTTPException(
@@ -256,7 +374,7 @@ async def install_from_upload(
         result = _install(tmp_path, force=force)
         return result
 
-    except RAPRPackagesError as e:
+    except HelmPackError as e:
         logger.error("RAPR Packages upload install error: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
@@ -272,17 +390,32 @@ async def install_from_upload(
             pass
 
 
+@router.post("/toggle")
+async def toggle_package(req: ToggleRequest):
+    """Enable or disable an installed skill package."""
+    pkg_id = req.package_id
+    enabled = req.enabled
+
+    try:
+        from helm.packages.skill_installer import toggle_skill
+        result = toggle_skill(pkg_id, enabled)
+        return result
+    except Exception as e:
+        logger.error("Toggle failed for %s: %s", pkg_id, e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/uninstall")
 async def uninstall_package(req: UninstallRequest):
     """Uninstall a package by ID."""
     from helm.packages.installer import uninstall_package as _uninstall
-    from helm.packages import RAPRPackagesError
+    from helm.packages import HelmPackError
 
     try:
         result = _uninstall(req.package_id)
         return result
 
-    except RAPRPackagesError as e:
+    except HelmPackError as e:
         logger.error("RAPR Packages uninstall error: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

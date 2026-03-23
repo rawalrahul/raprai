@@ -80,11 +80,11 @@ if errorlevel 1 echo  WARNING: Could not copy integrations folder.
 :: The helm\plugins and helm\skills directories are created on first launch if needed.
 :: Explicitly remove them from dist in case Nuitka somehow included them.
 if exist web_app.dist\helm\plugins (
-    echo  Removing bundled plugins from dist (should be marketplace-only)...
+    echo  Removing bundled plugins from dist - should be marketplace-only...
     rmdir /s /q web_app.dist\helm\plugins
 )
 if exist web_app.dist\helm\skills (
-    echo  Removing bundled skills from dist (should be marketplace-only)...
+    echo  Removing bundled skills from dist - should be marketplace-only...
     rmdir /s /q web_app.dist\helm\skills
 )
 

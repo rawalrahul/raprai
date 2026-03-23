@@ -268,7 +268,7 @@ def uninstall_package(package_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def list_installed() -> list[dict]:
-    """Return all installed packages."""
+    """Return all installed packages with enabled state."""
     try:
         from helm.db import get_db
         db = get_db()
@@ -277,8 +277,10 @@ def list_installed() -> list[dict]:
                       install_path, package_hash, installed_at
                FROM packages ORDER BY name"""
         ).fetchall()
-        return [
-            {
+
+        result = []
+        for r in rows:
+            pkg = {
                 "id": r["id"],
                 "type": r["type"],
                 "name": r["name"],
@@ -288,8 +290,14 @@ def list_installed() -> list[dict]:
                 "install_path": r["install_path"],
                 "installed_at": r["installed_at"],
             }
-            for r in rows
-        ]
+            # Check if skill is enabled (SKILL.md exists vs .disabled)
+            if r["type"] == "skill" and r["install_path"]:
+                skill_md = pathlib.Path(r["install_path"]) / "SKILL.md"
+                pkg["enabled"] = skill_md.exists()
+            else:
+                pkg["enabled"] = True
+            result.append(pkg)
+        return result
     except Exception as e:
         logger.warning("Failed to list installed packages: %s", e)
         return []

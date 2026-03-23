@@ -189,7 +189,7 @@ def sync_connections(force: bool = False) -> dict:
 
     token = get_device_token()
     if not token:
-        return {"ok": False, "error": "App not linked. Enter your activation code in Settings."}
+        return {"ok": False, "error": "App not linked. Restart the app to enter your activation code."}
 
     now = time.time()
     if not force and _cached_connections and (now - _last_sync_at) < _SYNC_INTERVAL:

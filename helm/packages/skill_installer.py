@@ -146,6 +146,50 @@ def uninstall_skill(package_id: str) -> dict:
     return {"ok": True, "removed": package_id}
 
 
+def toggle_skill(package_id: str, enabled: bool) -> dict:
+    """Enable or disable an installed skill by renaming SKILL.md.
+
+    Disabled skills have their SKILL.md renamed to SKILL.md.disabled,
+    which prevents the skills scanner from finding them.
+    """
+    install_dir = _get_skills_install_dir() / package_id
+    if not install_dir.exists():
+        return {"ok": False, "error": f"Skill '{package_id}' not found"}
+
+    skill_md = install_dir / "SKILL.md"
+    skill_md_disabled = install_dir / "SKILL.md.disabled"
+
+    if enabled:
+        # Re-enable: rename .disabled back to SKILL.md
+        if skill_md_disabled.exists():
+            skill_md_disabled.rename(skill_md)
+    else:
+        # Disable: rename SKILL.md to .disabled
+        if skill_md.exists():
+            skill_md.rename(skill_md_disabled)
+
+    # Update DB
+    try:
+        from helm.db import get_db
+        db = get_db()
+        db.execute(
+            "UPDATE packages SET description = CASE WHEN ? THEN REPLACE(description, ' [disabled]', '') ELSE description || ' [disabled]' END WHERE id = ?",
+            (enabled, package_id),
+        )
+        db.commit()
+    except Exception as e:
+        logger.warning("Failed to update package enabled state: %s", e)
+
+    # Hot-reload skill registry
+    try:
+        from helm.skills import scan_skills
+        scan_skills()
+    except Exception as e:
+        logger.warning("Skill hot-reload after toggle failed: %s", e)
+
+    return {"ok": True, "package_id": package_id, "enabled": enabled}
+
+
 def _find_skill_md(staging_dir: pathlib.Path) -> Optional[pathlib.Path]:
     """Find SKILL.md in the staging directory (handles nested structures)."""
     # Direct
