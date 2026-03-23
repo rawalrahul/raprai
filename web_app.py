@@ -431,7 +431,13 @@ async def _main():
                         pass
         except Exception:
             pass
-        # 4. Close database connections
+        # 4. Flush pending telemetry so install/usage events aren't lost
+        try:
+            from helm.device_link import flush_telemetry
+            flush_telemetry()
+        except Exception:
+            pass
+        # 5. Close database connections
         try:
             from helm.db import close_all
             close_all()
@@ -539,6 +545,12 @@ def main():
     except Exception as exc:
         logger.critical("Fatal error: %s", exc, exc_info=True)
     finally:
+        # Flush telemetry before anything else so events aren't lost
+        try:
+            from helm.device_link import flush_telemetry
+            flush_telemetry()
+        except Exception:
+            pass
         # Graceful shutdown — stop AI processes, close DB, flush logs
         try:
             import asyncio as _aio
