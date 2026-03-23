@@ -41,6 +41,12 @@ async def list_mcp_servers():
     # (they're internal infrastructure, not user-installable packages)
     _HIDDEN_SERVERS = {"chrome"}
 
+    # Import known OAuth MCPs so we can enrich servers with setup/connected
+    try:
+        from helm.web_routes.plugins_routes import _KNOWN_OAUTH_MCPS
+    except Exception:
+        _KNOWN_OAUTH_MCPS = {}
+
     all_servers = []
     for server_id, cfg in config.items():
         # Skip internal servers — they're not marketplace items
@@ -61,6 +67,58 @@ async def list_mcp_servers():
                 "tool_count": 0,
                 "summary": "Not started",
             })
+
+    # Enrich each server with setup/connected info for OAuth MCPs
+    for srv in all_servers:
+        sid = srv["id"]
+        base = sid.lower().replace("-oauth", "").replace("_oauth", "").replace("-", "_")
+        setup = None
+        token_env = ""
+
+        # 1) Check hardcoded known OAuth MCPs
+        known = (_KNOWN_OAUTH_MCPS.get(base)
+                 or _KNOWN_OAUTH_MCPS.get(sid.lower())
+                 or _KNOWN_OAUTH_MCPS.get(sid.lower().replace("-", "_"))
+                 or _KNOWN_OAUTH_MCPS.get(sid.lower().replace("_", "-")))
+        if known and known.get("auth"):
+            kauth = known["auth"]
+            setup = {
+                "type": "oauth",
+                "token_env": kauth.get("token_env", ""),
+                "client_id": kauth.get("client_id", ""),
+                "provider": kauth.get("proxy_provider", base),
+            }
+            token_env = kauth.get("token_env", "")
+
+        # 2) Fallback: check marketplace catalog
+        if not setup:
+            try:
+                from helm.packages.marketplace import get_catalog_entry
+                entry = get_catalog_entry(sid) or get_catalog_entry(
+                    sid.lower().replace("_", "-"))
+                if entry and entry.get("setup"):
+                    cat_setup = entry["setup"]
+                    setup = {
+                        "type": cat_setup.get("type", ""),
+                        "token_env": cat_setup.get("token_env", ""),
+                        "client_id": cat_setup.get("client_id", ""),
+                        "provider": cat_setup.get("provider", base),
+                    }
+                    token_env = cat_setup.get("token_env", "")
+            except Exception:
+                pass
+
+        if setup:
+            srv["setup"] = setup
+            # Check if OAuth token exists → connected
+            if token_env:
+                try:
+                    from helm.token_vault import load_token
+                    token = load_token(token_env)
+                    srv["connected"] = bool(token and token.strip())
+                except Exception:
+                    import os
+                    srv["connected"] = bool(os.environ.get(token_env, ""))
 
     return JSONResponse({"servers": all_servers})
 
