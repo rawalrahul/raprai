@@ -35,12 +35,11 @@ def _record_install(manifest: HelmPackManifest, install_path: str, pkg_hash: str
     try:
         from helm.db import get_db
         db = get_db()
-        now = time.time()
         db.execute(
             """INSERT OR REPLACE INTO packages
-               (id, type, name, version, description, author, keywords,
-                install_path, package_hash, installed_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, type, name, version, description, author,
+                install_path, package_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 manifest.id,
                 manifest.type.value,
@@ -48,11 +47,8 @@ def _record_install(manifest: HelmPackManifest, install_path: str, pkg_hash: str
                 manifest.version,
                 manifest.description,
                 manifest.author,
-                json.dumps(manifest.keywords),
                 install_path,
                 pkg_hash,
-                now,
-                now,
             ),
         )
         db.commit()
@@ -72,7 +68,8 @@ def _record_uninstall(package_id: str):
 
 
 def _log_transaction(package_id: str, action: str, status: str,
-                     detail: str = "", txn_id: Optional[str] = None) -> str:
+                     detail: str = "", txn_id: Optional[str] = None,
+                     package_type: str = "") -> str:
     """Log a package install/uninstall transaction. Returns txn_id."""
     txn_id = txn_id or uuid.uuid4().hex[:12]
     try:
@@ -80,9 +77,9 @@ def _log_transaction(package_id: str, action: str, status: str,
         db = get_db()
         db.execute(
             """INSERT INTO package_installs
-               (txn_id, package_id, action, status, detail, timestamp)
+               (transaction_id, package_id, package_type, operation, status, error_message)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (txn_id, package_id, action, status, detail, time.time()),
+            (txn_id, package_id, package_type or "unknown", action, status, detail or None),
         )
         db.commit()
     except Exception as e:
@@ -129,7 +126,8 @@ def install_package(
     pkg_hash = pkg.compute_hash()
     manifest.package_hash = pkg_hash
 
-    _log_transaction(manifest.id, "install", "started", txn_id=txn_id)
+    _log_transaction(manifest.id, "install", "started", txn_id=txn_id,
+                     package_type=manifest.type.value)
 
     # Extract to staging directory
     from helm.paths import packages_staging_dir
@@ -144,7 +142,8 @@ def install_package(
         # Record success
         install_path = result.get("install_path", "")
         _record_install(manifest, install_path, pkg_hash)
-        _log_transaction(manifest.id, "install", "success", txn_id=txn_id)
+        _log_transaction(manifest.id, "install", "success", txn_id=txn_id,
+                         package_type=manifest.type.value)
 
         logger.info(
             "RAPR Packages: installed %s (%s v%s) → %s",
@@ -161,11 +160,13 @@ def install_package(
             **result,
         }
 
-    except HelmPackError:
-        _log_transaction(manifest.id, "install", "failed", str(manifest.id), txn_id)
+    except HelmPackError as e:
+        _log_transaction(manifest.id, "install", "failed", str(e), txn_id,
+                         package_type=manifest.type.value)
         raise
     except Exception as e:
-        _log_transaction(manifest.id, "install", "failed", str(e), txn_id)
+        _log_transaction(manifest.id, "install", "failed", str(e), txn_id,
+                         package_type=manifest.type.value)
         raise InstallError(f"Installation failed: {e}") from e
     finally:
         # Clean up staging
@@ -219,7 +220,8 @@ def uninstall_package(package_id: str) -> dict:
         return {"ok": True, "message": f"Package '{package_id}' not found (already removed)"}
 
     pkg_type = info.get("type", "")
-    _log_transaction(package_id, "uninstall", "started", txn_id=txn_id)
+    _log_transaction(package_id, "uninstall", "started", txn_id=txn_id,
+                     package_type=pkg_type)
 
     try:
         if pkg_type == "skill":
@@ -238,7 +240,8 @@ def uninstall_package(package_id: str) -> dict:
             raise InstallError(f"Unknown package type: {pkg_type}")
 
         _record_uninstall(package_id)
-        _log_transaction(package_id, "uninstall", "success", txn_id=txn_id)
+        _log_transaction(package_id, "uninstall", "success", txn_id=txn_id,
+                         package_type=pkg_type)
 
         logger.info("RAPR Packages: uninstalled %s (%s)", package_id, pkg_type)
 
@@ -250,11 +253,13 @@ def uninstall_package(package_id: str) -> dict:
             **result,
         }
 
-    except HelmPackError:
-        _log_transaction(package_id, "uninstall", "failed", str(package_id), txn_id)
+    except HelmPackError as e:
+        _log_transaction(package_id, "uninstall", "failed", str(e), txn_id,
+                         package_type=pkg_type)
         raise
     except Exception as e:
-        _log_transaction(package_id, "uninstall", "failed", str(e), txn_id)
+        _log_transaction(package_id, "uninstall", "failed", str(e), txn_id,
+                         package_type=pkg_type)
         raise InstallError(f"Uninstall failed: {e}") from e
 
 
@@ -269,8 +274,7 @@ def list_installed() -> list[dict]:
         db = get_db()
         rows = db.execute(
             """SELECT id, type, name, version, description, author,
-                      keywords, install_path, package_hash,
-                      installed_at, updated_at
+                      install_path, package_hash, installed_at
                FROM packages ORDER BY name"""
         ).fetchall()
         return [
@@ -281,10 +285,8 @@ def list_installed() -> list[dict]:
                 "version": r["version"],
                 "description": r["description"],
                 "author": r["author"],
-                "keywords": json.loads(r["keywords"]) if r["keywords"] else [],
                 "install_path": r["install_path"],
                 "installed_at": r["installed_at"],
-                "updated_at": r["updated_at"],
             }
             for r in rows
         ]
@@ -310,11 +312,9 @@ def get_package_info(package_id: str) -> Optional[dict]:
             "version": row["version"],
             "description": row["description"],
             "author": row["author"],
-            "keywords": json.loads(row["keywords"]) if row["keywords"] else [],
             "install_path": row["install_path"],
             "package_hash": row["package_hash"],
             "installed_at": row["installed_at"],
-            "updated_at": row["updated_at"],
         }
     except Exception as e:
         logger.warning("Failed to get package info: %s", e)
@@ -327,9 +327,10 @@ def get_install_history(limit: int = 50) -> list[dict]:
         from helm.db import get_db
         db = get_db()
         rows = db.execute(
-            """SELECT txn_id, package_id, action, status, detail, timestamp
+            """SELECT transaction_id, package_id, package_type, operation,
+                      status, started_at, error_message
                FROM package_installs
-               ORDER BY timestamp DESC LIMIT ?""",
+               ORDER BY started_at DESC LIMIT ?""",
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]

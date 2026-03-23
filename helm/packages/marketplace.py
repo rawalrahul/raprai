@@ -94,6 +94,28 @@ def _catalog_url() -> str:
     return os.environ.get("RAPR_CATALOG_URL", _DEFAULT_CATALOG_URL)
 
 
+def _normalize_catalog_entry(entry: dict) -> dict:
+    """Normalize a catalog entry so downstream code can rely on consistent fields.
+
+    The website catalog uses ``slug`` / ``category`` while the app expects
+    ``id`` / ``type``.  This function ensures both sets of keys exist so
+    that filtering, search, and install all work regardless of the source.
+    """
+    # slug → id  (keep both so either lookup works)
+    if "slug" in entry and "id" not in entry:
+        entry["id"] = entry["slug"]
+    if "id" in entry and "slug" not in entry:
+        entry["slug"] = entry["id"]
+
+    # category → type  (website uses 'category'; app uses 'type')
+    if "category" in entry and "type" not in entry:
+        entry["type"] = entry["category"]
+    if "type" in entry and "category" not in entry:
+        entry["category"] = entry["type"]
+
+    return entry
+
+
 def _fetch_remote_catalog() -> list[dict]:
     """Fetch catalog JSON from the remote URL."""
     global _cached_full_response
@@ -110,11 +132,14 @@ def _fetch_remote_catalog() -> list[dict]:
 
         if isinstance(data, dict):
             _cached_full_response = data
-            return data.get("packages", data.get("items", []))
-        if isinstance(data, list):
+            items = data.get("packages", data.get("items", []))
+        elif isinstance(data, list):
             _cached_full_response = {"packages": data}
-            return data
-        return []
+            items = data
+        else:
+            return []
+
+        return [_normalize_catalog_entry(p) for p in items]
 
     except Exception as e:
         logger.warning("RAPR Packages: failed to fetch catalog from %s: %s", url, e)
@@ -220,7 +245,8 @@ def search_catalog(
         from helm.packages.installer import list_installed
         installed_ids = {p["id"] for p in list_installed()}
         for pkg in results:
-            pkg["installed"] = pkg.get("id", "") in installed_ids
+            pkg_id = pkg.get("id") or pkg.get("slug") or ""
+            pkg["installed"] = pkg_id in installed_ids
     except Exception:
         pass
 
@@ -228,20 +254,33 @@ def search_catalog(
 
 
 def get_catalog_entry(package_id: str) -> Optional[dict]:
-    """Return a specific catalog entry by ID."""
+    """Return a specific catalog entry by ID or slug."""
     catalog = get_catalog()
     for pkg in catalog:
-        if pkg.get("id") == package_id:
+        if pkg.get("id") == package_id or pkg.get("slug") == package_id:
             return pkg
     return None
 
 
 def get_download_url(package_id: str) -> Optional[str]:
-    """Return the download URL for a catalog package."""
+    """Return the absolute download URL for a catalog package.
+
+    Relative paths (e.g. ``/marketplace/packages/foo.raprpkg``) are
+    resolved against the catalog base URL (``raprai.com``).
+    """
     entry = get_catalog_entry(package_id)
     if not entry:
         return None
-    return entry.get("download_url") or entry.get("url")
+    url = entry.get("download_url") or entry.get("url") or ""
+    if not url:
+        return None
+    # Resolve relative paths against the catalog origin
+    if url.startswith("/"):
+        from urllib.parse import urlparse
+        catalog_url = _catalog_url()
+        parsed = urlparse(catalog_url)
+        url = f"{parsed.scheme}://{parsed.netloc}{url}"
+    return url
 
 
 # ---------------------------------------------------------------------------
@@ -249,74 +288,12 @@ def get_download_url(package_id: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 def _builtin_catalog() -> list[dict]:
-    """Return a small set of built-in example packages.
+    """Return an empty list — real catalog comes from raprai.com.
 
-    These serve as demo content so the marketplace UI works
-    out-of-the-box without any remote catalog configured.
-    Replace or remove once a real catalog source is wired up.
+    The marketplace UI shows "Catalog unavailable (offline?)" when
+    no remote catalog can be fetched and no local cache exists.
     """
-    return [
-        {
-            "id": "web-search",
-            "type": "skill",
-            "name": "Web Search",
-            "description": "Let any AI session search the web via Brave, Google, or DuckDuckGo and return summarised results.",
-            "version": "1.0.0",
-            "author": "RAPR AI",
-            "keywords": ["search", "web", "browse", "internet"],
-            "download_url": "",
-        },
-        {
-            "id": "file-organiser",
-            "type": "skill",
-            "name": "File Organiser",
-            "description": "Automatically sort files in a folder by type, date, or custom rules.",
-            "version": "1.0.0",
-            "author": "RAPR AI",
-            "keywords": ["files", "organise", "cleanup", "folders"],
-            "download_url": "",
-        },
-        {
-            "id": "sqlite-explorer",
-            "type": "mcp",
-            "name": "SQLite Explorer",
-            "description": "MCP server that exposes any SQLite database as queryable tools for AI sessions.",
-            "version": "0.2.0",
-            "author": "RAPR AI",
-            "keywords": ["sqlite", "database", "sql", "query"],
-            "download_url": "",
-        },
-        {
-            "id": "github-integration",
-            "type": "mcp",
-            "name": "GitHub",
-            "description": "MCP server for GitHub — browse repos, issues, PRs, and run actions from chat.",
-            "version": "0.3.0",
-            "author": "RAPR AI",
-            "keywords": ["github", "git", "repo", "issues", "pr"],
-            "download_url": "",
-        },
-        {
-            "id": "notion-sync",
-            "type": "plugin",
-            "name": "Notion Sync",
-            "description": "Two-way sync between RAPR AI sessions and Notion pages. Export chat logs or import task lists.",
-            "version": "0.1.0",
-            "author": "RAPR AI",
-            "keywords": ["notion", "sync", "notes", "tasks"],
-            "download_url": "",
-        },
-        {
-            "id": "code-review",
-            "type": "skill",
-            "name": "Code Review",
-            "description": "Automated code review skill — analyses diffs, checks style, and suggests improvements.",
-            "version": "1.1.0",
-            "author": "RAPR AI",
-            "keywords": ["code", "review", "lint", "diff", "quality"],
-            "download_url": "",
-        },
-    ]
+    return []
 
 
 # ---------------------------------------------------------------------------

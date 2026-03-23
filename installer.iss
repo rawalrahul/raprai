@@ -70,8 +70,9 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 Name: "rundeps"; Description: "Install required tools (Node.js, Pandoc, FFmpeg)"; GroupDescription: "Post-install:"; Flags: checkedonce
 
 [Files]
-; Include EVERYTHING from the Nuitka dist folder
-Source: "web_app.dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Include EVERYTHING from the Nuitka dist folder EXCEPT plugins and skills
+; (plugins/skills are installed at runtime via the marketplace — never bundled)
+Source: "web_app.dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "helm\plugins\*,helm\skills\*,chrome-extension\*,marketplace\*,rapr-oauth-proxy\*,scripts\*,unpacked_plan\*,__pycache__\*"
 ; NOTE: web_app.dist\ must exist before compiling this script.
 ;       Run build.bat first!
 

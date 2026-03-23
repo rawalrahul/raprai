@@ -55,6 +55,7 @@ python -m nuitka --standalone --enable-plugin=tk-inter ^
     --include-package=pypdf ^
     --include-package=pystray ^
     --include-package=PIL ^
+    --nofollow-import-to=helm.plugins.* ^
     web_app.py
 
 if errorlevel 1 (
@@ -75,9 +76,43 @@ echo  Copying additional files into dist...
 xcopy /E /I /Q integrations web_app.dist\integrations
 if errorlevel 1 echo  WARNING: Could not copy integrations folder.
 
-:: Copy plugins (manifest.json + instructions.md per plugin)
-xcopy /E /I /Q helm\plugins web_app.dist\helm\plugins
-if errorlevel 1 echo  WARNING: Could not copy plugins folder.
+:: Plugins and skills are NOT bundled — they're installed via the marketplace at runtime.
+:: The helm\plugins and helm\skills directories are created on first launch if needed.
+:: Explicitly remove them from dist in case Nuitka somehow included them.
+if exist web_app.dist\helm\plugins (
+    echo  Removing bundled plugins from dist (should be marketplace-only)...
+    rmdir /s /q web_app.dist\helm\plugins
+)
+if exist web_app.dist\helm\skills (
+    echo  Removing bundled skills from dist (should be marketplace-only)...
+    rmdir /s /q web_app.dist\helm\skills
+)
+
+:: Development-only directories — never ship to users
+if exist web_app.dist\chrome-extension (
+    echo  Removing dev-only: chrome-extension
+    rmdir /s /q web_app.dist\chrome-extension
+)
+if exist web_app.dist\marketplace (
+    echo  Removing dev-only: marketplace
+    rmdir /s /q web_app.dist\marketplace
+)
+if exist web_app.dist\rapr-oauth-proxy (
+    echo  Removing dev-only: rapr-oauth-proxy
+    rmdir /s /q web_app.dist\rapr-oauth-proxy
+)
+if exist web_app.dist\scripts (
+    echo  Removing dev-only: scripts
+    rmdir /s /q web_app.dist\scripts
+)
+if exist web_app.dist\unpacked_plan (
+    echo  Removing dev-only: unpacked_plan
+    rmdir /s /q web_app.dist\unpacked_plan
+)
+if exist web_app.dist\__pycache__ (
+    echo  Removing dev-only: __pycache__
+    rmdir /s /q web_app.dist\__pycache__
+)
 
 :: Copy frontend2 (separated frontend served at runtime)
 if exist frontend2 (

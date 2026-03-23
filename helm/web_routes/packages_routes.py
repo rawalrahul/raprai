@@ -134,21 +134,16 @@ async def configure_package(req: ConfigureRequest):
 
         logger.info("Packages: updated env vars for %s: %s", pkg_id, list(env_vars.keys()))
 
-        # If this is an MCP server, try to restart it
+        # If this is an MCP server, reload all servers so it picks up new env vars
         result = {"ok": True, "package_id": pkg_id, "configured_keys": list(env_vars.keys())}
         try:
-            from helm.mcp.config import load_config
-            mcp_cfg = load_config()
-            mcp_id = pkg_id.replace("-", "_")
-            if mcp_id in mcp_cfg or pkg_id in mcp_cfg:
-                server_id = mcp_id if mcp_id in mcp_cfg else pkg_id
-                from helm.mcp.manager import MCPManager
-                mgr = MCPManager.get_instance()
-                if mgr:
-                    await mgr.restart_server(server_id)
-                    result["restarted"] = server_id
+            from helm.mcp.manager import MCPManager
+            mgr = MCPManager.get_instance()
+            if mgr and hasattr(mgr, "reload_servers"):
+                await mgr.reload_servers()
+                result["reloaded"] = True
         except Exception as e:
-            logger.warning("Packages: could not restart MCP after config: %s", e)
+            logger.warning("Packages: could not reload MCP servers after config: %s", e)
 
         return result
 

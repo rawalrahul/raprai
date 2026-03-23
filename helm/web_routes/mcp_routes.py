@@ -37,8 +37,16 @@ async def list_mcp_servers():
     running_servers = mgr.list_servers() if mgr else []
     running_map = {s["id"]: s for s in running_servers}
 
+    # Built-in servers that should not appear in the packages panel
+    # (they're internal infrastructure, not user-installable packages)
+    _HIDDEN_SERVERS = {"chrome"}
+
     all_servers = []
     for server_id, cfg in config.items():
+        # Skip internal servers — they're not marketplace items
+        if server_id in _HIDDEN_SERVERS:
+            continue
+
         if server_id in running_map:
             # Server is loaded in manager — use live status
             info = running_map[server_id]

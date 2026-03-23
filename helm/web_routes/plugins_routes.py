@@ -64,6 +64,74 @@ async def toggle_plugin(plugin_id: str, request: Request):
 
 # ── Connect Page (Token Paste) ──────────────────────────────────────────────
 
+def _lookup_plugin_or_catalog(plugin_id: str) -> dict | None:
+    """Look up plugin info from registry first, then fall back to marketplace catalog.
+
+    This allows marketplace-installed MCP packages (e.g. figma-oauth, slack-oauth)
+    to use the same connect/OAuth flow as legacy plugins.
+    """
+    info = _registry.get(plugin_id.lower())
+    if info:
+        return info
+    # Fall back to marketplace catalog (for marketplace-installed MCPs)
+    try:
+        from helm.packages.marketplace import get_catalog_entry
+        entry = get_catalog_entry(plugin_id)
+        if entry and entry.get("setup"):
+            # Build a plugin-compatible info dict from catalog entry
+            setup = entry["setup"]
+            cat_info = {
+                "id": entry.get("id") or entry.get("slug", plugin_id),
+                "name": entry.get("name", plugin_id),
+                "emoji": entry.get("emoji", "🔌"),
+                "description": entry.get("description", ""),
+            }
+            # Map catalog setup → plugin auth format
+            if setup.get("type") == "oauth":
+                cat_info["auth"] = {
+                    "type": "oauth2",
+                    "authorize_url": setup.get("authorize_url", ""),
+                    "token_url": setup.get("token_url", ""),
+                    "scopes": setup.get("scopes", ""),
+                    "pkce": setup.get("pkce", False),
+                    "client_id": setup.get("client_id", ""),
+                    "env_client_id": setup.get("env_client_id", ""),
+                    "env_client_secret": setup.get("env_client_secret", ""),
+                    "token_env": setup.get("token_env", ""),
+                    "proxy_exchange": setup.get("proxy_exchange", False),
+                }
+                # Merge env_vars into auth if present
+                for ev in setup.get("env_vars", []):
+                    if isinstance(ev, dict):
+                        key = ev.get("key", "")
+                        if "CLIENT_ID" in key:
+                            cat_info["auth"]["env_client_id"] = key
+                        elif "CLIENT_SECRET" in key:
+                            cat_info["auth"]["env_client_secret"] = key
+                        elif not cat_info["auth"].get("token_env"):
+                            cat_info["auth"]["token_env"] = key
+            elif setup.get("type") in ("token", "api_key"):
+                token_env = ""
+                for ev in setup.get("env_vars", []):
+                    if isinstance(ev, dict):
+                        token_env = ev.get("key", "")
+                        break
+                    elif isinstance(ev, str):
+                        token_env = ev
+                        break
+                cat_info["auth"] = {
+                    "type": "token",
+                    "token_env": token_env,
+                    "token_label": setup.get("env_vars", [{}])[0].get("label", "API Token") if setup.get("env_vars") and isinstance(setup["env_vars"][0], dict) else "API Token",
+                    "token_url": setup.get("setup_url", ""),
+                    "token_hint": setup.get("env_vars", [{}])[0].get("placeholder", "") if setup.get("env_vars") and isinstance(setup["env_vars"][0], dict) else "",
+                }
+            return cat_info
+    except Exception as e:
+        logger.warning("Catalog lookup for plugin '%s' failed: %s", plugin_id, e)
+    return None
+
+
 @router.get("/plugins/{plugin_id}/connect")
 async def connect_page(plugin_id: str):
     """Show a connect page where users paste their token/API key.
@@ -71,7 +139,7 @@ async def connect_page(plugin_id: str):
     For OAuth2 plugins with a client_id available (embedded or env var),
     auto-redirect to the OAuth flow instead of showing the token-paste page.
     """
-    info = _registry.get(plugin_id.lower())
+    info = _lookup_plugin_or_catalog(plugin_id)
     if not info:
         return JSONResponse({"error": f"Plugin '{plugin_id}' not found"}, status_code=404)
 
@@ -156,7 +224,7 @@ def _validate_token(info: dict, token_value: str) -> dict:
 @router.post("/plugins/{plugin_id}/save-token")
 async def save_token(plugin_id: str, request: Request):
     """Save a token pasted by the user. Body: {"token_env": "...", "value": "..."}"""
-    info = _registry.get(plugin_id.lower())
+    info = _lookup_plugin_or_catalog(plugin_id)
     if not info:
         return JSONResponse({"error": f"Plugin '{plugin_id}' not found"}, status_code=404)
 
@@ -199,6 +267,16 @@ async def save_token(plugin_id: str, request: Request):
     # Auto-enable the plugin
     set_plugin_enabled(plugin_id, True)
 
+    # Reload MCP servers so they pick up the new token
+    try:
+        from helm.mcp.manager import MCPManager
+        mgr = MCPManager.get_instance()
+        if mgr and hasattr(mgr, "reload_servers"):
+            import asyncio
+            asyncio.ensure_future(mgr.reload_servers())
+    except Exception:
+        pass
+
     return JSONResponse({"ok": True, "plugin_id": plugin_id, "connected": True})
 
 
@@ -208,7 +286,7 @@ async def save_token(plugin_id: str, request: Request):
 async def oauth_start(plugin_id: str):
     """Initiate OAuth flow — redirects to provider if credentials are configured,
     otherwise falls back to the connect (token paste) page."""
-    info = _registry.get(plugin_id.lower())
+    info = _lookup_plugin_or_catalog(plugin_id)
     if not info:
         return JSONResponse({"error": f"Plugin '{plugin_id}' not found"}, status_code=404)
 
@@ -232,7 +310,7 @@ async def oauth_start(plugin_id: str):
 @router.get("/plugins/{plugin_id}/oauth/start/{provider}")
 async def oauth_start_provider(plugin_id: str, provider: str):
     """Initiate OAuth flow for a specific provider (e.g., linear or jira)."""
-    info = _registry.get(plugin_id.lower())
+    info = _lookup_plugin_or_catalog(plugin_id)
     if not info:
         return JSONResponse({"error": f"Plugin '{plugin_id}' not found"}, status_code=404)
 
@@ -243,6 +321,17 @@ async def oauth_start_provider(plugin_id: str, provider: str):
         return HTMLResponse(_callback_page(False, result["error"]))
 
     return RedirectResponse(url=result["authorize_url"])
+
+
+async def _reload_mcp_after_connect():
+    """Reload MCP servers after a token is saved so they pick up new credentials."""
+    try:
+        from helm.mcp.manager import MCPManager
+        mgr = MCPManager.get_instance()
+        if mgr and hasattr(mgr, "reload_servers"):
+            await mgr.reload_servers()
+    except Exception as e:
+        logger.warning("MCP reload after connect failed: %s", e)
 
 
 @router.get("/plugins/oauth/callback")
@@ -264,6 +353,7 @@ async def oauth_callback(
             return HTMLResponse(_callback_page(False, result["error"]))
         plugin_id = result.get("plugin_id", "")
         set_plugin_enabled(plugin_id, True)
+        await _reload_mcp_after_connect()
         return HTMLResponse(_callback_page(True, f"Successfully connected! Plugin '{plugin_id}' is now enabled."))
 
     # Local exchange: app exchanges code for token
@@ -276,6 +366,7 @@ async def oauth_callback(
 
     plugin_id = result.get("plugin_id", "")
     set_plugin_enabled(plugin_id, True)
+    await _reload_mcp_after_connect()
 
     return HTMLResponse(_callback_page(True, f"Successfully connected! Plugin '{plugin_id}' is now enabled."))
 
@@ -285,7 +376,7 @@ async def oauth_callback(
 @router.post("/plugins/{plugin_id}/disconnect")
 async def plugin_disconnect(plugin_id: str):
     """Clear stored tokens for a plugin."""
-    info = _registry.get(plugin_id.lower())
+    info = _lookup_plugin_or_catalog(plugin_id)
     if not info:
         return JSONResponse({"error": f"Plugin '{plugin_id}' not found"}, status_code=404)
 

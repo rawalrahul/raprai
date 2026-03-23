@@ -8,6 +8,7 @@ Flow:
   Step 3 — Claude + Codex + Ollama (optional)
   Step 4 — PIN Protection
   Step 5 — Done / summary
+  Step 6 — Activation Code (MANDATORY, last step before launch, only asked once)
 """
 
 _SETUP_HTML = r"""<!DOCTYPE html>
@@ -136,6 +137,7 @@ select option{background:var(--surface);color:var(--text)}
       <div class="step-dot" id="dot3"></div>
       <div class="step-dot" id="dot4"></div>
       <div class="step-dot" id="dot5"></div>
+      <div class="step-dot" id="dot6"></div>
     </div>
   </div>
 
@@ -318,17 +320,37 @@ select option{background:var(--surface);color:var(--text)}
       </div>
     </div>
 
-    <!-- ─── STEP 5: Done ─── -->
+    <!-- ─── STEP 5: Summary ─── -->
     <div class="step" id="step5">
-      <div class="step-title">You're all set! 🎉</div>
+      <div class="step-title">Almost there! 🎉</div>
       <div class="step-desc">
-        Here's a summary of what's configured. You can always update settings later by editing
-        your <code>.env</code> file in the RAPR AI folder.
+        Here's a summary of what's configured. You can always update settings later via the Settings panel.
       </div>
       <div id="summary"></div>
       <div class="btn-row" style="margin-top:28px">
-        <button class="btn btn-primary" style="width:100%;text-align:center;padding:11px" onclick="launch()">
-          Launch RAPR AI →
+        <button class="btn btn-primary" style="width:100%;text-align:center;padding:11px" onclick="goStep(6)">
+          Continue →
+        </button>
+      </div>
+    </div>
+
+    <!-- ─── STEP 6: Activation Code (MANDATORY, one-time) ─── -->
+    <div class="step" id="step6">
+      <div class="step-title" id="activation-title">Welcome! 🔑</div>
+      <div class="step-desc">
+        Enter your one-time activation code which you can find at
+        <a href="https://raprai.com/activate" target="_blank"><strong>raprai.com/activate</strong></a>
+      </div>
+      <div class="field">
+        <label>Activation Code</label>
+        <input id="activation-code" type="text" placeholder="RAPR-XXXX-XXXX" autocomplete="off"
+               style="text-transform:uppercase;letter-spacing:.08em;font-weight:600;font-size:15px">
+        <small>Each code works on up to 2 devices. You only need to do this once.</small>
+      </div>
+      <div id="activation-msg"></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="activate-btn" style="width:100%;text-align:center;padding:11px" onclick="activateApp()">
+          Activate & Launch RAPR AI →
         </button>
       </div>
     </div>
@@ -340,6 +362,63 @@ select option{background:var(--surface);color:var(--text)}
 <script>
 let _geminiStatus = {};
 let _saved = {gemini: false, tg: false, claude: false, codex: false, ollama: false};
+
+// ── Activation Code (Step 6 — last step before launch) ────────
+async function prepareActivation() {
+  // Personalize with user name
+  const userName = document.getElementById('user-name').value.trim();
+  const title = document.getElementById('activation-title');
+  if (title && userName) {
+    title.textContent = 'Welcome, ' + userName + '! 🔑';
+  }
+  // Check if already activated — skip straight to launch
+  try {
+    const st = await fetch('/device/status').then(r => r.json());
+    if (st.linked) {
+      launch();
+      return;
+    }
+  } catch(e) {}
+}
+
+async function activateApp() {
+  const code = document.getElementById('activation-code').value.trim();
+  const msg  = document.getElementById('activation-msg');
+  const btn  = document.getElementById('activate-btn');
+  msg.innerHTML = '';
+
+  if (!code) {
+    msg.innerHTML = '<div class="alert alert-warn">⚠ Please enter your activation code.</div>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Activating...';
+
+  try {
+    const r = await fetch('/device/activate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken()},
+      body: JSON.stringify({code: code}),
+    });
+    const data = await r.json();
+
+    if (data.ok) {
+      const used = data.devices_used || '?';
+      const max  = data.devices_max  || '?';
+      msg.innerHTML = `<div class="alert alert-ok">✓ Activated! (${used}/${max} devices used) — Launching...</div>`;
+      setTimeout(() => launch(), 1000);
+    } else {
+      msg.innerHTML = `<div class="alert alert-warn">⚠ ${data.error || 'Activation failed. Check your code and try again.'}</div>`;
+      btn.disabled = false;
+      btn.textContent = 'Activate & Launch RAPR AI →';
+    }
+  } catch(e) {
+    msg.innerHTML = '<div class="alert alert-warn">⚠ Could not reach raprai.com — check your internet connection.</div>';
+    btn.disabled = false;
+    btn.textContent = 'Activate & Launch RAPR AI →';
+  }
+}
 
 // ── Welcome / Personalization (Step 0) ────────────────────────
 async function saveWelcome() {
@@ -546,6 +625,7 @@ function goStep(n) {
   if (n === 3) checkOptionalIntegrations();
   if (n === 4) checkPinStatus();
   if (n === 5) buildSummary();
+  if (n === 6) prepareActivation();
 }
 
 // ── PIN step ──────────────────────────────────────────────────
@@ -668,7 +748,17 @@ function copyCode(btn) {
       return;
     }
 
-    // .env exists — check what still needs setup
+    // .env exists — check if already activated
+    try {
+      const devSt = await fetch('/device/status').then(r => r.json());
+      if (devSt.linked) {
+        // Already activated — go straight to app
+        launch();
+        return;
+      }
+    } catch(e) {}
+
+    // .env exists but not activated — check what still needs setup
     if (st.gemini_ready && st.has_bot_token) {
       // Both Gemini and Telegram configured — go to summary
       goStep(5);
@@ -685,6 +775,164 @@ function copyCode(btn) {
   } catch (e) {
     // Default: stay on step 0 (welcome)
   }
+})();
+</script>
+</body>
+</html>"""
+
+
+# ---------------------------------------------------------------------------
+# Standalone activation page — shown when .env exists but no device token.
+# This handles the edge case: user completed onboarding, closed the app
+# before activating, and reopened it.
+# ---------------------------------------------------------------------------
+
+_ACTIVATE_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RAPR AI — Activate</title>
+<link rel="icon" href="/static/logo.png" type="image/png">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0d0d;--surface:#141414;--surface2:#1c1c1c;--border:#242424;
+  --text:#e2e2e2;--muted:#555;--dim:#888;
+  --accent:#3b82f6;--ok:#22c55e;--warn:#f59e0b;--err:#ef4444;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.5}
+
+.wizard{display:flex;min-height:100vh;align-items:center;justify-content:center;padding:24px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  width:100%;max-width:480px;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+
+.card-header{padding:22px 28px 18px;border-bottom:1px solid var(--border)}
+.logo-row{display:flex;align-items:center;gap:10px}
+.logo-row img{width:26px;height:26px;border-radius:5px;object-fit:contain}
+.logo-row .app-name{font-size:15px;font-weight:700;color:var(--text)}
+
+.card-body{padding:28px}
+.step-title{font-size:17px;font-weight:700;margin-bottom:6px;color:var(--text)}
+.step-desc{color:var(--dim);font-size:13px;margin-bottom:20px;line-height:1.65}
+.step-desc a{color:var(--accent);text-decoration:none}
+.step-desc a:hover{text-decoration:underline}
+
+.field{margin-bottom:14px}
+.field label{display:block;font-size:11px;font-weight:600;color:var(--dim);
+  text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
+.field input{
+  width:100%;background:var(--surface2);border:1px solid var(--border);
+  border-radius:6px;padding:9px 12px;font-size:13px;color:var(--text);
+  outline:none;font-family:inherit;transition:border-color .15s}
+.field input:focus{border-color:#3a3a3a}
+.field small{font-size:11px;color:var(--muted);margin-top:5px;display:block;line-height:1.5}
+
+.alert{padding:10px 14px;border-radius:7px;font-size:12px;margin-bottom:14px;line-height:1.65}
+.alert-warn{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.18);color:#fbbf24}
+.alert-ok{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.18);color:#4ade80}
+
+.btn{padding:9px 18px;border-radius:6px;font-size:13px;font-weight:600;
+  cursor:pointer;border:none;transition:opacity .15s;font-family:inherit}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover:not(:disabled){opacity:.85}
+</style>
+</head>
+<body>
+<div class="wizard">
+<div class="card">
+  <div class="card-header">
+    <div class="logo-row">
+      <img src="/static/logo.png" alt="RAPR AI">
+      <span class="app-name">RAPR AI</span>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="step-title" id="activation-title">One Last Step! 🔑</div>
+    <div class="step-desc">
+      Enter your one-time activation code which you can find at
+      <a href="https://raprai.com/activate" target="_blank"><strong>raprai.com/activate</strong></a>
+    </div>
+    <div class="field">
+      <label>Activation Code</label>
+      <input id="activation-code" type="text" placeholder="RAPR-XXXX-XXXX" autocomplete="off"
+             style="text-transform:uppercase;letter-spacing:.08em;font-weight:600;font-size:15px">
+      <small>Each code works on up to 2 devices. You only need to do this once.</small>
+    </div>
+    <div id="activation-msg"></div>
+    <div style="margin-top:24px">
+      <button class="btn btn-primary" id="activate-btn"
+              style="width:100%;text-align:center;padding:11px"
+              onclick="activateApp()">
+        Activate & Launch RAPR AI →
+      </button>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+function csrfToken() {
+  const m = document.cookie.match(/(?:^|;\s*)hq_csrf=([^;]*)/);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+
+async function activateApp() {
+  const code = document.getElementById('activation-code').value.trim();
+  const msg  = document.getElementById('activation-msg');
+  const btn  = document.getElementById('activate-btn');
+  msg.innerHTML = '';
+
+  if (!code) {
+    msg.innerHTML = '<div class="alert alert-warn">Please enter your activation code.</div>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Activating...';
+
+  try {
+    const r = await fetch('/device/activate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken()},
+      body: JSON.stringify({code: code}),
+    });
+    const data = await r.json();
+
+    if (data.ok) {
+      const used = data.devices_used || '?';
+      const max  = data.devices_max  || '?';
+      msg.innerHTML = '<div class="alert alert-ok">Activated! (' + used + '/' + max + ' devices used) — Launching...</div>';
+      setTimeout(() => { window.location.href = '/'; }, 1000);
+    } else {
+      msg.innerHTML = '<div class="alert alert-warn">' + (data.error || 'Activation failed. Check your code and try again.') + '</div>';
+      btn.disabled = false;
+      btn.textContent = 'Activate & Launch RAPR AI →';
+    }
+  } catch(e) {
+    msg.innerHTML = '<div class="alert alert-warn">Could not reach raprai.com — check your internet connection.</div>';
+    btn.disabled = false;
+    btn.textContent = 'Activate & Launch RAPR AI →';
+  }
+}
+
+// Personalize title with user's name
+(async function init() {
+  try {
+    const prefs = await fetch('/prefs').then(r => r.json());
+    const title = document.getElementById('activation-title');
+    if (title && prefs.user_name) {
+      title.textContent = 'Welcome back, ' + prefs.user_name + '! 🔑';
+    }
+  } catch(e) {}
+
+  // If already activated, go to app
+  try {
+    const st = await fetch('/device/status').then(r => r.json());
+    if (st.linked) { window.location.href = '/'; return; }
+  } catch(e) {}
 })();
 </script>
 </body>

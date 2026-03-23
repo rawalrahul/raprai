@@ -37,7 +37,7 @@ app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 # ---------------------------------------------------------------------------
 
 # Paths that are always public (no PIN required)
-_PUBLIC_PREFIXES = ("/login", "/setup", "/static", "/health", "/manifest.json", "/sw.js", "/update/check")
+_PUBLIC_PREFIXES = ("/login", "/setup", "/activate", "/device/status", "/device/activate", "/prefs", "/static", "/health", "/manifest.json", "/sw.js", "/update/check")
 
 # MCP endpoints are NOT fully public — they require localhost origin
 # and a bearer token that's auto-generated at startup.
@@ -390,15 +390,41 @@ if _USE_SEPARATED_FRONTEND:
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    # Only redirect to setup on true first run (no .env file yet).
-    # Everything else (Telegram, AI CLIs) is optional — the user can configure
-    # them later via the Settings panel or by editing .env directly.
+    # First run: no .env file yet → full setup wizard
     if not (user_data_dir() / ".env").exists():
         return RedirectResponse(url="/setup")
+
+    # .env exists but no device token → activation gate
+    # This catches users who completed onboarding but closed the app
+    # before entering their activation code. They must activate first.
+    try:
+        from helm.device_link import get_device_token
+        if not get_device_token():
+            return RedirectResponse(url="/activate")
+    except Exception:
+        pass  # If device_link import fails, don't block the app
+
     # Serve from separated frontend if available, otherwise use embedded HTML
     if _USE_SEPARATED_FRONTEND:
         return HTMLResponse(content=(_FRONTEND_DIR / "index.html").read_text(encoding="utf-8"))
     return HTMLResponse(content=_HTML)
+
+
+@app.get("/activate", response_class=HTMLResponse)
+async def activate_gate():
+    """Standalone activation page — shown when .env exists but no device token.
+
+    If the user is already activated, redirect straight to the main app.
+    """
+    try:
+        from helm.device_link import get_device_token
+        if get_device_token():
+            return RedirectResponse(url="/")
+    except Exception:
+        pass
+
+    from helm.setup_wizard import _ACTIVATE_HTML
+    return HTMLResponse(content=_ACTIVATE_HTML)
 
 
 @app.get("/health")
