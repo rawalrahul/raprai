@@ -185,12 +185,26 @@ def scan_skills(skills_bases=None) -> dict[str, dict]:
     new_registry: dict[str, dict] = {}
     total_found = 0
 
+    # Skills that should never appear (auto-generated leftovers, etc.)
+    _SKILL_BLOCKLIST = {
+        "general-know-name-tell",
+        "general-else-chrome",
+        "general-gemini-hear",
+        "general-mynemo-remeber",
+    }
+
     def _register_skill_file(skill_file: pathlib.Path, skills_base: pathlib.Path,
                              fallback_name: str = "") -> bool:
         """Register a single skill from a .md file. Returns True on success."""
         nonlocal total_found
         if not skill_file.exists():
             return False
+
+        # Check directory name against blocklist
+        dir_name = skill_file.parent.name.lower()
+        if dir_name in _SKILL_BLOCKLIST:
+            return False
+
         try:
             raw  = skill_file.read_text(encoding="utf-8", errors="replace")
             meta, body = _parse_frontmatter(raw)
@@ -198,6 +212,10 @@ def scan_skills(skills_bases=None) -> dict[str, dict]:
                 # No valid frontmatter — not a skill file, skip silently
                 return False
             name = meta.get("name", fallback_name or skill_file.stem)
+
+            # Also check name against blocklist
+            if name.lower() in _SKILL_BLOCKLIST:
+                return False
 
             if name in new_registry:
                 # Already loaded from a higher-priority directory — skip.

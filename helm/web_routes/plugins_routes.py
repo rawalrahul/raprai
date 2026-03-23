@@ -64,6 +64,73 @@ async def toggle_plugin(plugin_id: str, request: Request):
 
 # ── Connect Page (Token Paste) ──────────────────────────────────────────────
 
+
+# ── Hardcoded OAuth configs for known MCPs ──────────────────────────────────
+# These are baked in so OAuth works even when the remote catalog is unavailable
+# or hasn't been deployed with the full OAuth config yet.
+# The built-in plugins directory is stripped from the compiled build, so we
+# cannot rely on manifest.json files at runtime.
+_KNOWN_OAUTH_MCPS = {
+    "github": {
+        "id": "github", "name": "GitHub", "emoji": "🐙",
+        "description": "GitHub integration via OAuth",
+        "auth": {
+            "type": "oauth2",
+            "authorize_url": "https://github.com/login/oauth/authorize",
+            "token_url": "https://github.com/login/oauth/access_token",
+            "scopes": "repo,read:user",
+            "client_id": "Ov23liSIlIczsIBvl13u",
+            "token_env": "GITHUB_TOKEN",
+            "proxy_exchange": True,
+            "proxy_provider": "github",
+        },
+    },
+    "airtable": {
+        "id": "airtable", "name": "Airtable", "emoji": "📊",
+        "description": "Airtable integration via OAuth",
+        "auth": {
+            "type": "oauth2",
+            "authorize_url": "https://airtable.com/oauth2/v1/authorize",
+            "token_url": "https://airtable.com/oauth2/v1/token",
+            "scopes": "data.records:read data.records:write schema.bases:read",
+            "pkce": True,
+            "client_id": "cffbd876-65fb-4d0e-a1c6-9d2cc048d05f",
+            "token_env": "AIRTABLE_API_KEY",
+            "proxy_exchange": True,
+            "proxy_provider": "airtable",
+        },
+    },
+    "figma": {
+        "id": "figma", "name": "Figma", "emoji": "🎨",
+        "description": "Figma integration via OAuth",
+        "auth": {
+            "type": "oauth2",
+            "authorize_url": "https://www.figma.com/oauth",
+            "token_url": "https://api.figma.com/v1/oauth/token",
+            "scopes": "files:read",
+            "client_id": "MznNjf2PKtOY51sKE94O4F",
+            "token_env": "FIGMA_API_TOKEN",
+            "proxy_exchange": True,
+            "proxy_provider": "figma",
+        },
+    },
+    "slack": {
+        "id": "slack", "name": "Slack", "emoji": "💬",
+        "description": "Slack integration via OAuth",
+        "auth": {
+            "type": "oauth2",
+            "authorize_url": "https://slack.com/oauth/v2/authorize",
+            "token_url": "https://slack.com/api/oauth.v2.access",
+            "scopes": "channels:history,channels:read,chat:write,users:read",
+            "client_id": "10748377536450.10748382720834",
+            "token_env": "SLACK_BOT_TOKEN",
+            "proxy_exchange": True,
+            "proxy_provider": "slack",
+        },
+    },
+}
+
+
 def _lookup_plugin_or_catalog(plugin_id: str) -> dict | None:
     """Look up plugin info from registry first, then fall back to marketplace catalog.
 
@@ -73,6 +140,14 @@ def _lookup_plugin_or_catalog(plugin_id: str) -> dict | None:
     info = _registry.get(plugin_id.lower())
     if info:
         return info
+
+    # Try base name: "github-oauth" → look up "github" in built-in plugins
+    base = plugin_id.lower().replace("-oauth", "").replace("_oauth", "")
+    if base != plugin_id.lower():
+        info = _registry.get(base)
+        if info:
+            return info
+
     # Fall back to marketplace catalog (for marketplace-installed MCPs)
     try:
         from helm.packages.marketplace import get_catalog_entry
@@ -132,6 +207,15 @@ def _lookup_plugin_or_catalog(plugin_id: str) -> dict | None:
             return cat_info
     except Exception as e:
         logger.warning("Catalog lookup for plugin '%s' failed: %s", plugin_id, e)
+
+    # Last resort: check hardcoded OAuth configs for known MCPs
+    # This ensures OAuth works even in compiled builds where built-in plugins
+    # are stripped and the remote catalog hasn't been updated yet.
+    known = _KNOWN_OAUTH_MCPS.get(base) or _KNOWN_OAUTH_MCPS.get(plugin_id.lower())
+    if known:
+        import copy
+        return copy.deepcopy(known)
+
     return None
 
 

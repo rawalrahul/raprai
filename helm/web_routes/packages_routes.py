@@ -13,6 +13,7 @@ Endpoints:
 """
 
 import asyncio
+import os
 import pathlib
 import shutil
 import subprocess
@@ -268,11 +269,28 @@ async def list_installed():
     try:
         from helm.packages.marketplace import get_catalog_entry
         for pkg in packages:
-            entry = get_catalog_entry(pkg.get("id", ""))
-            if entry and entry.get("setup"):
-                pkg["setup"] = entry["setup"]
+            pkg_id = pkg.get("id", "")
+            entry = get_catalog_entry(pkg_id)
+            setup = entry.get("setup") if entry else None
+
+            # Fallback: if no catalog setup, try known OAuth MCPs
+            # e.g. "github-oauth" → check hardcoded "github" OAuth config
+            if not setup:
+                base = pkg_id.lower().replace("-oauth", "").replace("_oauth", "")
+                from helm.web_routes.plugins_routes import _KNOWN_OAUTH_MCPS
+                known = _KNOWN_OAUTH_MCPS.get(base) or _KNOWN_OAUTH_MCPS.get(pkg_id.lower())
+                if known and known.get("auth"):
+                    kauth = known["auth"]
+                    setup = {
+                        "type": "oauth",
+                        "token_env": kauth.get("token_env", ""),
+                        "client_id": kauth.get("client_id", ""),
+                        "provider": kauth.get("proxy_provider", base),
+                    }
+
+            if setup:
+                pkg["setup"] = setup
                 # Check if OAuth token exists (connected)
-                setup = entry["setup"]
                 token_env = setup.get("token_env", "")
                 if token_env:
                     try:
