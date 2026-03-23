@@ -151,8 +151,22 @@ def toggle_skill(package_id: str, enabled: bool) -> dict:
 
     Disabled skills have their SKILL.md renamed to SKILL.md.disabled,
     which prevents the skills scanner from finding them.
+    Searches both marketplace install dir and all detected skills dirs.
     """
     install_dir = _get_skills_install_dir() / package_id
+
+    # Also search bundled/detected skills directories
+    if not install_dir.exists():
+        try:
+            from helm.skills import get_all_skills_dirs
+            for sdir in get_all_skills_dirs():
+                candidate = pathlib.Path(sdir) / package_id
+                if candidate.exists():
+                    install_dir = candidate
+                    break
+        except Exception:
+            pass
+
     if not install_dir.exists():
         return {"ok": False, "error": f"Skill '{package_id}' not found"}
 

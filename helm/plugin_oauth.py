@@ -226,7 +226,9 @@ def start_oauth(plugin_info: dict) -> dict:
         if proxy_exchange:
             proxy_params["proxy_exchange"] = "1"
             proxy_params["token_url"] = auth.get("token_url", "")
-            proxy_params["provider"] = plugin_id
+            # Use proxy_provider if set (e.g. "github" even when plugin_id
+            # is "github-oauth"), so the proxy finds the right client secret.
+            proxy_params["provider"] = auth.get("proxy_provider") or plugin_id
 
         url = f"{OAUTH_PROXY_URL}/authorize?{urlencode(proxy_params)}"
     else:

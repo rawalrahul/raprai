@@ -259,9 +259,31 @@ async def configure_package(req: ConfigureRequest):
 
 @router.get("/installed")
 async def list_installed():
-    """List all installed packages."""
+    """List all installed packages, enriched with catalog setup info."""
     from helm.packages.installer import list_installed as _list
     packages = _list()
+
+    # Enrich with setup info from catalog (so frontend knows OAuth vs api_key)
+    # and check connected state for OAuth MCPs
+    try:
+        from helm.packages.marketplace import get_catalog_entry
+        for pkg in packages:
+            entry = get_catalog_entry(pkg.get("id", ""))
+            if entry and entry.get("setup"):
+                pkg["setup"] = entry["setup"]
+                # Check if OAuth token exists (connected)
+                setup = entry["setup"]
+                token_env = setup.get("token_env", "")
+                if token_env:
+                    try:
+                        from helm.token_vault import load_token
+                        token = load_token(token_env)
+                        pkg["connected"] = bool(token and token.strip())
+                    except Exception:
+                        pkg["connected"] = bool(os.environ.get(token_env, ""))
+    except Exception:
+        pass
+
     return {"ok": True, "packages": packages, "count": len(packages)}
 
 

@@ -1205,16 +1205,21 @@ def auto_create_skill_template(prompt: str, ai: str, output: str = "") -> Option
 
 def list_skills() -> list[dict]:
     """Return a summary list suitable for the Settings panel."""
-    return [
-        {
+    import pathlib as _pl
+    result = []
+    for info in _registry.values():
+        skill_path = _pl.Path(info["path"])
+        # A skill is enabled if its SKILL.md exists (not renamed to .disabled)
+        enabled = skill_path.exists() and skill_path.name == "SKILL.md"
+        result.append({
             "name":        info["name"],
             "description": info["description"][:160] + ("…" if len(info["description"]) > 160 else ""),
             "keywords":    info["keywords"][:8],
             "path":        info["path"],
             "source_dir":  info.get("source_dir", ""),
-        }
-        for info in _registry.values()
-    ]
+            "enabled":     enabled,
+        })
+    return result
 
 
 def get_skills_dir() -> Optional[str]:

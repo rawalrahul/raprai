@@ -104,6 +104,47 @@ def set_device_token(token: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Machine fingerprint (survives reinstalls)
+# ---------------------------------------------------------------------------
+
+def _get_machine_id() -> str:
+    """Return a stable, hashed machine fingerprint that survives app reinstalls.
+
+    On Windows: uses the SMBIOS product UUID (from ``wmic csproduct get uuid``).
+    Fallback: SHA-256 of MAC address + hostname + platform info.
+    The raw identifiers are hashed so we never transmit actual hardware IDs.
+    """
+    import hashlib
+    import platform
+    import subprocess
+    import uuid as _uuid
+
+    raw = ""
+
+    # Windows: SMBIOS product UUID (most stable identifier)
+    if platform.system() == "Windows":
+        try:
+            out = subprocess.check_output(
+                "wmic csproduct get uuid",
+                shell=True, timeout=5, text=True,
+            ).strip()
+            # Output is like "UUID\nXXXXX-XXXX-..."
+            lines = [ln.strip() for ln in out.splitlines() if ln.strip() and ln.strip().upper() != "UUID"]
+            if lines and lines[0] not in ("", "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"):
+                raw = lines[0]
+        except Exception:
+            pass
+
+    # Fallback: MAC + hostname + platform
+    if not raw:
+        mac = str(_uuid.getnode())
+        host = platform.node()
+        raw = f"{mac}|{host}|{platform.system()}|{platform.machine()}"
+
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:48]
+
+
+# ---------------------------------------------------------------------------
 # Activation
 # ---------------------------------------------------------------------------
 
@@ -123,9 +164,10 @@ def activate_with_code(code: str) -> dict:
         return {"ok": False, "error": "Activation code is required"}
 
     try:
+        machine_id = _get_machine_id()
         resp = requests.get(
             f"{_RAPRAI_BASE}/api/device-token",
-            params={"code": code},
+            params={"code": code, "machine_id": machine_id},
             timeout=15,
             headers={"User-Agent": f"RAPR-AI/{APP_VERSION}"},
         )

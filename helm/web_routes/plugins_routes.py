@@ -99,6 +99,9 @@ def _lookup_plugin_or_catalog(plugin_id: str) -> dict | None:
                     "env_client_secret": setup.get("env_client_secret", ""),
                     "token_env": setup.get("token_env", ""),
                     "proxy_exchange": setup.get("proxy_exchange", False),
+                    # Provider name for the proxy (e.g. "github" even if
+                    # the catalog slug is "github-oauth").
+                    "proxy_provider": setup.get("provider", ""),
                 }
                 # Merge env_vars into auth if present
                 for ev in setup.get("env_vars", []):
