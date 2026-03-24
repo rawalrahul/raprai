@@ -276,6 +276,32 @@ _OLLAMA_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "execute_shell",
+            "description": (
+                "Run a shell/terminal command in the user's working directory. "
+                "Use for CLI tools like npx, npm, pip, git, playwright-cli, opencli, "
+                "cli-anything, curl, and any other command-line programs. "
+                "Returns stdout and stderr. Prefer this over execute_python when "
+                "the task involves running CLI commands or tools."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": (
+                            "The shell command to execute (e.g. 'npx @playwright/cli open https://example.com', "
+                            "'opencli hackernews top --limit 5', 'npm install -g package-name')"
+                        ),
+                    },
+                },
+                "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "write_file",
             "description": (
                 "Write text content directly to a file. "
@@ -416,6 +442,23 @@ async def _execute_ollama_tool(name: str, args: dict, cwd: str) -> str:
             if result.returncode != 0:
                 return f"Exit {result.returncode}:\n{err}\n{out}".strip()
             return out or "✓ executed (no output)"
+
+        elif name == "execute_shell":
+            command = args.get("command", "")
+            if not command:
+                return "Error: 'command' is required."
+            result = await asyncio.to_thread(
+                subprocess.run,
+                command,
+                capture_output=True, text=True, timeout=600, cwd=cwd,
+                shell=True,
+                **hidden_kwargs(),
+            )
+            out = result.stdout.strip()
+            err = result.stderr.strip()
+            if result.returncode != 0:
+                return f"Exit {result.returncode}:\n{err}\n{out}".strip()
+            return out or "✓ command executed (no output)"
 
         elif name == "write_file":
             rel     = args.get("path", "")
