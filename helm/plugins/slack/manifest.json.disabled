@@ -1,0 +1,50 @@
+{
+  "id": "slack",
+  "name": "Slack",
+  "description": "Send messages, read channels, search conversations, and manage Slack workspaces",
+  "emoji": "💬",
+  "category": "communication",
+  "auth": {
+    "type": "oauth2",
+    "authorize_url": "https://slack.com/oauth/v2/authorize",
+    "token_url": "https://slack.com/api/oauth.v2.access",
+    "scopes": "channels:read channels:history chat:write users:read",
+    "pkce": false,
+    "env_client_id": "SLACK_CLIENT_ID",
+    "env_client_secret": "SLACK_CLIENT_SECRET",
+    "token_env": "SLACK_BOT_TOKEN",
+    "fallback_token": {
+      "token_env": "SLACK_BOT_TOKEN",
+      "token_label": "Bot Token",
+      "token_url": "https://api.slack.com/apps",
+      "token_hint": "Create an app at api.slack.com/apps → Install to workspace → Copy Bot User OAuth Token (xoxb-...)"
+    },
+    "client_id": "10748377536450.10748382720834",
+    "proxy_exchange": true
+  },
+  "setup_url": "https://api.slack.com/apps",
+  "setup_steps": [
+    "Go to api.slack.com/apps → Create New App → From scratch",
+    "Add OAuth scopes under OAuth & Permissions",
+    "Set the Redirect URL to your RAPR proxy callback URL",
+    "Copy the Client ID and Client Secret into RAPR Settings"
+  ],
+  "env_vars": [
+    "SLACK_BOT_TOKEN"
+  ],
+  "setup_env_vars": [
+    "SLACK_CLIENT_ID",
+    "SLACK_CLIENT_SECRET"
+  ],
+  "keywords": [
+    "slack",
+    "message",
+    "channel",
+    "chat",
+    "team",
+    "workspace",
+    "thread",
+    "dm"
+  ],
+  "free_tier": true
+}

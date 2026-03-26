@@ -1,0 +1,17 @@
+{
+  "id": "firecrawl",
+  "name": "Firecrawl",
+  "description": "Scrape, crawl, and extract structured data from websites using Firecrawl API",
+  "emoji": "\ud83d\udd0d",
+  "category": "research",
+  "auth": {
+    "type": "token",
+    "token_env": "FIRECRAWL_API_KEY",
+    "token_label": "API Key",
+    "token_url": "https://www.firecrawl.dev/app/api-keys",
+    "token_hint": "Sign up at firecrawl.dev → Dashboard → API Keys → Copy your key"
+  },
+  "env_vars": ["FIRECRAWL_API_KEY"],
+  "keywords": ["firecrawl", "scrape", "crawl", "web", "extract", "website", "parse", "research"],
+  "free_tier": true
+}

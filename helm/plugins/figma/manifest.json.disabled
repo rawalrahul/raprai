@@ -1,0 +1,50 @@
+{
+  "id": "figma",
+  "name": "Figma",
+  "description": "Browse files, inspect designs, export assets, and read comments from Figma projects",
+  "emoji": "🎨",
+  "category": "design",
+  "auth": {
+    "type": "oauth2",
+    "authorize_url": "https://www.figma.com/oauth",
+    "token_url": "https://api.figma.com/v1/oauth/token",
+    "scopes": "files:read",
+    "pkce": false,
+    "env_client_id": "FIGMA_CLIENT_ID",
+    "env_client_secret": "FIGMA_CLIENT_SECRET",
+    "token_env": "FIGMA_API_TOKEN",
+    "refresh_token_env": "FIGMA_REFRESH_TOKEN",
+    "fallback_token": {
+      "token_env": "FIGMA_API_TOKEN",
+      "token_label": "Personal Access Token",
+      "token_url": "https://www.figma.com/developers/api#access-tokens",
+      "token_hint": "Go to Figma → Settings → Personal access tokens → Generate new token"
+    },
+    "client_id": "MznNjf2PKtOY51sKE94O4F",
+    "proxy_exchange": true
+  },
+  "setup_url": "https://www.figma.com/developers/apps",
+  "setup_steps": [
+    "Go to figma.com/developers/apps → Create a new app",
+    "Set the Callback URL to your RAPR proxy callback URL",
+    "Copy the Client ID and Client Secret into RAPR Settings"
+  ],
+  "env_vars": [
+    "FIGMA_API_TOKEN"
+  ],
+  "setup_env_vars": [
+    "FIGMA_CLIENT_ID",
+    "FIGMA_CLIENT_SECRET"
+  ],
+  "keywords": [
+    "figma",
+    "design",
+    "ui",
+    "ux",
+    "prototype",
+    "wireframe",
+    "component",
+    "assets"
+  ],
+  "free_tier": true
+}

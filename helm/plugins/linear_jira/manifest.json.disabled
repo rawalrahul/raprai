@@ -1,0 +1,27 @@
+{
+  "id": "linear_jira",
+  "name": "Linear / Jira",
+  "description": "Manage issues, projects, sprints, and workflows in Linear or Jira",
+  "emoji": "\ud83d\udccc",
+  "category": "project_management",
+  "auth": {
+    "type": "token",
+    "tokens": [
+      {
+        "token_env": "LINEAR_API_KEY",
+        "token_label": "Linear API Key",
+        "token_url": "https://linear.app/settings",
+        "token_hint": "Go to Linear → Settings → Account → Security & Access → New API key"
+      },
+      {
+        "token_env": "JIRA_API_TOKEN",
+        "token_label": "Jira API Token",
+        "token_url": "https://id.atlassian.com/manage-profile/security/api-tokens",
+        "token_hint": "Go to id.atlassian.com → Security → Create API token"
+      }
+    ]
+  },
+  "env_vars": ["LINEAR_API_KEY", "JIRA_API_TOKEN"],
+  "keywords": ["linear", "jira", "issue", "ticket", "sprint", "project", "task", "backlog", "kanban"],
+  "free_tier": true
+}

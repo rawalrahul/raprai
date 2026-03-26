@@ -1,0 +1,23 @@
+{
+  "id": "gamma",
+  "name": "Gamma",
+  "description": "Generate beautiful presentations, documents, and webpages using Gamma's AI API",
+  "emoji": "✨",
+  "category": "productivity",
+  "auth": {
+    "type": "token",
+    "token_env": "GAMMA_API_KEY",
+    "token_label": "API Key",
+    "token_url": "https://gamma.app/settings/api",
+    "token_hint": "Go to Gamma → Settings → API → Generate API Key (requires Pro/Ultra/Teams plan)",
+    "scopes_hint": "API key grants full access to your Gamma account"
+  },
+  "validate": {
+    "url": "https://api.gamma.app/v1/me",
+    "headers": {"Authorization": "Bearer {token}"},
+    "expect_status": 200
+  },
+  "env_vars": ["GAMMA_API_KEY"],
+  "keywords": ["gamma", "presentation", "deck", "slides", "beautiful", "design", "webpage", "gamma app"],
+  "free_tier": false
+}

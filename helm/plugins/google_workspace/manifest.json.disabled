@@ -1,0 +1,28 @@
+{
+  "id": "google_workspace",
+  "name": "Google Workspace",
+  "description": "Interact with Gmail, Google Drive, Calendar, and Sheets",
+  "emoji": "\ud83d\udce7",
+  "category": "productivity",
+  "auth": {
+    "type": "oauth2",
+    "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
+    "token_url": "https://oauth2.googleapis.com/token",
+    "scopes": "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/spreadsheets",
+    "extra_params": {"access_type": "offline", "prompt": "consent"},
+    "env_client_id": "GOOGLE_CLIENT_ID",
+    "env_client_secret": "GOOGLE_CLIENT_SECRET",
+    "token_env": "GOOGLE_ACCESS_TOKEN",
+    "refresh_token_env": "GOOGLE_REFRESH_TOKEN",
+    "fallback_token": {
+      "token_env": "GOOGLE_ACCESS_TOKEN",
+      "token_label": "Access Token",
+      "token_url": "https://developers.google.com/oauthplayground",
+      "token_hint": "Use Google OAuth Playground to generate a token: select APIs → Authorize → Exchange for tokens → Copy access token"
+    }
+  },
+  "env_vars": ["GOOGLE_ACCESS_TOKEN"],
+  "setup_env_vars": ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"],
+  "keywords": ["google", "gmail", "drive", "sheets", "calendar", "email", "docs", "spreadsheet"],
+  "free_tier": true
+}

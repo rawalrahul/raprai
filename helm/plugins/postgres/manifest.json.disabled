@@ -1,0 +1,16 @@
+{
+  "id": "postgres",
+  "name": "PostgreSQL",
+  "description": "Query, insert, update, and manage PostgreSQL databases",
+  "emoji": "\ud83d\udc18",
+  "category": "database",
+  "auth": {
+    "type": "token",
+    "token_env": "POSTGRES_CONNECTION_STRING",
+    "token_label": "Connection String",
+    "token_hint": "Format: postgresql://user:password@host:5432/dbname"
+  },
+  "env_vars": ["POSTGRES_CONNECTION_STRING"],
+  "keywords": ["postgres", "postgresql", "database", "sql", "query", "table", "db"],
+  "free_tier": true
+}

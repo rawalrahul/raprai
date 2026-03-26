@@ -593,12 +593,13 @@ def _parse_content_tool_calls(content: str) -> list[dict]:
     Some models embed tool calls as JSON text in the message content field
     instead of the structured tool_calls field.
 
-    Handles all common formats:
-      • {"name": "fn", "arguments": {...}}
-      • [{"name": "fn", "arguments": {...}}, ...]
-      • ```json\n{...}\n```
-      • <tool_call>{...}</tool_call>
-      • <tool_call>\n{...}\n</tool_call>
+    Handles all common formats (tried in order):
+      1. [tool_name] {"arg": "val"}       (bracket pseudo-call notation)
+      2. {"name": "fn", "arguments": {...}}
+      3. [{"name": "fn", "arguments": {...}}, ...]
+      4. ```json\n{...}\n```
+      5. <tool_call>{...}</tool_call>
+      6. ```bash\n<command>\n```           (bash code blocks → execute_shell)
 
     Returns a list of synthetic tool-call dicts matching the shape our agent
     loop already expects:  [{"function": {"name": ..., "arguments": ...}}, ...]
@@ -608,7 +609,25 @@ def _parse_content_tool_calls(content: str) -> list[dict]:
 
     text = content.strip()
 
-    # Strip markdown code fences
+    # ── 1. Try [tool_name] {...} pattern ──
+    # Models often output:  [execute_shell] {"command": "npx ..."}
+    bracket_calls = re.findall(
+        r'\[(\w+)\]\s*\{([^}]+)\}', content, re.DOTALL,
+    )
+    if bracket_calls:
+        result = []
+        for tool_name, json_body in bracket_calls:
+            try:
+                args = json.loads("{" + json_body + "}")
+            except (json.JSONDecodeError, ValueError):
+                continue
+            result.append({"function": {"name": tool_name, "arguments": args}})
+        if result:
+            return result
+
+    # ── 2. Try structured JSON formats ──
+
+    # Strip markdown code fences (json / tool_call only, NOT bash)
     fence = re.search(r'```(?:json|tool_call)?\s*(\[.*?\]|\{.*?\})\s*```',
                       text, re.DOTALL)
     if fence:
@@ -620,39 +639,51 @@ def _parse_content_tool_calls(content: str) -> list[dict]:
     if xml:
         text = xml.group(1)
 
-    # Try to parse whatever we have
+    parsed = None
     try:
         parsed = json.loads(text)
     except (json.JSONDecodeError, ValueError):
-        # Last-ditch: find the first {...} block in the content
         m = re.search(r'\{.*\}', text, re.DOTALL)
-        if not m:
-            return []
-        try:
-            parsed = json.loads(m.group(0))
-        except (json.JSONDecodeError, ValueError):
-            return []
-
-    # Normalise to a list
-    if isinstance(parsed, dict):
-        parsed = [parsed]
-    if not isinstance(parsed, list):
-        return []
-
-    result = []
-    for item in parsed:
-        if not isinstance(item, dict) or "name" not in item:
-            continue
-        args = item.get("arguments") or item.get("parameters") or {}
-        # Some models wrap arguments as a JSON string
-        if isinstance(args, str):
+        if m:
             try:
-                args = json.loads(args)
-            except Exception:
-                args = {}
-        result.append({"function": {"name": item["name"], "arguments": args}})
+                parsed = json.loads(m.group(0))
+            except (json.JSONDecodeError, ValueError):
+                pass
 
-    return result
+    if parsed is not None:
+        if isinstance(parsed, dict):
+            parsed = [parsed]
+        if isinstance(parsed, list):
+            result = []
+            for item in parsed:
+                if not isinstance(item, dict) or "name" not in item:
+                    continue
+                args = item.get("arguments") or item.get("parameters") or {}
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except Exception:
+                        args = {}
+                result.append({"function": {"name": item["name"], "arguments": args}})
+            if result:
+                return result
+
+    # ── 3. Final fallback: detect ```bash / ```shell code blocks ──
+    # Many models output shell commands as markdown code blocks instead of
+    # calling execute_shell.  Convert them automatically.
+    bash_blocks = re.findall(
+        r'```(?:bash|shell|sh|cmd|powershell|terminal|console)\s*\n(.+?)```',
+        content, re.DOTALL,
+    )
+    if bash_blocks:
+        return [
+            {"function": {"name": "execute_shell",
+                          "arguments": {"command": cmd.strip()}}}
+            for cmd in bash_blocks
+            if cmd.strip()
+        ]
+
+    return []
 
 
 def _ollama_system_prompt(cwd: str, skill_content: str = "", user_prompt: str = "") -> str:
@@ -660,8 +691,25 @@ def _ollama_system_prompt(cwd: str, skill_content: str = "", user_prompt: str = 
     base = (
         f"You are a capable AI assistant with tools to create and manage files.\n"
         f"Working directory: {cwd}\n\n"
-        "You have tools available — use whichever tool fits the task best. "
+        "CRITICAL: You MUST use tool calls to take action. DO NOT just describe or explain "
+        "commands — actually CALL the tools to execute them.\n"
+        "- To run ANY shell/terminal/CLI command: call `execute_shell` with the command string.\n"
+        "- To run Python code: call `execute_python` with the code string.\n"
+        "- To create/write files: call `write_file` with filepath and content.\n"
+        "- To read files: call `read_file` with the filepath.\n\n"
+        "NEVER output a command in a code block without calling the tool. "
+        "If the user asks you to DO something, USE the tools — don't just explain how.\n"
+        "After each tool call, read the result and continue with the NEXT step "
+        "until the ENTIRE task is complete. Do NOT stop after one step.\n"
+        "Be EFFICIENT — complete tasks in as few tool calls as possible. "
+        "Do not retry the same command more than twice if it fails.\n"
+        "MULTI-STEP TASKS: When a task has multiple parts (e.g. 'go to X, search Y, "
+        "screenshot Z'), you MUST complete ALL parts. Plan the steps first, then "
+        "execute them one by one using tool calls. Do NOT stop until every part is done.\n"
         "Produce detailed, professional content. Never produce stubs or placeholders.\n"
+        "IMPORTANT: This is a WINDOWS system. Use Windows commands "
+        "(dir, type, copy, move, del, powershell) — NOT Linux commands "
+        "(ls, cat, cp, mv, rm). For PowerShell, prefix with 'powershell -Command'.\n"
     )
 
     if skill_content:
@@ -669,6 +717,29 @@ def _ollama_system_prompt(cwd: str, skill_content: str = "", user_prompt: str = 
             "\nThe following skill guide applies to this task:\n\n"
             f"{skill_content}\n"
         )
+        # If the skill contains bash/shell commands, guide the model to use execute_shell
+        if "```bash" in skill_content or "npx " in skill_content or "npm " in skill_content:
+            base += (
+                "\n[IMPORTANT — USE execute_shell FOR CLI COMMANDS]\n"
+                "The skill guide above contains shell/terminal commands (e.g. npx, npm, CLI tools). "
+                "Use the `execute_shell` tool to run these commands directly — do NOT wrap them "
+                "in Python code or use execute_python for shell commands. "
+                "Run each command step by step using execute_shell and read the output before proceeding.\n"
+            )
+            # Extra guidance for Playwright CLI multi-step workflows
+            if "playwright" in skill_content.lower():
+                base += (
+                    "\nPLAYWRIGHT CLI WORKFLOW — follow these steps IN ORDER:\n"
+                    "1. execute_shell: npx @playwright/cli open <url>\n"
+                    "2. execute_shell: npx @playwright/cli snapshot  (to get element refs)\n"
+                    "3. execute_shell: npx @playwright/cli fill <ref> \"<text>\"  (for search/input)\n"
+                    "4. execute_shell: npx @playwright/cli press Enter  (to submit)\n"
+                    "5. execute_shell: npx @playwright/cli snapshot  (to see results)\n"
+                    "6. execute_shell: npx @playwright/cli screenshot  (to capture)\n"
+                    "You MUST do snapshot BEFORE interacting — you need ref IDs from the snapshot.\n"
+                    "Do NOT skip steps. Complete the ENTIRE workflow.\n"
+                )
+            base += "[END INSTRUCTIONS]\n"
 
     # Add MCP server info if any servers are running
     mgr = _get_mcp_manager()
@@ -766,6 +837,30 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
         if sess["ollama_messages"][0].get("role") == "system":
             sess["ollama_messages"][0]["content"] = system_content
 
+    # ── Context window management ──
+    # Trim old tool results to prevent context overflow on smaller models.
+    # Keep the system prompt + last 6 messages intact; compress everything
+    # in between by replacing long tool results with short summaries.
+    _MAX_TOOL_RESULT_CHARS = 500
+    _KEEP_RECENT = 6  # keep last N messages untouched
+    msgs = sess["ollama_messages"]
+    if len(msgs) > _KEEP_RECENT + 1:  # +1 for system prompt
+        for i in range(1, len(msgs) - _KEEP_RECENT):
+            msg = msgs[i]
+            if msg.get("role") == "tool" and len(msg.get("content", "")) > _MAX_TOOL_RESULT_CHARS:
+                # Summarise long tool results to save context space
+                original = msg["content"]
+                msgs[i] = {
+                    "role": "tool",
+                    "content": original[:200] + "\n...(truncated)...\n" + original[-200:],
+                }
+            elif msg.get("role") == "assistant" and len(msg.get("content", "")) > _MAX_TOOL_RESULT_CHARS:
+                original = msg["content"]
+                msgs[i] = {
+                    "role": "assistant",
+                    "content": original[:200] + "\n...(truncated)...\n" + original[-200:],
+                }
+
     sess["ollama_messages"].append({"role": "user", "content": text})
 
     before       = await asyncio.to_thread(snapshot_dir, cwd)
@@ -775,10 +870,9 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
     _total_prompt_tokens = 0
     _total_eval_tokens   = 0
 
-    # No hard iteration cap — the loop runs until the model produces a
-    # text response (no more tool calls) or the budget guardrail stops it.
-    # A safety limit of 200 prevents true infinite loops from buggy models.
-    _SAFETY_LIMIT = 200
+    # Safety limit prevents runaway loops from smaller models that keep
+    # retrying failed commands or taking unnecessary steps.
+    _SAFETY_LIMIT = 30
     for _iteration in range(_SAFETY_LIMIT):
         active_tools = _build_ollama_tools()
         payload = {

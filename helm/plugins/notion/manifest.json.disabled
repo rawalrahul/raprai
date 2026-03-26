@@ -1,0 +1,35 @@
+{
+  "id": "notion",
+  "name": "Notion",
+  "description": "Create pages, query databases, search content, and manage your Notion workspace",
+  "emoji": "📝",
+  "category": "productivity",
+  "auth": {
+    "type": "token",
+    "token_env": "NOTION_API_KEY",
+    "token_label": "Notion Integration Token",
+    "token_url": "https://www.notion.so/my-integrations",
+    "token_hint": "Go to notion.so/my-integrations → New integration → Copy the Internal Integration Secret (starts with 'secret_')"
+  },
+  "setup_url": "https://www.notion.so/my-integrations",
+  "setup_steps": [
+    "Go to notion.so/my-integrations",
+    "Click 'New integration' → give it any name → Save",
+    "Copy the 'Internal Integration Secret' (starts with secret_...)",
+    "Paste it into RAPR AI Settings under Notion → Integration Token",
+    "In Notion, open any page → Share → Invite your integration to give it access"
+  ],
+  "env_vars": [
+    "NOTION_API_KEY"
+  ],
+  "keywords": [
+    "notion",
+    "wiki",
+    "page",
+    "database",
+    "notes",
+    "docs",
+    "knowledge base"
+  ],
+  "free_tier": true
+}

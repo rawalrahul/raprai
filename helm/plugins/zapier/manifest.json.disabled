@@ -1,0 +1,26 @@
+{
+  "id": "zapier",
+  "name": "Zapier",
+  "description": "Trigger Zapier webhooks and manage Zaps to automate cross-app workflows",
+  "emoji": "\u26a1",
+  "category": "automation",
+  "auth": {
+    "type": "token",
+    "tokens": [
+      {
+        "token_env": "ZAPIER_NLA_API_KEY",
+        "token_label": "NLA API Key",
+        "token_url": "https://nla.zapier.com/credentials/",
+        "token_hint": "Go to nla.zapier.com/credentials → Copy your API key"
+      },
+      {
+        "token_env": "ZAPIER_WEBHOOK_URL",
+        "token_label": "Webhook URL",
+        "token_hint": "Create a Zap with 'Webhooks by Zapier' trigger → Copy the webhook URL"
+      }
+    ]
+  },
+  "env_vars": ["ZAPIER_WEBHOOK_URL", "ZAPIER_NLA_API_KEY"],
+  "keywords": ["zapier", "automation", "webhook", "zap", "workflow", "trigger", "integrate"],
+  "free_tier": true
+}

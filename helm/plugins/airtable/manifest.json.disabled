@@ -1,0 +1,57 @@
+{
+  "id": "airtable",
+  "name": "Airtable",
+  "description": "Read, create, update, and delete records in Airtable bases and tables",
+  "emoji": "📊",
+  "category": "data",
+  "auth": {
+    "type": "oauth2",
+    "authorize_url": "https://airtable.com/oauth2/v1/authorize",
+    "token_url": "https://airtable.com/oauth2/v1/token",
+    "scopes": "data.records:read data.records:write schema.bases:read",
+    "pkce": true,
+    "env_client_id": "AIRTABLE_CLIENT_ID",
+    "env_client_secret": "AIRTABLE_CLIENT_SECRET",
+    "token_env": "AIRTABLE_API_KEY",
+    "refresh_token_env": "AIRTABLE_REFRESH_TOKEN",
+    "fallback_token": {
+      "token_env": "AIRTABLE_API_KEY",
+      "token_label": "Personal Access Token",
+      "token_url": "https://airtable.com/create/tokens",
+      "token_hint": "Go to Airtable → Developer Hub → Personal access tokens → Create token"
+    },
+    "client_id": "cffbd876-65fb-4d0e-a1c6-9d2cc048d05f",
+    "proxy_exchange": true
+  },
+  "setup_url": "https://airtable.com/create/oauth",
+  "setup_steps": [
+    "Go to airtable.com/create/oauth → Register a new OAuth integration",
+    "Set the Redirect URL to your RAPR proxy callback URL",
+    "Add scopes: data.records:read, data.records:write, schema.bases:read",
+    "Copy the Client ID and Client Secret into RAPR Settings"
+  ],
+  "validate": {
+    "url": "https://api.airtable.com/v0/meta/bases",
+    "headers": {
+      "Authorization": "Bearer {token}"
+    },
+    "expect_status": 200
+  },
+  "env_vars": [
+    "AIRTABLE_API_KEY"
+  ],
+  "setup_env_vars": [
+    "AIRTABLE_CLIENT_ID",
+    "AIRTABLE_CLIENT_SECRET"
+  ],
+  "keywords": [
+    "airtable",
+    "base",
+    "table",
+    "records",
+    "spreadsheet",
+    "database",
+    "crm"
+  ],
+  "free_tier": true
+}

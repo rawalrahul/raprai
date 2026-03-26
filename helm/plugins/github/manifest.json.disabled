@@ -1,0 +1,50 @@
+{
+  "id": "github",
+  "name": "GitHub",
+  "description": "Manage repos, issues, pull requests, actions, and code on GitHub",
+  "emoji": "🐙",
+  "category": "development",
+  "auth": {
+    "type": "oauth2",
+    "authorize_url": "https://github.com/login/oauth/authorize",
+    "token_url": "https://github.com/login/oauth/access_token",
+    "scopes": "repo read:user read:org",
+    "pkce": false,
+    "env_client_id": "GITHUB_CLIENT_ID",
+    "env_client_secret": "GITHUB_CLIENT_SECRET",
+    "token_env": "GITHUB_TOKEN",
+    "fallback_token": {
+      "token_env": "GITHUB_TOKEN",
+      "token_label": "Personal Access Token",
+      "token_url": "https://github.com/settings/tokens",
+      "token_hint": "Go to GitHub → Settings → Developer settings → Personal access tokens → Generate new token"
+    },
+    "client_id": "Ov23liSIlIczsIBvl13u",
+    "proxy_exchange": true
+  },
+  "setup_url": "https://github.com/settings/developers",
+  "setup_steps": [
+    "Go to github.com/settings/developers → OAuth Apps → New OAuth App",
+    "Set Authorization callback URL to your RAPR proxy callback URL",
+    "Copy the Client ID and Client Secret into RAPR Settings"
+  ],
+  "env_vars": [
+    "GITHUB_TOKEN"
+  ],
+  "setup_env_vars": [
+    "GITHUB_CLIENT_ID",
+    "GITHUB_CLIENT_SECRET"
+  ],
+  "keywords": [
+    "github",
+    "repo",
+    "repository",
+    "issue",
+    "pull request",
+    "pr",
+    "commit",
+    "code",
+    "git"
+  ],
+  "free_tier": true
+}

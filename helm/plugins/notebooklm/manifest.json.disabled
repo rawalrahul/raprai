@@ -1,0 +1,17 @@
+{
+  "id": "notebooklm",
+  "name": "NotebookLM",
+  "description": "Query your documents via Google NotebookLM — the best RAG for source-grounded, citation-backed answers. Generate audio overviews, quizzes, mind maps, and more.",
+  "emoji": "\ud83d\udcda",
+  "category": "research",
+  "auth": {
+    "type": "none",
+    "setup_hint": "Install: pip install \"notebooklm-py[browser]\" && python -m playwright install chromium. Then run: notebooklm login. Auth is browser-based and stored locally at ~/.notebooklm/"
+  },
+  "env_vars": [],
+  "keywords": ["notebooklm", "research", "rag", "documents", "notes", "google", "gemini", "citations", "audio", "podcast", "quiz", "mindmap"],
+  "free_tier": true,
+  "requires_pip": ["notebooklm-py"],
+  "experimental": true,
+  "warning": "Uses unofficial reverse-engineered Google APIs via notebooklm-py. Auth expires every 1-2 weeks and requires browser re-login. Not for production use."
+}
