@@ -238,10 +238,10 @@ async def _main():
         )
         from helm.telegram_bot import (
             action_callback, browse_callback, pipeline_callback,
-            approval_callback,
+            approval_callback, agent_callback,
             tg_browse, tg_clear, tg_clear_context, tg_claude, tg_cmd,
             tg_codex, tg_cwd, tg_gemini, tg_history, tg_interrupt,
-            tg_launch, tg_menu, tg_pipeline, tg_resume, tg_schedule,
+            tg_launch, tg_menu, tg_pipeline, tg_agent, tg_resume, tg_schedule,
             tg_start, tg_status, tg_stop, tg_stop_ai, tg_text, tg_timeout,
             tg_voice, tg_file,
         )
@@ -275,10 +275,12 @@ async def _main():
         tg.add_handler(CommandHandler("clear_context", tg_clear_context))
         tg.add_handler(CommandHandler("schedule",      tg_schedule))
         tg.add_handler(CommandHandler("pipeline",      tg_pipeline))
+        tg.add_handler(CommandHandler("agent",         tg_agent))
         # Inline keyboard callbacks — action/ms: buttons BEFORE browse_callback
         tg.add_handler(CallbackQueryHandler(action_callback, pattern=r"^(action:|ms:)"))
         tg.add_handler(CallbackQueryHandler(pipeline_callback, pattern=r"^pl:"))
         tg.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^appr:"))
+        tg.add_handler(CallbackQueryHandler(agent_callback, pattern=r"^ag:"))
         tg.add_handler(CallbackQueryHandler(heartbeat_callback, pattern=r"^heartbeat:"))
         tg.add_handler(CallbackQueryHandler(browse_callback))
         # Voice / audio messages
@@ -328,10 +330,10 @@ async def _main():
             )
             from helm.telegram_bot import (
                 action_callback, browse_callback, pipeline_callback,
-                approval_callback,
+                approval_callback, agent_callback,
                 tg_browse, tg_clear, tg_clear_context, tg_claude, tg_cmd,
                 tg_codex, tg_cwd, tg_gemini, tg_history, tg_interrupt,
-                tg_launch, tg_menu, tg_pipeline, tg_resume, tg_schedule,
+                tg_launch, tg_menu, tg_pipeline, tg_agent, tg_resume, tg_schedule,
                 tg_start, tg_status, tg_stop, tg_stop_ai, tg_text, tg_timeout,
                 tg_voice, tg_file,
             )
@@ -359,9 +361,11 @@ async def _main():
             tg.add_handler(CommandHandler("clear_context", tg_clear_context))
             tg.add_handler(CommandHandler("schedule",      tg_schedule))
             tg.add_handler(CommandHandler("pipeline",      tg_pipeline))
+            tg.add_handler(CommandHandler("agent",         tg_agent))
             tg.add_handler(CallbackQueryHandler(action_callback, pattern=r"^(action:|ms:)"))
             tg.add_handler(CallbackQueryHandler(pipeline_callback, pattern=r"^pl:"))
             tg.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^appr:"))
+            tg.add_handler(CallbackQueryHandler(agent_callback, pattern=r"^ag:"))
             tg.add_handler(CallbackQueryHandler(heartbeat_callback, pattern=r"^heartbeat:"))
             tg.add_handler(CallbackQueryHandler(browse_callback))
             tg.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, tg_voice))
@@ -478,6 +482,11 @@ async def _main():
                         logger.debug("Could not launch %s: %s", browser_path, exc)
         if not opened:
             webbrowser.open(url)
+
+    # Load agents and start the agent schedule cron runner
+    from helm.agent.runner import register_agent_schedules, agent_cron_runner
+    register_agent_schedules()
+    asyncio.create_task(agent_cron_runner())
 
     # Load persisted scheduled tasks and start the cron runner
     load_scheduled_tasks()

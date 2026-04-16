@@ -112,3 +112,11 @@ default_models: dict[str, str] = {}      # ai_key -> default model name
 # ---------------------------------------------------------------------------
 
 approval_queue: dict[str, dict] = {}     # approval_id -> request dict
+
+# ---------------------------------------------------------------------------
+# Agent state (workflow automation DAG runner)
+# ---------------------------------------------------------------------------
+
+agents: dict[str, dict] = {}            # agent_id -> Agent, loaded at startup
+agent_runs: dict[str, dict] = {}        # run_id -> AgentRun, active runs only
+                                         # completed runs evicted to DB on finish

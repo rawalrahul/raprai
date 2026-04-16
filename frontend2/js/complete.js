@@ -164,6 +164,8 @@ function connect(){
     else if(d.type==='pipeline_step_stream') handleStepStream(d.pipeline_id, d.step_id, d.chunk);
     else if(d.type==='approval_request') showApprovalBanner(d.approval);
     else if(d.type==='approval_resolved') hideApprovalBanner();
+    else if(d.type==='agent_run_update' && typeof handleAgentRunUpdate==='function') handleAgentRunUpdate(d.run);
+    else if(d.type==='agent_run_stream' && typeof handleAgentRunStream==='function') handleAgentRunStream(d.run_id, d.node_id, d.chunk);
   };
 }
 
@@ -1424,6 +1426,7 @@ function toggleSbSection(headerEl){
     if(tab === 'usage') loadUsageDashboard();
     if(tab === 'pipelines') loadPipelines();
     if(tab === 'memory') loadMemoryPanel();
+    if(tab === 'agents') loadAgentsPanel();
   }
 }
 

@@ -130,3 +130,18 @@ def pipeline_list_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("← Sessions", callback_data="ms:list")],
     ])
+
+
+# ---------------------------------------------------------------------------
+# Agent keyboards
+# ---------------------------------------------------------------------------
+
+def agent_list_keyboard():
+    """One button per saved agent + a back button."""
+    from helm.agent.models import agent_slug
+    rows: list = []
+    for ag in sorted(_st.agents.values(), key=lambda a: a.get("name", "")):
+        label = f"✦ {ag['name']}"
+        rows.append([InlineKeyboardButton(label, callback_data=f"ag:run:{ag['id']}")])
+    rows.append([InlineKeyboardButton("← Sessions", callback_data="ms:list")])
+    return InlineKeyboardMarkup(rows)

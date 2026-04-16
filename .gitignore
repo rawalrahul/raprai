@@ -43,6 +43,25 @@ packages_cache/
 # Release archives
 *.zip
 
+# Binaries & installers
+*.exe
+*.msi
+*.msix
+*.dll
+
+# Downloads folder (large installers, personal files)
+Downloads/
+
+# Error screenshots
+Error/
+
+# Generated/temp data files
+*.log
+ai_news_research.txt
+top_ai_news.json
+top_3_ai_news_selection.txt
+nemoclaw_debug.log
+
 # Backup / old files
 *.bak
 *.py.bak
@@ -64,6 +83,14 @@ desktop.ini
 
 # Claude Code internals
 .claude/
+.superpowers/
 
 # Skills (managed externally)
 .skills/
+
+# Runtime state
+.heartbeat_last
+.fuse_hidden*
+
+# Obsidian vault config
+.obsidian/

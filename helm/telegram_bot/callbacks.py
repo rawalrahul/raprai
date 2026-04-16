@@ -438,6 +438,55 @@ async def pipeline_callback(update, context):
         )
 
 
+async def agent_callback(update, context):
+    """Handle ag:run:<agent_id> inline keyboard button presses."""
+    from helm.agent.runner import trigger_agent_run
+    from helm.session_mgr import focused_session
+
+    query = update.callback_query
+    user_id = query.from_user.id
+    if not ALLOWED_USER_IDS or user_id not in ALLOWED_USER_IDS:
+        await query.answer("Not authorized.", show_alert=True)
+        return
+    await query.answer()
+
+    parts = query.data.split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    agent_id = parts[2] if len(parts) > 2 else ""
+
+    if action != "run" or not agent_id:
+        await query.edit_message_text("Unknown agent action.")
+        return
+
+    ag = _st.agents.get(agent_id)
+    if not ag:
+        await query.edit_message_text("Agent not found.")
+        return
+
+    fs = focused_session()
+    session_id = fs["id"] if fs else None
+
+    await query.edit_message_text(
+        f"✦ Starting agent: *{ag['name']}* ({len(ag.get('nodes', []))} nodes)…",
+        parse_mode="Markdown",
+    )
+
+    run = await trigger_agent_run(agent_id, trigger="telegram", session_id=session_id)
+    if not run:
+        await query.edit_message_text("❌ Failed to start agent — it may have no nodes.")
+        return
+
+    import asyncio as _asyncio
+    try:
+        await query.edit_message_text(
+            f"✦ *{ag['name']}* is running (`{run['id'][:8]}`).\n"
+            f"You'll receive step-by-step updates here.",
+            parse_mode="Markdown",
+        )
+    except Exception:
+        pass
+
+
 async def approval_callback(update, context):
     """Handle appr:approve:<id> and appr:deny:<id> inline keyboard buttons."""
     import helm.approval as _appr

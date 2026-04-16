@@ -1237,3 +1237,87 @@ async def tg_pipeline(update, context):
     except Exception as exc:
         logger.error("Pipeline planning failed: %s", exc)
         await update.message.reply_text(f"❌ Pipeline planning failed: {str(exc)[:200]}")
+
+
+# ---------------------------------------------------------------------------
+# /agent — Agent workflow automation
+# ---------------------------------------------------------------------------
+
+@authorized_only
+async def tg_agent(update, context):
+    """/agent [name] — List agents or run a named agent."""
+    from helm.agent.models import agent_slug_match
+    from helm.agent.runner import trigger_agent_run
+    from helm.session_mgr import focused_session
+    from .keyboards import agent_list_keyboard
+
+    text = (update.message.text or "").partition(" ")[2].strip()
+
+    # /agent with no args → list all agents as inline buttons
+    if not text:
+        if not _st.agents:
+            await update.message.reply_text(
+                "✦ *Agents*\n\n"
+                "No agents yet. Build one in the web UI:\n"
+                "• Open the *Agents* tab\n"
+                "• Click *New Agent* to design your workflow\n"
+                "• Then use `/agent <name>` to run it here",
+                parse_mode="Markdown",
+            )
+            return
+
+        lines = ["✦ *Agents* — tap to run:"]
+        for ag in sorted(_st.agents.values(), key=lambda a: a.get("name", "")):
+            rc = ag.get("run_count", 0)
+            lines.append(f"  • {ag['name']} ({len(ag.get('nodes', []))} nodes, {rc} runs)")
+
+        await update.message.reply_text(
+            "\n".join(lines),
+            parse_mode="Markdown",
+            reply_markup=agent_list_keyboard(),
+        )
+        return
+
+    # /agent <name> → find agent by slug and run it
+    slug = text.strip()
+    matched = None
+    for ag in _st.agents.values():
+        if agent_slug_match(ag["name"], slug):
+            matched = ag
+            break
+
+    if not matched:
+        # Try partial name match
+        slug_lower = slug.lower().replace("-", " ").replace("_", " ")
+        for ag in _st.agents.values():
+            if slug_lower in ag["name"].lower():
+                matched = ag
+                break
+
+    if not matched:
+        names = ", ".join(f"`{ag['name']}`" for ag in _st.agents.values())
+        await update.message.reply_text(
+            f"❌ No agent found matching `{slug}`.\n\n"
+            f"Available: {names or '(none yet)'}",
+            parse_mode="Markdown",
+        )
+        return
+
+    fs = focused_session()
+    session_id = fs["id"] if fs else None
+
+    await update.message.reply_text(
+        f"✦ Starting agent: *{matched['name']}* ({len(matched.get('nodes', []))} nodes)…",
+        parse_mode="Markdown",
+    )
+
+    run = await trigger_agent_run(matched["id"], trigger="telegram", session_id=session_id)
+    if not run:
+        await update.message.reply_text("❌ Failed to start agent — it may have no nodes.")
+        return
+
+    await update.message.reply_text(
+        f"✦ *{matched['name']}* is running (`{run['id'][:8]}`).\n"
+        f"You'll receive step-by-step updates here.",
+        parse_mode="Markdown",
+    )

@@ -34,6 +34,7 @@ from .backup_routes import router as backup_router
 from .chrome_ws import router as chrome_ws_router
 from .update_routes import router as update_router
 from .device_routes import router as device_router
+from .agent_routes import router as agent_router
 
 # Include all routers in the app
 app.include_router(auth_router)
@@ -55,6 +56,7 @@ app.include_router(backup_router)
 app.include_router(chrome_ws_router)
 app.include_router(update_router)
 app.include_router(device_router)
+app.include_router(agent_router)
 
 # Re-export model fetchers so they can be imported as: from helm.web_routes import _fetch_claude_models
 from .helpers import (

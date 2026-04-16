@@ -316,6 +316,41 @@ def v9_add_packages_keywords(conn: sqlite3.Connection):
     conn.commit()
 
 
+def v10_add_agent_tables(conn: sqlite3.Connection):
+    """
+    Version 10: Add agents and agent_runs tables for the Agent workflow system.
+
+    - agents: saved agent definitions (node graphs + triggers)
+    - agent_runs: execution history for each agent
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS agents (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL,
+            description TEXT,
+            graph_json  TEXT NOT NULL,
+            created_at  REAL NOT NULL,
+            updated_at  REAL NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_runs (
+            id           TEXT PRIMARY KEY,
+            agent_id     TEXT NOT NULL,
+            status       TEXT NOT NULL,
+            trigger      TEXT NOT NULL,
+            result_json  TEXT,
+            started_at   REAL NOT NULL,
+            completed_at REAL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_agent_id
+            ON agent_runs(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_started_at
+            ON agent_runs(started_at);
+    """)
+    conn.commit()
+
+
 MIGRATIONS: list[tuple[int, str, callable]] = [
     (1, "Initial schema", v1_initial),
     (2, "Add FTS5 full-text search", v2_add_content_fts),
@@ -326,6 +361,7 @@ MIGRATIONS: list[tuple[int, str, callable]] = [
     (7, "Add dollar cost tracking to usage_stats", v7_add_cost_usd),
     (8, "Encrypt memory content at rest", v8_encrypt_memory_content),
     (9, "Add keywords/updated_at to packages", v9_add_packages_keywords),
+    (10, "Add agents + agent_runs tables", v10_add_agent_tables),
 ]
 
 
