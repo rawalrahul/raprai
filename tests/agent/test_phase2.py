@@ -42,3 +42,56 @@ def test_extract_var_assignments():
 def test_extract_var_assignments_none():
     output = "Nothing special here"
     assert extract_var_assignments(output) == {}
+
+
+from helm.agent.nodes.transform import execute_transform_node
+
+def test_transform_json_extract():
+    node = make_node("Extract", "", node_type="transform")
+    node["transform_op"] = "json_extract"
+    node["transform_key"] = "name"
+    result = asyncio.run(
+        execute_transform_node(node, context='{"name": "Rahul", "age": 30}')
+    )
+    assert result == "Rahul"
+
+def test_transform_regex_extract():
+    node = make_node("Regex", "", node_type="transform")
+    node["transform_op"] = "regex_extract"
+    node["transform_pattern"] = r"\d+"
+    result = asyncio.run(
+        execute_transform_node(node, context="There are 42 results found")
+    )
+    assert result == "42"
+
+def test_transform_template():
+    node = make_node("Template", "Hello {{input}}, welcome", node_type="transform")
+    node["transform_op"] = "template"
+    result = asyncio.run(
+        execute_transform_node(node, context="Rahul")
+    )
+    assert "Hello Rahul" in result
+
+def test_transform_truncate():
+    node = make_node("Truncate", "", node_type="transform")
+    node["transform_op"] = "truncate"
+    node["transform_length"] = 10
+    result = asyncio.run(
+        execute_transform_node(node, context="Hello World this is long")
+    )
+    assert len(result) <= 10
+
+def test_transform_missing_op():
+    node = make_node("Bad", "", node_type="transform")
+    result = asyncio.run(
+        execute_transform_node(node, context="anything")
+    )
+    assert "error" in result.lower()
+
+def test_shell_node_var_substitution():
+    """Var substitution should work in shell node task text."""
+    from helm.agent.context import substitute_vars
+    run = {"vars": {"output_dir": "/tmp/results"}}
+    task = "mkdir -p {{var:output_dir}}"
+    result = substitute_vars(task, run)
+    assert result == "mkdir -p /tmp/results"

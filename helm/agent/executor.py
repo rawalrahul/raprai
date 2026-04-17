@@ -15,7 +15,7 @@ import helm.state as _st
 from helm.config import logger
 from helm.session_mgr import make_session
 
-from .context import build_node_prompt
+from .context import build_node_prompt, extract_var_assignments
 from .models import (
     find_node,
     is_run_done,
@@ -114,17 +114,32 @@ async def _execute_node(run: dict, node: dict, semaphore: asyncio.Semaphore):
         node_type = node.get("type", "ai")
         context = build_node_context(run, node)
 
+        from helm.agent.context import substitute_vars
+        from helm.agent.nodes.transform import execute_transform_node
+        # Apply var substitution to node task text for all node types
+        task_text = substitute_vars(node.get("task", ""), run)
+
         try:
             if node_type == "shell":
-                output = await execute_shell_node(node, context=context, cwd=cwd)
+                shell_node = dict(node)
+                shell_node["task"] = task_text
+                output = await execute_shell_node(shell_node, context=context, cwd=cwd)
             elif node_type == "http":
-                output = await execute_http_node(node, context=context)
+                http_node = dict(node)
+                http_node["task"] = task_text
+                if node.get("http_url"):
+                    http_node["http_url"] = substitute_vars(node["http_url"], run)
+                if node.get("http_body"):
+                    http_node["http_body"] = substitute_vars(node["http_body"], run)
+                output = await execute_http_node(http_node, context=context)
             elif node_type == "file":
                 output = await execute_file_node(node, context=context)
             elif node_type == "deliver":
                 output = await execute_deliver_node(node, context=context)
             elif node_type == "condition":
                 output = await execute_condition_node(node, context=context)
+            elif node_type == "transform":
+                output = await execute_transform_node(node, context=context)
             elif node_type == "input":
                 if not parent_nodes(run["nodes"], node["id"]) and run.get("input_data"):
                     output = run["input_data"]
@@ -179,7 +194,6 @@ async def _execute_node(run: dict, node: dict, semaphore: asyncio.Semaphore):
             node["output"] = output
 
             # Extract and store any SET_VAR assignments into run scratchpad
-            from helm.agent.context import extract_var_assignments
             assignments = extract_var_assignments(output)
             if assignments:
                 run.setdefault("vars", {}).update(assignments)

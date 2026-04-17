@@ -83,6 +83,8 @@ def node_definition(node: dict) -> dict:
         "timeout", "http_method", "http_url", "http_headers", "http_body",
         "file_op", "file_path", "deliver_channel", "deliver_to",
         "deliver_subject", "input_timeout", "loop_max", "retry_max",
+        "transform_op", "transform_key", "transform_pattern", "transform_length",
+        "env_vars",
     ):
         if key in node:
             definition[key] = node[key]
