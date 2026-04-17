@@ -94,3 +94,6 @@ desktop.ini
 
 # Obsidian vault config
 .obsidian/
+
+# Git worktrees
+.worktrees/
