@@ -42,12 +42,14 @@ def make_node(
     x: float = 100.0,
     y: float = 100.0,
     node_id: Optional[str] = None,
+    node_type: str = "ai",
 ) -> dict:
     """Create a new AgentNode dict."""
     return {
         "id": node_id or make_node_id(),
         "title": title,
         "task": task,
+        "type": node_type,
         "ai": ai,
         "children": [],          # list of child node IDs (max 3)
         "x": x,
@@ -67,15 +69,24 @@ def make_node(
 
 def node_definition(node: dict) -> dict:
     """Strip runtime fields from a node — only save the graph definition."""
-    return {
+    definition = {
         "id": node["id"],
         "title": node["title"],
         "task": node["task"],
+        "type": node.get("type", "ai"),
         "ai": node["ai"],
         "children": list(node["children"]),
         "x": node.get("x", 100.0),
         "y": node.get("y", 100.0),
     }
+    for key in (
+        "timeout", "http_method", "http_url", "http_headers", "http_body",
+        "file_op", "file_path", "deliver_channel", "deliver_to",
+        "deliver_subject", "input_timeout", "loop_max", "retry_max",
+    ):
+        if key in node:
+            definition[key] = node[key]
+    return definition
 
 
 def node_runtime_snapshot(node: dict) -> dict:
@@ -124,6 +135,7 @@ def make_agent(name: str, description: str = "", nodes: Optional[list] = None) -
         },
         "last_run_at": None,
         "run_count": 0,
+        "run_timeout": 1800,   # seconds; 0 = no timeout
     }
 
 
@@ -131,7 +143,12 @@ def make_agent(name: str, description: str = "", nodes: Optional[list] = None) -
 # AgentRun
 # ---------------------------------------------------------------------------
 
-def make_run(agent: dict, trigger: str, session_id: Optional[str] = None) -> dict:
+def make_run(
+    agent: dict,
+    trigger: str,
+    session_id: Optional[str] = None,
+    input_data: Optional[str] = None,
+) -> dict:
     """Create an AgentRun for one execution of an agent."""
     # Deep-copy nodes, resetting runtime state
     nodes_snapshot = [node_runtime_snapshot(n) for n in agent["nodes"]]
@@ -142,6 +159,9 @@ def make_run(agent: dict, trigger: str, session_id: Optional[str] = None) -> dic
         "trigger": trigger,          # "telegram" | "schedule" | "webhook" | "ui"
         "status": "running",         # running | completed | failed | cancelled
         "nodes": nodes_snapshot,
+        "input_data": input_data,
+        "feedback_retries": {},
+        "node_retries": {},
         "started_at": time.time(),
         "completed_at": None,
         "session_id": session_id,    # for WS broadcasts + Telegram replies
@@ -211,6 +231,7 @@ def run_state_payload(run: dict) -> dict:
         "trigger": run["trigger"],
         "status": run["status"],
         "nodes": run["nodes"],
+        "input_data": run.get("input_data"),
         "started_at": run["started_at"],
         "completed_at": run.get("completed_at"),
         "progress": run_progress(run),
