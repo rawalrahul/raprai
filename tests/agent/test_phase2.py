@@ -18,3 +18,27 @@ def test_run_timeout_marks_run_failed():
     asyncio.run(execute_agent_run(run["id"]))
     assert run["status"] == "failed"
     assert run.get("timed_out") is True
+
+
+from helm.agent.context import substitute_vars, extract_var_assignments
+
+def test_substitute_vars_replaces_placeholder():
+    run = {"vars": {"city": "Delhi", "role": "Python Dev"}}
+    prompt = "Find {{var:role}} jobs in {{var:city}}"
+    result = substitute_vars(prompt, run)
+    assert result == "Find Python Dev jobs in Delhi"
+
+def test_substitute_vars_missing_key_leaves_placeholder():
+    run = {"vars": {}}
+    prompt = "Hello {{var:name}}"
+    result = substitute_vars(prompt, run)
+    assert "{{var:name}}" in result
+
+def test_extract_var_assignments():
+    output = "I found 5 jobs.\nSET_VAR: count = 5\nSET_VAR: city = Mumbai"
+    assignments = extract_var_assignments(output)
+    assert assignments == {"count": "5", "city": "Mumbai"}
+
+def test_extract_var_assignments_none():
+    output = "Nothing special here"
+    assert extract_var_assignments(output) == {}

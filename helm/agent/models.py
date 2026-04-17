@@ -160,6 +160,7 @@ def make_run(
         "status": "running",         # running | completed | failed | cancelled
         "nodes": nodes_snapshot,
         "input_data": input_data,
+        "vars": {},
         "feedback_retries": {},
         "node_retries": {},
         "started_at": time.time(),

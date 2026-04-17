@@ -177,6 +177,13 @@ async def _execute_node(run: dict, node: dict, semaphore: asyncio.Semaphore):
                     return
 
             node["output"] = output
+
+            # Extract and store any SET_VAR assignments into run scratchpad
+            from helm.agent.context import extract_var_assignments
+            assignments = extract_var_assignments(output)
+            if assignments:
+                run.setdefault("vars", {}).update(assignments)
+
             node["status"] = "completed"
             node["completed_at"] = time.time()
             node["elapsed_seconds"] = node["completed_at"] - node["started_at"]
