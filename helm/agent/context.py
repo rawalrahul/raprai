@@ -15,9 +15,15 @@ def build_node_context(run: dict, node: dict) -> str:
     Returns an empty string if there are no parents or no parent output.
     The returned string is prepended to the node's task prompt.
     """
-    parents = parent_nodes(run["nodes"], node["id"])
+    if node.get("type") == "manager":
+        parents = [
+            n for n in run["nodes"]
+            if n.get("type") != "manager" and n.get("output")
+        ]
+    else:
+        parents = parent_nodes(run["nodes"], node["id"], include_manager=False)
     parts = []
-    if not parents and run.get("input_data"):
+    if node.get("type") != "manager" and not parents and run.get("input_data"):
         parts.append(
             f"=== User Input ===\n"
             f"{run['input_data']}\n"
@@ -36,6 +42,11 @@ def build_node_context(run: dict, node: dict) -> str:
             f"{text}\n"
             f"=== End ==="
         )
+
+    # Prepend loop item if present (Task 9)
+    loop_item = node.get("_loop_item")
+    if loop_item:
+        parts.insert(0, f"=== Current Item ===\n{loop_item}\n=== End ===")
 
     if not parts:
         return ""

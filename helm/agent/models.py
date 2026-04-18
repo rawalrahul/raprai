@@ -67,6 +67,73 @@ def make_node(
     }
 
 
+def ensure_manager_node(nodes: list[dict], manager_title: str | None = None) -> None:
+    """
+    Ensure every executable workflow has one supervisory Manager node.
+
+    The manager is drawn above the workflow and points at executable roots.
+    Those edges are supervisory: ready_nodes() ignores them as prerequisites,
+    then runs the manager after every non-manager node has reached a terminal
+    state so it can review success/failure with the user.
+    """
+    if not nodes:
+        return
+
+    title = (manager_title or "Manager Review").strip() or "Manager Review"
+    managers = [n for n in nodes if n.get("type") == "manager"]
+    if managers:
+        manager = managers[0]
+        for extra in managers[1:]:
+            nodes.remove(extra)
+    else:
+        max_x = max(float(n.get("x", 100)) for n in nodes)
+        leaf_ys = [float(n.get("y", 100)) for n in nodes if not n.get("children")]
+        y = sum(leaf_ys) / len(leaf_ys) if leaf_ys else 100.0
+        manager = make_node(
+            title=title,
+            task=(
+                "Review the full workflow result with the user. Ask if they are happy "
+                "with the output. If not, collect the issue, identify the node most "
+                "responsible, improve that node, and rerun the workflow."
+            ),
+            ai="claude",
+            x=max_x + 260,
+            y=y,
+            node_type="manager",
+        )
+        manager["manager_max_iter"] = 3
+        manager["input_timeout"] = 3600
+        manager["deliver_channel"] = "ui"
+        nodes.append(manager)
+
+    if manager_title or not manager.get("title"):
+        manager["title"] = title
+    manager["type"] = "manager"
+    manager["ai"] = manager.get("ai") or "claude"
+    manager["task"] = manager.get("task") or (
+        "Review the full workflow result with the user. Ask if they are happy "
+        "with the output. If not, collect the issue, identify the node most "
+        "responsible, improve that node, and rerun the workflow."
+    )
+    manager.setdefault("manager_max_iter", 3)
+    manager.setdefault("input_timeout", 3600)
+    manager.setdefault("deliver_channel", "ui")
+
+    manager_id = manager["id"]
+    non_manager_nodes = [n for n in nodes if n is not manager]
+    for node in non_manager_nodes:
+        node["children"] = [cid for cid in node.get("children", []) if cid != manager_id]
+
+    if non_manager_nodes:
+        min_x = min(float(n.get("x", 100)) for n in non_manager_nodes)
+        max_x = max(float(n.get("x", 100)) for n in non_manager_nodes)
+        min_y = min(float(n.get("y", 100)) for n in non_manager_nodes)
+        manager["x"] = (min_x + max_x) / 2
+        manager["y"] = max(20.0, min_y - 170.0)
+
+    manager["children"] = [n["id"] for n in non_manager_nodes]
+
+
 def node_definition(node: dict) -> dict:
     """Strip runtime fields from a node — only save the graph definition."""
     definition = {
@@ -84,7 +151,9 @@ def node_definition(node: dict) -> dict:
         "file_op", "file_path", "deliver_channel", "deliver_to",
         "deliver_subject", "input_timeout", "loop_max", "retry_max",
         "transform_op", "transform_key", "transform_pattern", "transform_length",
-        "env_vars",
+        "env_vars", "join_separator", "manager_max_iter",
+        # A1: AI fallback fields
+        "ai_fallback", "stuck_threshold",
     ):
         if key in node:
             definition[key] = node[key]
@@ -129,6 +198,7 @@ def make_agent(name: str, description: str = "", nodes: Optional[list] = None) -
                 "expression": "",
                 "cron": "",
                 "next_run": None,
+                "input_data": None,
             },
             "webhook": {
                 "enabled": False,
@@ -165,6 +235,7 @@ def make_run(
         "vars": {},
         "feedback_retries": {},
         "node_retries": {},
+        "manager_iterations": 0,
         "started_at": time.time(),
         "completed_at": None,
         "session_id": session_id,    # for WS broadcasts + Telegram replies
@@ -184,27 +255,48 @@ def find_node(run_or_agent: dict, node_id: str) -> Optional[dict]:
 
 
 def root_nodes(nodes: list[dict]) -> list[dict]:
-    """Return nodes that have no incoming edges (not listed as any node's child)."""
+    """Return executable roots, ignoring Manager supervision edges."""
+    return workflow_root_nodes(nodes)
+
+
+def workflow_root_nodes(nodes: list[dict]) -> list[dict]:
+    """Return non-manager nodes that have no incoming non-manager edges."""
     child_ids: set[str] = set()
     for n in nodes:
+        if n.get("type") == "manager":
+            continue
         for cid in n.get("children", []):
             child_ids.add(cid)
-    return [n for n in nodes if n["id"] not in child_ids]
+    return [n for n in nodes if n.get("type") != "manager" and n["id"] not in child_ids]
 
 
-def parent_nodes(nodes: list[dict], node_id: str) -> list[dict]:
+def parent_nodes(
+    nodes: list[dict],
+    node_id: str,
+    *,
+    include_manager: bool = True,
+) -> list[dict]:
     """Return all nodes whose children list contains node_id."""
-    return [n for n in nodes if node_id in n.get("children", [])]
+    return [
+        n for n in nodes
+        if node_id in n.get("children", [])
+        and (include_manager or n.get("type") != "manager")
+    ]
 
 
 def ready_nodes(nodes: list[dict]) -> list[dict]:
     """Return nodes whose parents are all terminal and the node itself is pending."""
     terminal = {"completed", "failed", "skipped"}
+    non_manager_nodes = [n for n in nodes if n.get("type") != "manager"]
     result = []
     for n in nodes:
         if n["status"] != "pending":
             continue
-        parents = parent_nodes(nodes, n["id"])
+        if n.get("type") == "manager":
+            if not non_manager_nodes or all(w["status"] in terminal for w in non_manager_nodes):
+                result.append(n)
+            continue
+        parents = parent_nodes(nodes, n["id"], include_manager=False)
         if all(p["status"] in terminal for p in parents):
             result.append(n)
     return result

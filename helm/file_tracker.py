@@ -153,6 +153,11 @@ _merge_session_changes = merge_session_changes  # legacy alias
 
 async def emit_session_end_summary(sess: dict, ended_as: str, source: str) -> None:
     """Send end-of-session summary to chat + Telegram (without persisting metadata)."""
+    agent_internal = bool(
+        sess.get("agent_run_id")
+        or sess.get("agent_manager")
+        or source == "agent"
+    )
     now = time.time()
     started = float(sess.get("session_started") or sess.get("created") or now)
     total_session = max(0.0, now - started)
@@ -198,7 +203,7 @@ async def emit_session_end_summary(sess: dict, ended_as: str, source: str) -> No
     summary = "\n".join(lines)
     await push_message("system", summary, source=source, session_id=sess.get("id"))
 
-    if _st.telegram_app and _st.telegram_chat_id:
+    if _st.telegram_app and _st.telegram_chat_id and not agent_internal:
         try:
             from helm.telegram_bot import sessions_keyboard
             _kb = sessions_keyboard()
@@ -309,6 +314,9 @@ async def handle_diff(before: dict, after: dict, source: str, cwd: str,
                       session_id: Optional[str] = None):
     """Diff snapshots -> notify web chat + Telegram about new, modified, deleted files."""
     diff = diff_snapshots(before, after)
+    sess = _st.sessions.get(session_id) if session_id else None
+    agent_internal = bool(source == "agent" or (sess or {}).get("agent_run_id"))
+    send_agent_file = bool((sess or {}).get("agent_send_files_to_telegram"))
     if session_id and session_id in _st.sessions:
         merge_session_changes(_st.sessions[session_id], diff, cwd)
 
@@ -327,7 +335,6 @@ async def handle_diff(before: dict, after: dict, source: str, cwd: str,
             size_kb = 0
 
         # Track in generated files log (in-memory + SQLite)
-        sess = _st.sessions.get(session_id) if session_id else None
         file_record = {
             "path": str(path),
             "name": path.name,
@@ -367,10 +374,19 @@ async def handle_diff(before: dict, after: dict, source: str, cwd: str,
             source=source,
             session_id=session_id
         )
-        await send_file_to_telegram(filepath, source)
+        if not agent_internal or send_agent_file:
+            await send_file_to_telegram(filepath, source)
 
     # --- Modified files ---
     if diff["modified"]:
+        if agent_internal:
+            if send_agent_file:
+                for filepath in diff["modified"]:
+                    path = pathlib.Path(filepath)
+                    if path.suffix.lower() in _ALL_SENDABLE:
+                        await send_file_to_telegram(filepath, source)
+            return
+
         git_stat = await asyncio.to_thread(git_diff_stat, cwd) if git_is_repo(cwd) else None
         if git_stat:
             summary = f"📝 Changes:\n```\n{git_stat[:1400]}\n```"
@@ -388,7 +404,7 @@ async def handle_diff(before: dict, after: dict, source: str, cwd: str,
 
         await push_message("system", summary, source=source, session_id=session_id)
 
-        if _st.telegram_app and _st.telegram_chat_id:
+        if _st.telegram_app and _st.telegram_chat_id and not agent_internal:
             tg_text = git_stat or "\n".join(
                 f"📝 {pathlib.Path(fp).name}" for fp in diff["modified"][:10]
             )
@@ -414,7 +430,7 @@ async def handle_diff(before: dict, after: dict, source: str, cwd: str,
             source=source, session_id=session_id,
         )
         # Also alert on Telegram
-        if _st.telegram_app and _st.telegram_chat_id:
+        if _st.telegram_app and _st.telegram_chat_id and not agent_internal:
             try:
                 await _st.telegram_app.bot.send_message(
                     chat_id=_st.telegram_chat_id,

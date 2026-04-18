@@ -83,11 +83,49 @@ async def ws_endpoint(websocket: WebSocket):
                     continue
                 # Allow client to target a specific session (e.g. voice auto-send)
                 _dispatch_sid = data.get("session_id") or _st.focused_id
+                sess = _st.sessions.get(_dispatch_sid) if _dispatch_sid else None
+                manager_waiting_run_id = sess.get("agent_manager_waiting_run_id") if sess else None
+                if manager_waiting_run_id:
+                    try:
+                        from helm.agent.nodes.input_node import resume_run
+                        if resume_run(manager_waiting_run_id, content):
+                            waiting_kind = sess.get("agent_manager_waiting_kind")
+                            sess.pop("agent_manager_waiting_run_id", None)
+                            sess.pop("agent_manager_waiting_kind", None)
+                            sess.pop("agent_manager_waiting_node_id", None)
+                            await push_message("user", content, source="web", session_id=_dispatch_sid)
+                            system_text = (
+                                "Input received. Passing it to the waiting workflow step."
+                                if waiting_kind == "input"
+                                else "Manager feedback received. Updating the workflow and rerunning the affected steps."
+                            )
+                            await push_message(
+                                "system",
+                                system_text,
+                                source="agent",
+                                session_id=_dispatch_sid,
+                            )
+                            continue
+                    except Exception as exc:
+                        logger.warning("Could not route manager feedback from focused session: %s", exc)
+
+                try:
+                    from helm.agent.nodes.input_node import resume_run_for_session
+                    if resume_run_for_session(_dispatch_sid, content):
+                        await push_message("user", content, source="web", session_id=_dispatch_sid)
+                        await push_message(
+                            "system",
+                            "Input received. Passing it to the waiting workflow step.",
+                            source="agent",
+                            session_id=_dispatch_sid,
+                        )
+                        continue
+                except Exception as exc:
+                    logger.warning("Could not route agent input from focused session: %s", exc)
 
                 # Track chat message usage
                 try:
                     from helm.device_link import track_usage
-                    sess = _st.sessions.get(_dispatch_sid) if _dispatch_sid else None
                     track_usage("chat", "message_sent", {
                         "source": "web",
                         "ai": sess.get("ai") if sess else None,

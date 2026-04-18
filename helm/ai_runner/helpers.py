@@ -117,6 +117,8 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
     """
     if not (_st.telegram_app and _st.telegram_chat_id):
         return
+    if source == "agent" or (sess or {}).get("agent_silent_telegram"):
+        return
 
     # Resolve the controls keyboard once — attached to the final message
     try:

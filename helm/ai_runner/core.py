@@ -150,6 +150,51 @@ def _is_failure(output: str) -> bool:
     return _is_infra_failure(output)
 
 
+# A1: availability probe cache — (backend_name) → (available: bool, checked_at: float)
+_availability_cache: dict[str, tuple[bool, float]] = {}
+_AVAILABILITY_TTL = 120.0  # seconds
+
+
+def is_backend_available(ai_key: str) -> bool:
+    """Return True if ai_key's CLI/integration is reachable right now.
+
+    A1: Cached 120s so repeated probes on a healthy backend are free.
+    Used by the agent executor to skip the selected backend before a 600s timeout.
+    """
+    cached = _availability_cache.get(ai_key)
+    if cached:
+        available, checked_at = cached
+        if time.time() - checked_at < _AVAILABILITY_TTL:
+            return available
+
+    # Built-in CLI check
+    if ai_key == "claude":
+        result = bool(shutil.which("claude"))
+    elif ai_key == "ollama":
+        result = bool(shutil.which("ollama"))
+    else:
+        # Registered integration — check CLI binary
+        info = _st.integrations.get(ai_key)
+        if not info:
+            result = False
+        else:
+            try:
+                test_cmd = info["build_command"]("test", model=None)
+                cli_name = test_cmd[0] if test_cmd else ai_key
+                result = bool(shutil.which(cli_name))
+            except Exception:
+                result = False
+
+    _availability_cache[ai_key] = (result, time.time())
+    return result
+
+
+def list_available_backends(exclude: str | None = None) -> list[str]:
+    """Return all backends that pass is_backend_available(), optionally excluding one."""
+    candidates = list(_BUILTIN_AIS) + [k for k in _st.integrations if k not in _BUILTIN_AIS]
+    return [k for k in candidates if k != exclude and is_backend_available(k)]
+
+
 def _find_available_ais(exclude: str) -> list[str]:
     """Return a list of available AI keys, excluding the failed one.
 

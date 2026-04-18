@@ -785,6 +785,17 @@ async def tg_text(update, context):
         )
         return
 
+    try:
+        from helm.agent.nodes.input_node import resume_run_for_session
+        if resume_run_for_session(sess.get("id"), text):
+            await update.message.reply_text(
+                "Input received. Continuing the agent workflow...",
+                reply_markup=session_controls_keyboard(),
+            )
+            return
+    except Exception as exc:
+        logger.warning("Could not resume agent input from Telegram text: %s", exc)
+
     # --- Auto-pipeline detection for complex tasks ---
     pipeline_auto = os.environ.get("PIPELINE_AUTO_SUGGEST", "true").lower()
     if pipeline_auto == "true" and len(text) > 100:
@@ -882,6 +893,21 @@ async def tg_text(update, context):
 # ---------------------------------------------------------------------------
 # Voice message handler — Whisper speech-to-text → process_message
 # ---------------------------------------------------------------------------
+
+def _agent_file_input_payload(path: str, filename: str, caption: str = "") -> str:
+    """Build text payload for a Telegram file sent to a waiting agent input node."""
+    try:
+        from helm.web_routes.agent_routes import _extract_agent_input_file_text
+        extracted = _extract_agent_input_file_text(path, filename)
+    except Exception as exc:
+        extracted = f"(file uploaded, but text extraction failed: {exc})"
+    caption_block = f"\n\nUser note:\n{caption}" if caption else ""
+    return (
+        f"Uploaded file: {filename}\n"
+        f"Saved path: {path}{caption_block}\n\n"
+        f"=== Extracted File Text ===\n{extracted}\n=== End Extracted File Text ==="
+    )
+
 
 @authorized_only
 async def tg_voice(update, context):
@@ -1095,6 +1121,21 @@ async def tg_file(update, context):
 
     fs = focused_session()
     label = f"{fs['emoji']} {fs['name']}" if fs else "session"
+
+    try:
+        from helm.agent.nodes.input_node import resume_run_for_session
+        if fs and resume_run_for_session(
+            fs.get("id"),
+            _agent_file_input_payload(save_path, filename, caption),
+        ):
+            await update.message.reply_text(
+                f"Saved `{filename}` and sent it to the waiting agent. Continuing workflow...",
+                parse_mode="Markdown",
+                reply_markup=session_controls_keyboard(),
+            )
+            return
+    except Exception as exc:
+        logger.warning("Could not resume agent input from Telegram file: %s", exc)
 
     if caption:
         # User wants the AI to process this file
@@ -1318,6 +1359,6 @@ async def tg_agent(update, context):
 
     await update.message.reply_text(
         f"✦ *{matched['name']}* is running (`{run['id'][:8]}`).\n"
-        f"You'll receive step-by-step updates here.",
+        f"I'll message you here only when input is needed or the final output is ready.",
         parse_mode="Markdown",
     )

@@ -166,6 +166,7 @@ function connect(){
     else if(d.type==='approval_resolved') hideApprovalBanner();
     else if(d.type==='agent_run_update' && typeof handleAgentRunUpdate==='function') handleAgentRunUpdate(d.run);
     else if(d.type==='agent_run_stream' && typeof handleAgentRunStream==='function') handleAgentRunStream(d.run_id, d.node_id, d.chunk);
+    else if(d.type==='agent_run_waiting_input' && typeof handleAgentRunWaitingInput==='function') handleAgentRunWaitingInput(d);
   };
 }
 
