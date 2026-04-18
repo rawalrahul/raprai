@@ -110,3 +110,44 @@ def test_concurrent_save_run_no_error():
         await asyncio.gather(*[save_run(dict(run)) for _ in range(5)])
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# B5: Cap _telegram_notified_runs with FIFO eviction
+# ---------------------------------------------------------------------------
+
+def test_telegram_notified_runs_capped():
+    from helm.agent.nodes import input_node
+    input_node._telegram_notified_queue.clear()
+    input_node._telegram_notified_set.clear()
+    for i in range(1100):
+        input_node._notified_add(f"run:{i}")
+    assert len(input_node._telegram_notified_set) == input_node._NOTIFIED_MAX
+    assert len(input_node._telegram_notified_queue) == input_node._NOTIFIED_MAX
+    assert not input_node._notified_contains("run:0")
+    assert input_node._notified_contains("run:1099")
+
+
+def test_telegram_notified_remove_allows_rerun():
+    from helm.agent.nodes import input_node
+    input_node._telegram_notified_queue.clear()
+    input_node._telegram_notified_set.clear()
+    input_node._notified_add("run1:node1")
+    assert input_node._notified_contains("run1:node1")
+    input_node._notified_remove("run1:node1")
+    assert not input_node._notified_contains("run1:node1")
+
+
+# ---------------------------------------------------------------------------
+# B19: manager_reset_vars flag in node definition allowlist
+# ---------------------------------------------------------------------------
+
+def test_manager_reset_vars_in_node_definition():
+    from helm.agent.models import node_definition
+    node = {
+        "id": "n1", "title": "Mgr", "task": "approve", "type": "manager",
+        "ai": "claude", "children": [], "x": 0.0, "y": 0.0,
+        "manager_reset_vars": True,
+    }
+    defn = node_definition(node)
+    assert defn.get("manager_reset_vars") is True

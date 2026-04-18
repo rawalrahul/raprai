@@ -166,7 +166,7 @@ def node_definition(node: dict) -> dict:
         "file_op", "file_path", "deliver_channel", "deliver_to",
         "deliver_subject", "input_timeout", "loop_max", "retry_max",
         "transform_op", "transform_key", "transform_pattern", "transform_length",
-        "env_vars", "join_separator", "manager_max_iter",
+        "env_vars", "join_separator", "manager_max_iter", "manager_reset_vars",
         # A1: AI fallback fields
         "ai_fallback", "stuck_threshold",
     ):

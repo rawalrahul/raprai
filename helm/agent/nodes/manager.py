@@ -380,5 +380,9 @@ async def execute_manager_node(node: dict, run: dict, context: str) -> str:
                 rn["task"] = fix["new_task"]
 
         run["manager_iterations"] = iterations + 1
+        # B19: optionally clear vars accumulated by SET_VAR during the failed attempt.
+        # Default False preserves existing behavior (vars carry over across reruns).
+        if node.get("manager_reset_vars", False):
+            run["vars"] = {}
 
     return "RERUN"
