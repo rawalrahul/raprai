@@ -206,11 +206,14 @@ async def _execute_node(run: dict, node: dict, semaphore: asyncio.Semaphore):
                 if not items:
                     output = "(no items to iterate)"
             else:
-                from helm.ai_runner.core import process_message, is_backend_available, list_available_backends
+                from helm.ai_runner.core import process_message, is_backend_available, list_available_backends, resolve_ai_spec
+
+                # A6: resolve provider/model strings — "anthropic/claude-sonnet-4.6" → ("claude", "claude-sonnet-4.6")
+                ai_spec = node.get("ai", "claude")
+                requested_ai, _model_override = resolve_ai_spec(ai_spec)
 
                 # A1: availability-driven fallback — only triggers when selected
                 # backend is unavailable, not on task-level errors.
-                requested_ai = node.get("ai", "claude")
                 actual_ai = requested_ai
                 fallback_reason: str | None = None
 
@@ -228,12 +231,14 @@ async def _execute_node(run: dict, node: dict, semaphore: asyncio.Semaphore):
                             f"No AI backend available: {requested_ai} unavailable and no alternatives"
                         )
 
-                node["ai_requested"] = requested_ai
+                node["ai_requested"] = ai_spec  # store original spec
                 node["ai_used"] = actual_ai
                 if fallback_reason:
                     node["ai_fallback_reason"] = fallback_reason
 
                 child_sess = make_session(actual_ai, cwd=cwd)
+                if _model_override:
+                    child_sess["model"] = _model_override  # A6: pass model override
                 child_sess["agent_run_id"] = run["id"]
                 child_sess["agent_node_id"] = node["id"]
                 child_sess["agent_silent_telegram"] = True

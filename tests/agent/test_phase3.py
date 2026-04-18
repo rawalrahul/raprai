@@ -194,3 +194,42 @@ def test_webhook_rate_limit_constants():
     from helm.web_routes.agent_routes import _WEBHOOK_MIN_INTERVAL, _webhook_last_trigger
     assert _WEBHOOK_MIN_INTERVAL > 0
     assert isinstance(_webhook_last_trigger, dict)
+
+
+# ---------------------------------------------------------------------------
+# A6: Multi-model routing via provider strings
+# ---------------------------------------------------------------------------
+
+def test_resolve_ai_spec_plain():
+    from helm.ai_runner.core import resolve_ai_spec
+    assert resolve_ai_spec("claude") == ("claude", None)
+    assert resolve_ai_spec("ollama") == ("ollama", None)
+    assert resolve_ai_spec("gemini") == ("gemini", None)
+
+
+def test_resolve_ai_spec_anthropic_prefix():
+    from helm.ai_runner.core import resolve_ai_spec
+    backend, model = resolve_ai_spec("anthropic/claude-sonnet-4.6")
+    assert backend == "claude"
+    assert model == "claude-sonnet-4.6"
+
+
+def test_resolve_ai_spec_ollama_model():
+    from helm.ai_runner.core import resolve_ai_spec
+    backend, model = resolve_ai_spec("ollama/llama3.2")
+    assert backend == "ollama"
+    assert model == "llama3.2"
+
+
+def test_resolve_ai_spec_openrouter():
+    from helm.ai_runner.core import resolve_ai_spec
+    backend, model = resolve_ai_spec("openrouter/anthropic/claude-3")
+    assert backend == "openrouter"
+    assert model == "anthropic/claude-3"
+
+
+def test_resolve_ai_spec_unknown_provider():
+    from helm.ai_runner.core import resolve_ai_spec
+    backend, model = resolve_ai_spec("mistral/mistral-large")
+    assert backend == "mistral"
+    assert model == "mistral-large"
