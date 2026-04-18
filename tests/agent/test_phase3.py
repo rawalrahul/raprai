@@ -50,3 +50,37 @@ def test_setvar_heredoc_leading_trailing_blank_lines():
     text = "SET_VAR: data <<EOF\n\nfirst\nsecond\n\nEOF"
     result = extract_var_assignments(text)
     assert result == {"data": "first\nsecond"}
+
+
+# ---------------------------------------------------------------------------
+# B14: manager_max_iter floor to 1
+# ---------------------------------------------------------------------------
+
+def test_manager_max_iter_zero_floors_to_one():
+    """manager_max_iter=0 should behave same as 1 (not silent auto-approve)."""
+    from helm.agent.nodes.manager import _resolve_max_iter
+    assert _resolve_max_iter(0) == 1
+    assert _resolve_max_iter(1) == 1
+    assert _resolve_max_iter(5) == 5
+    assert _resolve_max_iter(None) is None   # skip manager
+    assert _resolve_max_iter(False) is None  # skip manager
+
+
+# ---------------------------------------------------------------------------
+# B17: TERMINAL_STATES constant in models.py
+# ---------------------------------------------------------------------------
+
+def test_terminal_states_constant_exists():
+    from helm.agent.models import TERMINAL_STATES
+    assert "completed" in TERMINAL_STATES
+    assert "failed" in TERMINAL_STATES
+    assert "timed_out" in TERMINAL_STATES
+
+
+def test_is_run_done_uses_terminal_states():
+    from helm.agent.models import is_run_done, TERMINAL_STATES
+    # Build minimal run dict
+    for status in TERMINAL_STATES:
+        nodes = [{"status": status}]
+        run = {"nodes": nodes}
+        assert is_run_done(run), f"Expected done for status={status}"
