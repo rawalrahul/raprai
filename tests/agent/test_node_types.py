@@ -173,7 +173,7 @@ def test_input_wait_notifies_telegram_for_ui_run():
     app = FakeApp()
     run_id = "run-test-telegram-input"
     notify_key = f"{run_id}:n1"
-    input_node_module._telegram_notified_runs.discard(notify_key)
+    input_node_module._notified_remove(notify_key)
     _st.telegram_app = app
     _st.telegram_chat_id = 12345
     try:
@@ -188,7 +188,7 @@ def test_input_wait_notifies_telegram_for_ui_run():
     finally:
         _st.telegram_app = old_app
         _st.telegram_chat_id = old_chat_id
-        input_node_module._telegram_notified_runs.discard(notify_key)
+        input_node_module._notified_remove(notify_key)
 
     assert app.bot.messages
     assert app.bot.messages[0]["chat_id"] == 12345
