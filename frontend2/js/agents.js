@@ -680,18 +680,56 @@ function openNodeModal(nodeId){
   _editingNodeId=nodeId;
   const ti=document.getElementById('node-title-inp');if(ti) ti.value=node.title||'';
   const ty=_ensureNodeTypeSelect();if(ty) ty.value=node.type||'ai';
-  const ai=document.getElementById('node-ai-sel');if(ai){_populateNodeAiSelect();ai.value=node.ai||'claude';}
+  // Handle openrouter/model split: node.ai may be "openrouter/anthropic/claude-sonnet-4-5"
+  const aiSpec=node.ai||'claude';
+  const isOr=aiSpec.startsWith('openrouter/');
+  const aiKey=isOr?'openrouter':aiSpec;
+  const orModel=isOr?aiSpec.slice('openrouter/'.length):'';
+  const ai=document.getElementById('node-ai-sel');
+  if(ai){
+    _populateNodeAiSelect(()=>{
+      ai.value=aiKey;
+      _toggleOpenRouterInput(aiKey);
+      const mi=document.getElementById('node-or-model-inp');if(mi) mi.value=orModel;
+    });
+  }
   const tk=document.getElementById('node-task-inp');if(tk) tk.value=node.task||'';
-  // Update modal title
   const mt=document.querySelector('#agent-node-modal .modal-title');
   if(mt) mt.textContent='Configure Step';
   document.getElementById('agent-node-modal').style.display='flex';
-  // Focus the title if empty
   if(ti&&!ti.value) ti.focus();
   else if(tk) tk.focus();
 }
 
-function _populateNodeAiSelect(){
+function _toggleOpenRouterInput(aiVal){
+  const wrap=document.getElementById('node-or-model-wrap');
+  if(!wrap) return;
+  wrap.style.display=(aiVal==='openrouter')?'block':'none';
+}
+
+function _ensureOpenRouterModelInput(){
+  if(document.getElementById('node-or-model-wrap')) return;
+  const ai=document.getElementById('node-ai-sel');
+  if(!ai||!ai.parentElement) return;
+  const wrap=document.createElement('div');
+  wrap.id='node-or-model-wrap';
+  wrap.style.cssText='margin-bottom:8px;display:none';
+  const label=document.createElement('label');
+  label.textContent='OpenRouter Model';
+  label.style.cssText='display:block;font-size:11px;color:#888;margin-bottom:4px';
+  const inp=document.createElement('input');
+  inp.type='text';
+  inp.id='node-or-model-inp';
+  inp.placeholder='e.g. anthropic/claude-sonnet-4-5  or  openai/gpt-4o';
+  inp.style.cssText='width:100%;box-sizing:border-box;background:#1a1a1a;color:#ccc;border:1px solid #333;border-radius:4px;padding:5px 8px;font-size:12px';
+  const hint=document.createElement('div');
+  hint.style.cssText='font-size:10px;color:#666;margin-top:3px';
+  hint.textContent='Full model list: openrouter.ai/models';
+  wrap.appendChild(label);wrap.appendChild(inp);wrap.appendChild(hint);
+  ai.parentElement.insertBefore(wrap,ai.nextSibling);
+}
+
+function _populateNodeAiSelect(cb){
   const sel=document.getElementById('node-ai-sel');if(!sel) return;
   const cur=sel.value;
   const _fill=()=>{
@@ -699,6 +737,12 @@ function _populateNodeAiSelect(){
     const add=(v,t)=>{const o=document.createElement('option');o.value=v;o.textContent=t;sel.appendChild(o);};
     (_availableAis||[{key:'claude',name:'Claude Code'}]).forEach(a=>add(a.key,a.name));
     sel.value=cur||'claude';
+    _ensureOpenRouterModelInput();
+    if(!sel._orListenerAdded){
+      sel.addEventListener('change',()=>_toggleOpenRouterInput(sel.value));
+      sel._orListenerAdded=true;
+    }
+    if(cb) cb();
   };
   if(_availableAis){_fill();}else{_loadAvailableAis(_fill);}
 }
@@ -733,7 +777,17 @@ function saveNodeModal(){
   const node=_builderNodes.find(n=>n.id===_editingNodeId);if(!node) return;
   const ti=document.getElementById('node-title-inp');if(ti) node.title=ti.value.trim()||'Step';
   const ty=document.getElementById('node-type-sel');if(ty) node.type=ty.value||'ai';
-  const ai=document.getElementById('node-ai-sel');if(ai) node.ai=ai.value||'claude';
+  const ai=document.getElementById('node-ai-sel');
+  if(ai){
+    const aiVal=ai.value||'claude';
+    if(aiVal==='openrouter'){
+      const mi=document.getElementById('node-or-model-inp');
+      const model=(mi&&mi.value.trim())||'anthropic/claude-sonnet-4-5';
+      node.ai='openrouter/'+model;
+    } else {
+      node.ai=aiVal;
+    }
+  }
   const tk=document.getElementById('node-task-inp');if(tk) node.task=tk.value;
   closeNodeModal();_renderBuilderCanvas();
 }

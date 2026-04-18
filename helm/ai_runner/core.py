@@ -172,6 +172,9 @@ def is_backend_available(ai_key: str) -> bool:
         result = bool(shutil.which("claude"))
     elif ai_key == "ollama":
         result = bool(shutil.which("ollama"))
+    elif ai_key == "openrouter":
+        # OpenRouter uses HTTP API — available when API key is set
+        result = bool(os.environ.get("OPENROUTER_API_KEY", "").strip())
     else:
         # Registered integration — check CLI binary
         info = _st.integrations.get(ai_key)
