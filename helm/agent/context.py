@@ -57,14 +57,72 @@ def substitute_vars(text: str, run: dict) -> str:
 
 def extract_var_assignments(output: str) -> dict:
     """
-    Parse SET_VAR: key = value lines from node output.
-    Returns dict of assignments.
+    Parse SET_VAR directives from node output. Supports three forms:
+
+    1. Plain:   SET_VAR: key = plain value
+    2. Quoted:  SET_VAR: key = "value with = signs and spaces"
+                (outer quotes stripped; escaped \" kept as-is)
+    3. Heredoc: SET_VAR: key <<DELIM
+                line1
+                line2
+                DELIM
+                (value = body between delimiter lines, leading/trailing
+                blank lines stripped)
+
+    Returns a dict of {key: value} assignments.
     """
+    if not output:
+        return {}
+
     result = {}
-    for line in (output or "").splitlines():
-        m = _re.match(r"SET_VAR\s*:\s*(\w+)\s*=\s*(.+)", line.strip(), _re.IGNORECASE)
+    # Track character spans consumed by heredoc matches so pass 2 skips them.
+    heredoc_spans: list[tuple[int, int]] = []
+
+    # Pass 1 — heredoc blocks (multi-line, must go first).
+    heredoc_pat = _re.compile(
+        r"SET_VAR\s*:\s*(\w+)\s*<<(\w+)\n(.*?)\n\2",
+        _re.IGNORECASE | _re.DOTALL,
+    )
+    for m in heredoc_pat.finditer(output):
+        key = m.group(1)
+        body = m.group(3)
+        # Strip leading/trailing blank lines from body.
+        lines = body.split("\n")
+        # Remove leading blank lines.
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        # Remove trailing blank lines.
+        while lines and not lines[-1].strip():
+            lines.pop()
+        result[key] = "\n".join(lines)
+        heredoc_spans.append((m.start(), m.end()))
+
+    def _in_heredoc(pos: int) -> bool:
+        return any(start <= pos < end for start, end in heredoc_spans)
+
+    # Pass 2 — line-by-line for quoted and plain forms.
+    offset = 0
+    for line in output.splitlines(keepends=True):
+        line_start = offset
+        offset += len(line)
+        # Skip lines that are part of a heredoc block.
+        if _in_heredoc(line_start):
+            continue
+        stripped = line.strip()
+        # Quoted form: SET_VAR: key = "..."
+        m = _re.match(
+            r'SET_VAR\s*:\s*(\w+)\s*=\s*"((?:[^"\\]|\\.)*)"',
+            stripped,
+            _re.IGNORECASE,
+        )
         if m:
-            result[m.group(1).strip()] = m.group(2).strip()
+            result[m.group(1)] = m.group(2)
+            continue
+        # Plain form: SET_VAR: key = value
+        m = _re.match(r"SET_VAR\s*:\s*(\w+)\s*=\s*(.+)", stripped, _re.IGNORECASE)
+        if m:
+            result[m.group(1)] = m.group(2).strip()
+
     return result
 
 
