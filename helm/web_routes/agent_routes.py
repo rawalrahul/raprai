@@ -8,14 +8,23 @@ import asyncio
 import os
 import time
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, File, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 import helm.state as _st
 from helm.config import logger
 from helm.agent.models import (
+    ensure_manager_node as _ensure_manager_node,
     make_agent, make_node, node_definition,
-    run_state_payload, agent_slug, make_webhook_token,
+    run_state_payload, agent_slug, make_webhook_token, workflow_root_nodes,
+)
+from helm.agent.repair import (
+    choose_node_ai as _repair_choose_node_ai,
+    description_needs_initial_input as _repair_description_needs_initial_input,
+    initial_input_question as _repair_initial_input_question,
+    looks_like_fake_input_instruction as _repair_looks_like_fake_input_instruction,
+    looks_like_input_step as _repair_looks_like_input_step,
+    repair_agent_graph as _repair_agent_graph_core,
 )
 from helm.agent.storage import (
     save_agent, delete_agent, save_run, load_recent_runs, load_run,
@@ -36,6 +45,27 @@ async def list_agents():
     for ag in sorted(_st.agents.values(), key=lambda a: a.get("created_at", 0), reverse=True):
         items.append(_agent_summary(ag))
     return JSONResponse({"agents": items})
+
+
+@router.get("/api/agents/templates")
+async def list_agent_templates():
+    """List built-in agent workflow templates."""
+    import glob as _glob, json as _json, os as _os
+    template_dir = _os.path.join(_os.path.dirname(__file__), '..', 'agent', 'templates')
+    templates = []
+    for path in _glob.glob(_os.path.join(template_dir, '*.json')):
+        try:
+            with open(path, encoding="utf-8") as f:
+                t = _json.load(f)
+            templates.append({
+                "name": t.get("name", ""),
+                "description": t.get("description", ""),
+                "node_count": len(t.get("nodes", [])),
+                "template": t,
+            })
+        except Exception:
+            pass
+    return JSONResponse({"templates": templates})
 
 
 @router.get("/api/agents/{agent_id}")
@@ -64,6 +94,7 @@ async def create_agent(request: Request):
         description=body.get("description", ""),
         nodes=[_parse_node(n) for n in body.get("nodes", [])],
     )
+    _ensure_manager_node(ag["nodes"], manager_title=name)
 
     # Apply trigger overrides from body
     _apply_trigger(ag, body.get("trigger", {}))
@@ -88,6 +119,7 @@ async def update_agent(agent_id: str, request: Request):
         ag["description"] = body["description"]
     if "nodes" in body:
         ag["nodes"] = [_parse_node(n) for n in body["nodes"]]
+        _ensure_manager_node(ag["nodes"], manager_title=ag["name"])
     if "trigger" in body:
         _apply_trigger(ag, body["trigger"])
 
@@ -125,8 +157,21 @@ async def run_agent(agent_id: str, request: Request):
     from helm.session_mgr import focused_session
     fs = focused_session()
     session_id = body.get("session_id") or (fs["id"] if fs else None)
+    input_data = body.get("input_data") or None
 
-    run = await trigger_agent_run(agent_id, trigger="ui", session_id=session_id)
+    ag = _st.agents.get(agent_id)
+    if ag and input_data is None and _agent_requires_initial_input(ag):
+        return JSONResponse({
+            "needs_input": True,
+            "question": _agent_initial_input_question(ag),
+        })
+
+    run = await trigger_agent_run(
+        agent_id,
+        trigger="ui",
+        session_id=session_id,
+        input_data=input_data,
+    )
     if not run:
         return JSONResponse({"error": "Agent not found or has no nodes"}, status_code=404)
 
@@ -154,7 +199,7 @@ async def cancel_run(agent_id: str, run_id: str):
 
     from helm.agent.executor import broadcast_run_update
     await broadcast_run_update(run)
-    save_run(run)
+    await save_run(run)
 
     return JSONResponse({"ok": True})
 
@@ -204,17 +249,96 @@ async def get_run(run_id: str):
 # ---------------------------------------------------------------------------
 
 @router.post("/api/agents/webhook/{token}")
-async def webhook_trigger(token: str):
-    """Trigger an agent via its webhook token."""
+async def webhook_trigger(token: str, request: Request):
+    """Trigger an agent via its webhook token. Request body becomes input_data."""
+    body_bytes = await request.body()
+    input_data = body_bytes.decode("utf-8", errors="replace").strip() or None
+
     for ag in _st.agents.values():
         webhook = ag.get("trigger", {}).get("webhook", {})
         if webhook.get("enabled") and webhook.get("token") == token:
-            run = await trigger_agent_run(ag["id"], trigger="webhook")
+            run = await trigger_agent_run(
+                ag["id"],
+                trigger="webhook",
+                input_data=input_data,
+            )
             if run:
                 return JSONResponse({"ok": True, "run_id": run["id"]})
             return JSONResponse({"error": "Agent has no nodes"}, status_code=400)
 
     return JSONResponse({"error": "Invalid webhook token"}, status_code=404)
+
+
+@router.post("/api/agents/runs/{run_id}/resume")
+async def resume_agent_run(run_id: str, request: Request):
+    """Resume a run waiting for human input."""
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    user_input = (body.get("input") or "").strip()
+    if not user_input:
+        return JSONResponse({"error": "input is required"}, status_code=400)
+
+    from helm.agent.nodes.input_node import resume_run
+    if not resume_run(run_id, user_input):
+        return JSONResponse({"error": "Run not waiting for input"}, status_code=400)
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/agents/input-file")
+async def upload_agent_input_file(file: UploadFile = File(...)):
+    """Upload a file for an agent input node and return extractable text."""
+    from helm.config import _DEFAULT_CWD
+    from helm.security import MAX_UPLOAD_SIZE, validate_upload
+
+    filename = file.filename or f"agent_input_{int(time.time())}"
+    try:
+        data = await file.read()
+    except Exception as exc:
+        return JSONResponse({"error": f"Failed to read upload: {exc}"}, status_code=400)
+
+    error = validate_upload(filename, len(data))
+    if error:
+        return JSONResponse({"error": error}, status_code=400)
+    if len(data) > MAX_UPLOAD_SIZE:
+        return JSONResponse(
+            {"error": f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024*1024)} MB."},
+            status_code=413,
+        )
+
+    from helm.session_mgr import focused_session
+    fs = focused_session()
+    cwd = fs.get("cwd", _DEFAULT_CWD) if fs else _DEFAULT_CWD
+    safe_name = os.path.basename(filename)
+    if not safe_name or safe_name.startswith("."):
+        safe_name = f"agent_input_{int(time.time())}"
+    save_path = os.path.join(cwd, safe_name)
+    resolved = os.path.realpath(save_path)
+    if not resolved.startswith(os.path.realpath(cwd)):
+        return JSONResponse({"error": "Invalid upload path"}, status_code=400)
+
+    try:
+        with open(save_path, "wb") as f:
+            f.write(data)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    extracted = _extract_agent_input_file_text(save_path, safe_name)
+    input_text = (
+        f"Uploaded file: {safe_name}\n"
+        f"Saved path: {save_path}\n\n"
+        f"=== Extracted File Text ===\n{extracted}\n=== End Extracted File Text ==="
+    )
+    return JSONResponse({
+        "filename": safe_name,
+        "path": save_path,
+        "size": len(data),
+        "text": extracted,
+        "input_text": input_text,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -239,8 +363,9 @@ async def generate_agent_graph(request: Request):
 The user wants to build an agent that does the following:
 {description}
 
-Return a JSON array of steps (nodes) for this agent. Each step is an object with:
+Return a JSON array of up to 7 workflow steps (nodes). The backend will add the supervisory Manager node automatically. Each step is an object with:
 - "title": short display name (max 50 chars)
+- "type": one of "ai", "shell", "http", "file", "deliver", "input", "condition", "loop", "transform", "join"
 - "task": detailed instructions for the AI executing this step (1-3 sentences)
 - "ai": which AI to use — "claude", "gemini", or "ollama"
 - "children": array of titles of steps that should come AFTER this one (direct children only)
@@ -248,17 +373,32 @@ Return a JSON array of steps (nodes) for this agent. Each step is an object with
 - "y": vertical canvas position (start at 100, add 150 per row)
 
 Rules:
-- Max 8 nodes
+- Use "input" where user data or approval is required.
+- Use "ai" for reasoning/research/writing/ranking, "shell" for local CLI, "http" for APIs, "file" for files, "condition" for branches, "loop" for repeated item processing, "transform" for cheap data cleanup, "join" for merging branches, and "deliver" for final delivery.
+- Add RETRY_PARENT guidance to validation/review nodes when quality matters.
+- Include optional config fields only when useful: retry_max, loop_max, timeout, http_method, http_url, file_op, file_path, deliver_channel, deliver_to, input_timeout, transform_op, transform_key, transform_pattern, transform_length, join_separator, manager_max_iter, env_vars.
 - Max 3 children per node
 - Keep it focused and practical
 - Use claude for code/analysis, gemini for research/web, ollama for local tasks
+- Do not create a hardcoded example agent. Create a reusable workflow structure that asks the user for the missing inputs at execution time.
+- Do not include a Manager node; it is added automatically above the workflow and supervises the executable root nodes.
 
 Respond with ONLY a valid JSON array, no markdown, no explanation."""
 
     try:
         from helm.pipeline.planner import _call_planner_ai
         from helm.session_mgr import session_cwd
-        result = await _call_planner_ai(planner_ai, prompt, session_cwd())
+        timeout = float(os.environ.get("AGENT_GENERATION_TIMEOUT", "600"))
+        result = await asyncio.wait_for(
+            _call_planner_ai(planner_ai, prompt, session_cwd()),
+            timeout=timeout if timeout > 0 else None,
+        )
+    except asyncio.TimeoutError:
+        logger.error("Agent graph generation timed out after %ss", timeout)
+        return JSONResponse(
+            {"error": f"Agent generation timed out after {int(timeout)} seconds. Try a shorter description or switch the planner AI in Settings."},
+            status_code=504,
+        )
     except Exception as exc:
         logger.error("Agent graph generation failed: %s", exc)
         return JSONResponse({"error": f"AI generation failed: {exc}"}, status_code=500)
@@ -277,6 +417,7 @@ Respond with ONLY a valid JSON array, no markdown, no explanation."""
     # Convert title-based children references to IDs
     nodes = []
     title_to_id: dict[str, str] = {}
+    normalized_title_to_id: dict[str, str] = {}
     for raw in raw_nodes:
         node = make_node(
             title=str(raw.get("title", "Step"))[:60],
@@ -284,19 +425,156 @@ Respond with ONLY a valid JSON array, no markdown, no explanation."""
             ai=str(raw.get("ai", "claude")),
             x=float(raw.get("x", 100)),
             y=float(raw.get("y", 100)),
+            node_type=str(raw.get("type", "ai")),
         )
+        for key in (
+            "timeout", "http_method", "http_url", "http_headers", "http_body",
+            "file_op", "file_path", "deliver_channel", "deliver_to",
+            "deliver_subject", "input_timeout", "loop_max", "retry_max",
+            "transform_op", "transform_key", "transform_pattern", "transform_length",
+            "env_vars", "join_separator", "manager_max_iter",
+        ):
+            if key in raw:
+                node[key] = raw[key]
         title_to_id[raw.get("title", "")] = node["id"]
+        normalized_title_to_id[_normalize_node_title(raw.get("title", ""))] = node["id"]
         node["_children_titles"] = raw.get("children", [])
         nodes.append(node)
 
     for node in nodes:
         children_titles = node.pop("_children_titles", [])
         node["children"] = [
-            title_to_id[t] for t in children_titles if t in title_to_id
+            title_to_id.get(t) or normalized_title_to_id.get(_normalize_node_title(t))
+            for t in children_titles
+            if title_to_id.get(t) or normalized_title_to_id.get(_normalize_node_title(t))
         ][:3]
+
+    _repair_generated_agent_graph(description, nodes)
+    _ensure_manager_node(nodes)
 
     logger.info("Agent graph generation: returned %d nodes for description len=%d", len(nodes), len(description))
     return JSONResponse({"nodes": [node_definition(n) for n in nodes]})
+
+
+# ---------------------------------------------------------------------------
+# Builder chat — iterative graph editing via natural language
+# ---------------------------------------------------------------------------
+
+@router.post("/api/agents/builder-chat")
+async def builder_chat(request: Request):
+    """
+    Accept a natural-language instruction + current node graph + conversation
+    history.  Return updated nodes + a human-readable reply.
+
+    The frontend replaces _builderNodes wholesale on success and re-renders.
+    Manager node is always re-injected if the AI drops it.
+    """
+    import json as _json, re as _re
+
+    body = await request.json()
+    description = (body.get("description") or "").strip()
+    nodes_raw = body.get("nodes") or []
+    history = (body.get("history") or [])[-20:]   # last 10 exchanges
+    message = (body.get("message") or "").strip()
+
+    if not message:
+        return JSONResponse({"error": "message is required"}, status_code=400)
+
+    nodes_json = _json.dumps(nodes_raw, indent=2, ensure_ascii=False)
+
+    system = f"""You are an expert workflow builder assistant editing an agent node graph.
+
+{"Original description: " + description if description else "This is a manually built agent."}
+
+Current workflow nodes (JSON):
+{nodes_json}
+
+Node types: ai, shell, http, file, deliver, input, condition, loop, transform, join, manager
+  ai        — reasoning / writing / analysis (ai field: claude | gemini | ollama)
+  shell     — run CLI commands
+  http      — call external APIs
+  file      — read/write files
+  deliver   — send results (email, telegram…)
+  input     — pause and ask user for input
+  condition — branch on yes/no
+  loop      — iterate over a list
+  transform — cheap data manipulation (no AI call)
+  join      — merge multiple parallel branches
+  manager   — NEVER REMOVE — supervises workflow, handles node failures, collects user feedback, triggers reruns automatically
+
+RULES:
+1. Return ALL nodes (not just changed ones) — frontend does a full replace.
+2. Preserve existing node IDs for unchanged nodes. New nodes: generate a unique random 10-char hex string as id.
+3. Keep x/y of unchanged nodes. Place new nodes near their neighbours (+220 x, same y).
+4. Every children entry must be a valid id present in the returned array.
+5. NEVER remove or omit the Manager node. If the user asks, keep it and explain in reply.
+6. Max 3 children per node.
+7. AI selection: claude for code/analysis, gemini for research/web, ollama for local tasks.
+
+Respond with ONLY valid JSON, no markdown, no code fences:
+{{"reply": "<human explanation of changes>", "nodes": [<complete updated node array>]}}"""
+
+    # Build conversation string
+    conv_lines = []
+    for h in history:
+        role = "USER" if h.get("role") == "user" else "ASSISTANT"
+        conv_lines.append(f"{role}: {h.get('content', '')}")
+    conv_lines.append(f"USER: {message}")
+    full_prompt = system + "\n\n" + "\n\n".join(conv_lines)
+
+    planner_ai = os.environ.get("PIPELINE_PLANNER_AI", "claude")
+    try:
+        from helm.pipeline.planner import _call_planner_ai
+        from helm.session_mgr import session_cwd
+        timeout = float(os.environ.get("BUILDER_CHAT_TIMEOUT", "120"))
+        result = await asyncio.wait_for(
+            _call_planner_ai(planner_ai, full_prompt, session_cwd()),
+            timeout=timeout if timeout > 0 else None,
+        )
+    except asyncio.TimeoutError:
+        return JSONResponse({"error": "Builder chat timed out — try rephrasing"}, status_code=504)
+    except Exception as exc:
+        logger.error("Builder chat AI call failed: %s", exc)
+        return JSONResponse({"error": f"AI call failed: {exc}"}, status_code=500)
+
+    # Parse {reply, nodes} from AI response
+    json_text = _re.sub(r"```(?:json)?\s*|\s*```", "", result).strip()
+    obj = None
+    try:
+        obj = _json.loads(json_text)
+    except _json.JSONDecodeError:
+        m = _re.search(r"\{.*\}", json_text, _re.DOTALL)
+        if m:
+            try:
+                obj = _json.loads(m.group(0))
+            except Exception:
+                pass
+    if not obj or not isinstance(obj.get("nodes"), list):
+        logger.error("Builder chat: could not parse AI response: %s", result[:400])
+        return JSONResponse(
+            {"error": "Could not parse AI response — try rephrasing or simplify the request"},
+            status_code=500,
+        )
+
+    reply = str(obj.get("reply", "Done."))
+    updated_nodes_raw = obj["nodes"]
+    if len(updated_nodes_raw) < 1:
+        return JSONResponse({"error": "AI returned empty node list — try rephrasing"}, status_code=500)
+
+    parsed = [_parse_node(n) for n in updated_nodes_raw]
+
+    # Guard: re-inject manager if AI dropped it
+    had_manager = any(n.get("type") == "manager" for n in nodes_raw)
+    has_manager = any(n.get("type") == "manager" for n in parsed)
+    if had_manager and not has_manager:
+        _ensure_manager_node(parsed)
+        reply += (" The Manager node was kept — it handles node failures, "
+                  "collects your feedback, and reruns the workflow automatically.")
+
+    return JSONResponse({
+        "reply": reply,
+        "nodes": [node_definition(n) for n in parsed],
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +618,154 @@ def _extract_json_array(text: str) -> list:
     return None
 
 
+def _normalize_node_title(title: str) -> str:
+    """Normalize generated node titles for fuzzy child-reference matching."""
+    import re
+    return re.sub(r"[^a-z0-9]+", "", str(title).lower())
+
+
+def _agent_requires_initial_input(agent: dict) -> bool:
+    """Return True when a saved agent should collect input before execution."""
+    nodes = agent.get("nodes", [])
+    if not nodes:
+        return False
+    roots = workflow_root_nodes(nodes) or [n for n in nodes if n.get("type") != "manager"][:1]
+    root_text = " ".join(f"{n.get('title', '')} {n.get('task', '')} {n.get('type', '')}" for n in roots).lower()
+    all_text = f"{agent.get('name', '')} {agent.get('description', '')} " + " ".join(
+        f"{n.get('title', '')} {n.get('task', '')}" for n in nodes
+    )
+    all_text = all_text.lower()
+    if any(n.get("type") == "input" for n in roots):
+        return True
+    # Legacy repair for job-finder agents that were saved before input nodes
+    # existed. Keep this intentionally narrow so ordinary agents still run.
+    job_terms = ("job", "career", "role", "position", "linkedin")
+    resume_terms = ("resume", "cv", "profile")
+    preference_terms = ("preferences", "criteria", "requirements")
+    if any(term in all_text for term in job_terms) and (
+        any(term in all_text for term in resume_terms)
+        or (any(term in root_text for term in preference_terms) and any(term in all_text for term in resume_terms))
+    ):
+        return True
+    return False
+
+
+def _agent_initial_input_question(agent: dict) -> str:
+    """Question shown before starting an input-requiring agent."""
+    nodes = agent.get("nodes", [])
+    roots = workflow_root_nodes(nodes) or [n for n in nodes if n.get("type") != "manager"][:1]
+    for node in roots:
+        if node.get("type") == "input" and node.get("task"):
+            return node["task"]
+    text = f"{agent.get('name', '')} {agent.get('description', '')} " + " ".join(
+        f"{n.get('title', '')} {n.get('task', '')}" for n in nodes
+    )
+    return _initial_input_question(text)
+
+
+def _repair_generated_agent_graph(description: str, nodes: list[dict]) -> None:
+    """
+    Make generated workflow JSON executable instead of merely descriptive.
+
+    LLMs often create AI nodes that say "ask the user for X"; those must become
+    real input nodes, otherwise the workflow just fakes the interaction.
+    """
+    _repair_agent_graph_core(description, nodes)
+
+
+def _repair_generated_node(description: str, node: dict, index: int) -> None:
+    text = f"{node.get('title', '')} {node.get('task', '')}".lower()
+    node_type = str(node.get("type", "ai")).lower()
+    if node_type not in {"ai", "shell", "http", "file", "deliver", "input", "condition", "loop", "transform", "join", "manager"}:
+        node_type = "ai"
+
+    if _looks_like_input_step(text):
+        node_type = "input"
+        if not node.get("task") or _looks_like_fake_input_instruction(node.get("task", "")):
+            node["task"] = _initial_input_question(description)
+    elif "human" in text and any(word in text for word in ("review", "approval", "approve", "confirm", "clarify")):
+        node_type = "input"
+        node["task"] = node.get("task") or "Review the previous output and provide approval, corrections, or clarification."
+    elif any(word in text for word in ("loop", "iterate", "for each", "each job", "each item", "each listing")):
+        node_type = "loop"
+        node.setdefault("loop_max", 10)
+    elif any(word in text for word in ("condition", "decide whether", "branch")):
+        node_type = "condition"
+
+    node["type"] = node_type
+    node["ai"] = _choose_node_ai(node_type, text, node.get("ai"))
+
+    if node_type == "ai" and any(word in text for word in ("validate", "quality", "review", "check", "rank", "score")):
+        task = node.get("task", "")
+        if "RETRY_PARENT:" not in task:
+            node["task"] = (
+                task.rstrip()
+                + "\n\nIf the previous output is weak, incomplete, irrelevant, missing required details, or not usable, output exactly: RETRY_PARENT: <clear reason>."
+            )
+        node.setdefault("retry_max", 2)
+
+    if node_type in {"shell", "http"}:
+        node.setdefault("timeout", 60)
+    if node_type == "input":
+        node.setdefault("input_timeout", 3600)
+
+        if index == 0 and _description_needs_initial_input(description):
+            node["type"] = "input"
+            if _looks_like_fake_input_instruction(node.get("task", "")):
+                node["task"] = _initial_input_question(description)
+
+
+def _looks_like_input_step(text: str) -> bool:
+    return _repair_looks_like_input_step(text)
+
+
+def _looks_like_fake_input_instruction(task: str) -> bool:
+    return _repair_looks_like_fake_input_instruction(task)
+
+
+def _description_needs_initial_input(description: str) -> bool:
+    return _repair_description_needs_initial_input(description)
+
+
+def _initial_input_question(description: str) -> str:
+    return _repair_initial_input_question(description)
+
+
+def _extract_agent_input_file_text(path: str, filename: str) -> str:
+    """Best-effort text extraction for files uploaded into agent input nodes."""
+    ext = os.path.splitext(filename.lower())[1]
+    try:
+        if ext in {".txt", ".md", ".csv", ".json", ".log"}:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                return f.read()[:50000]
+        if ext == ".pdf":
+            try:
+                from pdfminer.high_level import extract_text
+            except ImportError:
+                return "(PDF uploaded, but pdfminer.six is not installed. Use the saved path above or install pdfminer.six.)"
+            return (extract_text(path) or "").strip()[:50000] or "(empty PDF)"
+        if ext == ".docx":
+            try:
+                from docx import Document
+            except ImportError:
+                return "(DOCX uploaded, but python-docx is not installed. Use the saved path above or install python-docx.)"
+            doc = Document(path)
+            text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+            return text[:50000] or "(empty DOCX)"
+        return "(file uploaded; automatic text extraction is not available for this file type. Use the saved path above.)"
+    except Exception as exc:
+        return f"(file uploaded, but text extraction failed: {exc})"
+
+
+def _choose_node_ai(node_type: str, text: str, requested_ai: str | None) -> str:
+    return _repair_choose_node_ai(node_type, text, requested_ai)
+
+
+def _short_title(title: str) -> str:
+    title = str(title or "Collect User Input").strip()
+    return title[:60] or "Collect User Input"
+
+
 def _agent_summary(ag: dict) -> dict:
     """Lightweight agent dict for list views."""
     return {
@@ -365,8 +791,18 @@ def _parse_node(raw: dict) -> dict:
         x=float(raw.get("x", 100)),
         y=float(raw.get("y", 100)),
         node_id=raw.get("id") or make_node_id(),
+        node_type=str(raw.get("type", "ai")),
     )
     node["children"] = [str(c) for c in raw.get("children", [])][:3]
+    for key in (
+        "timeout", "http_method", "http_url", "http_headers", "http_body",
+        "file_op", "file_path", "deliver_channel", "deliver_to",
+        "deliver_subject", "input_timeout", "loop_max", "retry_max",
+        "transform_op", "transform_key", "transform_pattern", "transform_length",
+        "env_vars", "join_separator", "manager_max_iter",
+    ):
+        if key in raw:
+            node[key] = raw[key]
     return node
 
 
@@ -380,9 +816,11 @@ def _apply_trigger(ag: dict, trigger_body: dict) -> None:
         trig["telegram"] = bool(trigger_body["telegram"])
 
     sched_body = trigger_body.get("schedule", {})
-    sched = trig.setdefault("schedule", {"enabled": False, "expression": "", "cron": "", "next_run": None})
+    sched = trig.setdefault("schedule", {"enabled": False, "expression": "", "cron": "", "next_run": None, "input_data": None})
     if "enabled" in sched_body:
         sched["enabled"] = bool(sched_body["enabled"])
+    if "input_data" in sched_body:
+        sched["input_data"] = sched_body["input_data"] or None
     if "expression" in sched_body:
         expr = (sched_body["expression"] or "").strip()
         sched["expression"] = expr

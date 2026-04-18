@@ -332,7 +332,7 @@ async def _execute_node(run: dict, node: dict, semaphore: asyncio.Semaphore):
             if not (run.get("timed_out") or run.get("status") == "cancelled"):
                 try:
                     from .storage import save_run
-                    await asyncio.to_thread(save_run, run)
+                    await save_run(run)
                 except Exception as e:
                     logger.warning("Could not save agent run: %s", e)
 
@@ -603,7 +603,7 @@ async def execute_agent_run(run_id: str) -> None:
 
         try:
             from .storage import save_run
-            await asyncio.to_thread(save_run, run)
+            await save_run(run)
         except Exception as e:
             logger.warning("Could not save final agent run: %s", e)
 

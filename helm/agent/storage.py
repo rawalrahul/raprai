@@ -11,6 +11,7 @@ Public API:
   load_recent_runs(agent_id, limit=20) → list[dict]
 """
 
+import asyncio
 import json
 import time
 
@@ -19,6 +20,10 @@ from helm.config import logger
 from helm.db import get_db
 
 from .models import node_runtime_snapshot
+
+# Module-level write lock — serialises all INSERT/UPDATE/DELETE calls so that
+# concurrent async coroutines cannot interleave writes on the same connection.
+_WRITE_LOCK = asyncio.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -56,7 +61,14 @@ def save_agent(agent: dict) -> None:
         saveable = dict(agent)
         saveable["nodes"] = [
             {k: v for k, v in n.items()
-             if k in ("id", "title", "task", "ai", "children", "x", "y")}
+             if k in (
+                 "id", "title", "task", "type", "ai", "children", "x", "y",
+                 "timeout", "http_method", "http_url", "http_headers", "http_body",
+                 "file_op", "file_path", "deliver_channel", "deliver_to",
+                 "deliver_subject", "input_timeout", "loop_max", "retry_max",
+                 "transform_op", "transform_key", "transform_pattern", "transform_length",
+                 "env_vars", "join_separator", "manager_max_iter",
+             )}
             for n in agent.get("nodes", [])
         ]
         db.execute(
@@ -92,27 +104,28 @@ def delete_agent(agent_id: str) -> None:
 # Agent runs
 # ---------------------------------------------------------------------------
 
-def save_run(run: dict) -> None:
-    """Upsert a run into the agent_runs table."""
-    try:
-        db = get_db()
-        db.execute(
-            """INSERT OR REPLACE INTO agent_runs
-               (id, agent_id, status, trigger, result_json, started_at, completed_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (
-                run["id"],
-                run["agent_id"],
-                run["status"],
-                run["trigger"],
-                json.dumps(run, ensure_ascii=False),
-                run["started_at"],
-                run.get("completed_at"),
-            ),
-        )
-        db.commit()
-    except Exception as exc:
-        logger.warning("Could not save agent run %s: %s", run.get("id", "?"), exc)
+async def save_run(run: dict) -> None:
+    """Upsert a run into the agent_runs table (async, serialised by _WRITE_LOCK)."""
+    async with _WRITE_LOCK:
+        try:
+            db = get_db()
+            db.execute(
+                """INSERT OR REPLACE INTO agent_runs
+                   (id, agent_id, status, trigger, result_json, started_at, completed_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    run["id"],
+                    run["agent_id"],
+                    run["status"],
+                    run["trigger"],
+                    json.dumps(run, ensure_ascii=False),
+                    run["started_at"],
+                    run.get("completed_at"),
+                ),
+            )
+            db.commit()
+        except Exception as exc:
+            logger.warning("Could not save agent run %s: %s", run.get("id", "?"), exc)
 
 
 def load_recent_runs(agent_id: str, limit: int = 20) -> list[dict]:

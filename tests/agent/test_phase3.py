@@ -84,3 +84,29 @@ def test_is_run_done_uses_terminal_states():
         nodes = [{"status": status}]
         run = {"nodes": nodes}
         assert is_run_done(run), f"Expected done for status={status}"
+
+
+# ---------------------------------------------------------------------------
+# B15: WAL mode + asyncio.Lock for save_run race condition
+# ---------------------------------------------------------------------------
+
+def test_concurrent_save_run_no_error():
+    """Concurrent save_run calls must not raise SQLite errors."""
+    import asyncio
+    from helm.agent.storage import save_run
+
+    run = {
+        "id": "test_race_001",
+        "agent_id": "a1",
+        "status": "running",
+        "trigger": "ui",
+        "nodes": [],
+        "started_at": 1735689600.0,
+        "vars": {},
+    }
+
+    async def _run():
+        # Fire multiple concurrent saves — should all succeed without SQLite errors
+        await asyncio.gather(*[save_run(dict(run)) for _ in range(5)])
+
+    asyncio.run(_run())
