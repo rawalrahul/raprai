@@ -7,7 +7,29 @@ import asyncio
 _pending_inputs: dict[tuple[str, str | None], asyncio.Future] = {}
 # session_id → (run_id, node_id) so resume-by-session knows exactly which node to resolve.
 _pending_input_sessions: dict[str, tuple[str, str | None]] = {}
-_telegram_notified_runs: set[str] = set()
+from collections import deque as _deque
+
+_NOTIFIED_MAX = 1000
+_telegram_notified_queue: _deque[str] = _deque()
+_telegram_notified_set: set[str] = set()
+
+
+def _notified_add(key: str) -> None:
+    if key in _telegram_notified_set:
+        return
+    _telegram_notified_set.add(key)
+    _telegram_notified_queue.append(key)
+    while len(_telegram_notified_queue) > _NOTIFIED_MAX:
+        oldest = _telegram_notified_queue.popleft()
+        _telegram_notified_set.discard(oldest)
+
+
+def _notified_contains(key: str) -> bool:
+    return key in _telegram_notified_set
+
+
+def _notified_remove(key: str) -> None:
+    _telegram_notified_set.discard(key)
 
 
 def _find_pending_key(run_id: str, node_id: str | None = None) -> tuple[str, str | None] | None:
@@ -33,6 +55,7 @@ async def wait_for_input(run_id: str, timeout: int = 3600, node_id: str | None =
         return f"(timed out after {timeout}s - no user input received)"
     finally:
         _pending_inputs.pop(key, None)
+        _notified_remove(f"{run_id}:{node_id}")
         for session_id, pending in list(_pending_input_sessions.items()):
             if pending == key:
                 _pending_input_sessions.pop(session_id, None)
@@ -114,7 +137,7 @@ async def _notify_telegram_input_needed(
     """Send an actual Telegram bot message when a run is blocked on input."""
     run_id = run.get("id")
     notify_key = f"{run_id}:{node.get('id')}"
-    if not run_id or notify_key in _telegram_notified_runs:
+    if not run_id or _notified_contains(notify_key):
         return
     try:
         import helm.state as _st
@@ -143,7 +166,7 @@ async def _notify_telegram_input_needed(
             text=text,
             reply_markup=reply_markup,
         )
-        _telegram_notified_runs.add(notify_key)
+        _notified_add(notify_key)
 
         try:
             from helm.broadcast import push_message

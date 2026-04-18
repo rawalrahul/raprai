@@ -15,6 +15,22 @@ import json
 import re
 from helm.config import logger
 
+def _resolve_max_iter(value) -> int | None:
+    """Resolve manager_max_iter to a safe integer or None (skip manager).
+
+    Rules:
+    - None or False  → None  (caller should skip manager entirely, no-op pass-through)
+    - 0 or negative  → 1    (floor to 1; 0 would silently auto-approve, which is a foot-gun)
+    - positive int   → value (use as-is)
+    """
+    if value is None or value is False:
+        return None
+    value = int(value)
+    if value <= 0:
+        return 1
+    return value
+
+
 APPROVAL_KEYWORDS = {
     "yes", "yep", "yeah", "ok", "okay", "approved", "approve",
     "lgtm", "looks good", "good", "great", "perfect", "done",
@@ -231,8 +247,12 @@ async def execute_manager_node(node: dict, run: dict, context: str) -> str:
     from helm.agent.nodes.input_node import wait_for_input
     import helm.state as _st
 
-    max_iter = node.get("manager_max_iter", 3)
+    max_iter = _resolve_max_iter(node.get("manager_max_iter", 3))
     iterations = run.get("manager_iterations", 0)
+
+    # If max_iter resolved to None, skip manager entirely (pass-through).
+    if max_iter is None:
+        return "APPROVED"
 
     if iterations >= max_iter:
         logger.info("Manager node: max iterations (%d) reached — auto-approving", max_iter)
@@ -360,5 +380,9 @@ async def execute_manager_node(node: dict, run: dict, context: str) -> str:
                 rn["task"] = fix["new_task"]
 
         run["manager_iterations"] = iterations + 1
+        # B19: optionally clear vars accumulated by SET_VAR during the failed attempt.
+        # Default False preserves existing behavior (vars carry over across reruns).
+        if node.get("manager_reset_vars", False):
+            run["vars"] = {}
 
     return "RERUN"

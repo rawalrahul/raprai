@@ -195,6 +195,37 @@ def list_available_backends(exclude: str | None = None) -> list[str]:
     return [k for k in candidates if k != exclude and is_backend_available(k)]
 
 
+def resolve_ai_spec(ai_spec: str) -> tuple[str, str | None]:
+    """A6: Parse provider/model strings into (backend_key, model_override).
+
+    Accepts:
+      "claude"                          → ("claude", None)
+      "anthropic/claude-sonnet-4.6"     → ("claude", "claude-sonnet-4.6")
+      "ollama/llama3.2"                 → ("ollama", "llama3.2")
+      "openrouter/anthropic/claude-3"   → ("openrouter", "anthropic/claude-3")
+      "gemini/gemini-2.0-flash"         → ("gemini", "gemini-2.0-flash")
+      any other "provider/model"        → (provider, model) — dispatched via integrations
+    """
+    if not ai_spec or "/" not in ai_spec:
+        return ai_spec, None
+
+    parts = ai_spec.split("/", 1)
+    provider, model = parts[0].lower(), parts[1]
+
+    # Map provider aliases to known backend keys
+    _PROVIDER_MAP = {
+        "anthropic": "claude",
+        "claude": "claude",
+        "ollama": "ollama",
+        "gemini": "gemini",
+        "google": "gemini",
+        "openrouter": "openrouter",
+        "codex": "codex",
+    }
+    backend = _PROVIDER_MAP.get(provider, provider)
+    return backend, model
+
+
 def _find_available_ais(exclude: str) -> list[str]:
     """Return a list of available AI keys, excluding the failed one.
 

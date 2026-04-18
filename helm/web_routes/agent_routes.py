@@ -33,6 +33,36 @@ from helm.agent.runner import trigger_agent_run
 
 router = APIRouter()
 
+# B8: cycle detection — reject graphs with A→B→A cycles on save
+def _has_cycle(nodes: list[dict]) -> bool:
+    """DFS cycle detection on node children graph. Returns True if any cycle found."""
+    children_map: dict[str, list[str]] = {n["id"]: list(n.get("children", [])) for n in nodes}
+    visited: set[str] = set()
+    in_stack: set[str] = set()
+
+    def dfs(node_id: str) -> bool:
+        visited.add(node_id)
+        in_stack.add(node_id)
+        for child_id in children_map.get(node_id, []):
+            if child_id not in visited:
+                if dfs(child_id):
+                    return True
+            elif child_id in in_stack:
+                return True
+        in_stack.discard(node_id)
+        return False
+
+    for node_id in children_map:
+        if node_id not in visited:
+            if dfs(node_id):
+                return True
+    return False
+
+
+# B18: per-agent webhook throttle — track last trigger time
+_webhook_last_trigger: dict[str, float] = {}
+_WEBHOOK_MIN_INTERVAL = 5.0  # seconds
+
 
 # ---------------------------------------------------------------------------
 # List / Get agents
@@ -89,10 +119,13 @@ async def create_agent(request: Request):
     if not name:
         return JSONResponse({"error": "name is required"}, status_code=400)
 
+    parsed_nodes = [_parse_node(n) for n in body.get("nodes", [])]
+    if _has_cycle(parsed_nodes):
+        return JSONResponse({"error": "Workflow graph contains a cycle"}, status_code=400)
     ag = make_agent(
         name=name,
         description=body.get("description", ""),
-        nodes=[_parse_node(n) for n in body.get("nodes", [])],
+        nodes=parsed_nodes,
     )
     _ensure_manager_node(ag["nodes"], manager_title=name)
 
@@ -118,7 +151,10 @@ async def update_agent(agent_id: str, request: Request):
     if "description" in body:
         ag["description"] = body["description"]
     if "nodes" in body:
-        ag["nodes"] = [_parse_node(n) for n in body["nodes"]]
+        parsed_nodes = [_parse_node(n) for n in body["nodes"]]
+        if _has_cycle(parsed_nodes):
+            return JSONResponse({"error": "Workflow graph contains a cycle"}, status_code=400)
+        ag["nodes"] = parsed_nodes
         _ensure_manager_node(ag["nodes"], manager_title=ag["name"])
     if "trigger" in body:
         _apply_trigger(ag, body["trigger"])
@@ -199,7 +235,7 @@ async def cancel_run(agent_id: str, run_id: str):
 
     from helm.agent.executor import broadcast_run_update
     await broadcast_run_update(run)
-    save_run(run)
+    await save_run(run)
 
     return JSONResponse({"ok": True})
 
@@ -257,6 +293,16 @@ async def webhook_trigger(token: str, request: Request):
     for ag in _st.agents.values():
         webhook = ag.get("trigger", {}).get("webhook", {})
         if webhook.get("enabled") and webhook.get("token") == token:
+            # B18: per-agent rate limit — reject triggers fired too quickly
+            now = time.time()
+            min_interval = webhook.get("min_interval", _WEBHOOK_MIN_INTERVAL)
+            last = _webhook_last_trigger.get(ag["id"], 0.0)
+            if now - last < min_interval:
+                return JSONResponse(
+                    {"error": "Rate limited", "retry_after": min_interval - (now - last)},
+                    status_code=429,
+                )
+            _webhook_last_trigger[ag["id"]] = now
             run = await trigger_agent_run(
                 ag["id"],
                 trigger="webhook",
@@ -267,6 +313,20 @@ async def webhook_trigger(token: str, request: Request):
             return JSONResponse({"error": "Agent has no nodes"}, status_code=400)
 
     return JSONResponse({"error": "Invalid webhook token"}, status_code=404)
+
+
+# B20: rotate webhook token — invalidates old token, issues fresh one
+@router.post("/api/agents/{agent_id}/webhook/rotate")
+async def rotate_webhook_token(agent_id: str):
+    """Generate a new webhook token for an agent and invalidate the old one."""
+    ag = _st.agents.get(agent_id)
+    if not ag:
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
+    trig = ag.setdefault("trigger", {})
+    webhook = trig.setdefault("webhook", {"enabled": False})
+    webhook["token"] = make_webhook_token()
+    save_agent(ag)
+    return JSONResponse({"token": webhook["token"]})
 
 
 @router.post("/api/agents/runs/{run_id}/resume")
@@ -375,6 +435,8 @@ Return a JSON array of up to 7 workflow steps (nodes). The backend will add the 
 Rules:
 - Use "input" where user data or approval is required.
 - Use "ai" for reasoning/research/writing/ranking, "shell" for local CLI, "http" for APIs, "file" for files, "condition" for branches, "loop" for repeated item processing, "transform" for cheap data cleanup, "join" for merging branches, and "deliver" for final delivery.
+- PREFER PARALLEL DAGs over linear chains: if two or more steps are independent (do not need each other's output), give them the same parent so they run concurrently. Always use a "join" node to merge parallel branches before steps that need all their outputs.
+- Example parallel pattern: root → [branch_a, branch_b] both as children of root, then join → deliver. Do NOT chain branch_a → branch_b if they are independent.
 - Add RETRY_PARENT guidance to validation/review nodes when quality matters.
 - Include optional config fields only when useful: retry_max, loop_max, timeout, http_method, http_url, file_op, file_path, deliver_channel, deliver_to, input_timeout, transform_op, transform_key, transform_pattern, transform_length, join_separator, manager_max_iter, env_vars.
 - Max 3 children per node

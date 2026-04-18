@@ -12,6 +12,21 @@ from typing import Optional
 
 
 # ---------------------------------------------------------------------------
+# Terminal states — any status that means a node is done processing.
+# Add new terminal statuses here; is_run_done and ready_nodes use this set.
+# ---------------------------------------------------------------------------
+
+TERMINAL_STATES = {
+    "completed",
+    "failed",
+    "skipped",
+    "cancelled",
+    "timed_out",
+    "cancelled_by_user",
+}
+
+
+# ---------------------------------------------------------------------------
 # Factory helpers
 # ---------------------------------------------------------------------------
 
@@ -151,7 +166,7 @@ def node_definition(node: dict) -> dict:
         "file_op", "file_path", "deliver_channel", "deliver_to",
         "deliver_subject", "input_timeout", "loop_max", "retry_max",
         "transform_op", "transform_key", "transform_pattern", "transform_length",
-        "env_vars", "join_separator", "manager_max_iter",
+        "env_vars", "join_separator", "manager_max_iter", "manager_reset_vars",
         # A1: AI fallback fields
         "ai_fallback", "stuck_threshold",
     ):
@@ -304,8 +319,7 @@ def ready_nodes(nodes: list[dict]) -> list[dict]:
 
 def is_run_done(run: dict) -> bool:
     """True when every node is in a terminal state."""
-    terminal = {"completed", "failed", "skipped"}
-    return all(n["status"] in terminal for n in run["nodes"])
+    return all(n["status"] in TERMINAL_STATES for n in run["nodes"])
 
 
 def run_progress(run: dict) -> dict:

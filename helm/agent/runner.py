@@ -61,7 +61,7 @@ async def trigger_agent_run(
     _st.agent_runs[run["id"]] = run
 
     # Persist immediately so it's visible even before the executor runs
-    save_run(run)
+    await save_run(run)
 
     asyncio.create_task(execute_agent_run(run["id"]))
     logger.info(
@@ -215,7 +215,7 @@ async def resume_interrupted_runs() -> None:
                 await broadcast_run_update(run)
             except Exception:
                 pass
-            save_run(run)
+            await save_run(run)
             _st.agent_runs.pop(run["id"], None)
             count += 1
             logger.info(
