@@ -427,6 +427,134 @@ async def index():
     return HTMLResponse(content=_HTML)
 
 
+@app.get("/agent-run/{run_id}", response_class=HTMLResponse)
+async def agent_run_window(run_id: str):
+    """Standalone monitor page for one agent run."""
+    import json as _json
+    safe_run_id = _json.dumps(run_id)
+    return HTMLResponse(content=f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Run</title>
+  <style>
+    :root {{ color-scheme: dark; --bg:#101010; --panel:#171717; --border:#2a2a2a; --fg:#e6e6e6; --dim:#909090; --acc:#4a9eff; }}
+    * {{ box-sizing:border-box; }}
+    body {{ margin:0; background:var(--bg); color:var(--fg); font-family:Inter,Segoe UI,Arial,sans-serif; }}
+    header {{ display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); background:#151515; position:sticky; top:0; z-index:5; }}
+    h1 {{ font-size:14px; margin:0; font-weight:650; }}
+    .badge {{ font-size:11px; padding:2px 8px; border-radius:8px; background:#222; color:var(--dim); }}
+    .spacer {{ flex:1; }}
+    button {{ border-radius:6px; border:1px solid var(--border); background:#202020; color:var(--fg); padding:6px 10px; cursor:pointer; }}
+    button.danger {{ color:#ff8f98; border-color:#7d3038; background:#281418; }}
+    main {{ display:grid; grid-template-columns:minmax(360px,1fr) minmax(320px,420px); gap:12px; padding:12px; }}
+    .panel {{ background:var(--panel); border:1px solid var(--border); border-radius:8px; min-height:120px; }}
+    .panel h2 {{ font-size:12px; margin:0; padding:10px 12px; border-bottom:1px solid var(--border); color:#cfcfcf; }}
+    #nodes {{ padding:10px; display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; }}
+    .node {{ border:1px solid var(--border); border-radius:8px; background:#1d1d1d; padding:10px; min-height:110px; }}
+    .node-title {{ font-size:12px; font-weight:650; margin-bottom:6px; display:flex; gap:6px; align-items:center; }}
+    .chip {{ font-size:9px; text-transform:uppercase; padding:2px 5px; border-radius:5px; background:#232f42; color:#8fb2ff; }}
+    .status {{ margin-left:auto; font-size:10px; color:var(--dim); }}
+    .task,.output {{ font-size:11px; line-height:1.4; color:#aaa; white-space:pre-wrap; overflow-wrap:anywhere; }}
+    .output {{ margin-top:8px; color:#d2d2d2; max-height:220px; overflow:auto; }}
+    #feedback {{ padding:12px; display:none; }}
+    textarea {{ width:100%; min-height:150px; resize:vertical; background:#101010; color:var(--fg); border:1px solid var(--border); border-radius:6px; padding:9px; font-family:inherit; }}
+    .hint {{ color:var(--dim); font-size:12px; line-height:1.45; margin-bottom:8px; white-space:pre-wrap; }}
+    @media (max-width: 860px) {{ main {{ grid-template-columns:1fr; }} }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="title">Agent Run</h1>
+    <span class="badge" id="status">loading</span>
+    <span class="badge" id="progress"></span>
+    <div class="spacer"></div>
+    <button onclick="location.reload()">Refresh</button>
+    <button class="danger" id="stopBtn" onclick="cancelRun()" style="display:none">Stop</button>
+    <button onclick="window.opener&&window.opener.focus()">Main app</button>
+  </header>
+  <main>
+    <section class="panel">
+      <h2>Workflow</h2>
+      <div id="nodes"></div>
+    </section>
+    <aside class="panel">
+      <h2>Manager / Input</h2>
+      <div id="feedback">
+        <div class="hint" id="question"></div>
+        <textarea id="reply" placeholder="Reply YES if you are happy, or describe what should change."></textarea>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">
+          <button onclick="sendReply()">Send feedback</button>
+        </div>
+      </div>
+      <div id="idle" class="hint" style="padding:12px">This window keeps monitoring the agent run. You can continue using the main app.</div>
+    </aside>
+  </main>
+  <script>
+    const RUN_ID = {safe_run_id};
+    let currentRun = null;
+    function esc(s) {{ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}}[c])); }}
+    function terminal(s) {{ return ['completed','failed','cancelled'].includes(s); }}
+    async function poll() {{
+      try {{
+        const data = await fetch('/api/agents/runs/' + encodeURIComponent(RUN_ID)).then(r => r.json());
+        if (data.run) render(data.run);
+      }} catch (e) {{
+        document.getElementById('status').textContent = 'offline';
+      }}
+    }}
+    function render(run) {{
+      currentRun = run;
+      document.title = run.agent_name || 'Agent Run';
+      document.getElementById('title').textContent = run.agent_name || 'Agent Run';
+      document.getElementById('status').textContent = run.status || 'unknown';
+      const p = run.progress || {{}};
+      const done = (p.completed || 0) + (p.failed || 0) + (p.skipped || 0);
+      document.getElementById('progress').textContent = done + '/' + (p.total || (run.nodes || []).length || 0);
+      document.getElementById('stopBtn').style.display = terminal(run.status) ? 'none' : 'inline-block';
+      document.getElementById('nodes').innerHTML = (run.nodes || []).map(n => `
+        <div class="node">
+          <div class="node-title"><span class="chip">${{esc(n.type || 'ai')}}</span>${{esc(n.title || 'Step')}}<span class="status">${{esc(n.status || '')}}</span></div>
+          <div class="task">${{esc(n.task || '')}}</div>
+          ${{n.output || n.error || n.stream_buffer ? `<div class="output">${{esc(n.output || n.error || n.stream_buffer)}}</div>` : ''}}
+        </div>`).join('');
+      const waiting = run.status === 'waiting_input';
+      const node = (run.nodes || []).find(n => ['input','manager'].includes(n.type || 'ai') && n.status === 'running');
+      document.getElementById('feedback').style.display = waiting ? 'block' : 'none';
+      document.getElementById('idle').style.display = waiting ? 'none' : 'block';
+      if (waiting) {{
+        const manager = node && (node.type || 'ai') === 'manager';
+        document.getElementById('question').textContent = manager
+          ? 'Manager is waiting for feedback. Reply YES if you are happy, or describe what should change. You can also switch to the manager session in the main app later.'
+          : ((node && node.task) || 'This workflow is waiting for input.');
+      }}
+      if (terminal(run.status)) clearInterval(timer);
+    }}
+    async function sendReply() {{
+      const el = document.getElementById('reply');
+      const input = el.value.trim();
+      if (!input) {{ el.focus(); return; }}
+      const data = await fetch('/api/agents/runs/' + encodeURIComponent(RUN_ID) + '/resume', {{
+        method:'POST',
+        headers:{{'Content-Type':'application/json'}},
+        body:JSON.stringify({{input}})
+      }}).then(r => r.json());
+      if (data.error) alert(data.error);
+      else {{ el.value = ''; poll(); }}
+    }}
+    async function cancelRun() {{
+      if (!currentRun || !confirm('Stop this agent run?')) return;
+      await fetch('/api/agents/' + encodeURIComponent(currentRun.agent_id) + '/runs/' + encodeURIComponent(RUN_ID) + '/cancel', {{method:'POST'}});
+      poll();
+    }}
+    const timer = setInterval(poll, 2000);
+    poll();
+  </script>
+</body>
+</html>""")
+
+
 @app.get("/activate", response_class=HTMLResponse)
 async def activate_gate():
     """Standalone activation page — shown when .env exists but no device token.

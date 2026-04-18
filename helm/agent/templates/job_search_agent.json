@@ -1,0 +1,60 @@
+{
+  "name": "Job Search Agent",
+  "description": "Analyzes your resume, scrapes job boards via Firecrawl, filters results, and delivers top matches to Telegram.",
+  "nodes": [
+    {
+      "id": "n_input",
+      "title": "Collect Resume",
+      "type": "input",
+      "ai": "claude",
+      "task": "Please paste your resume text or upload your resume file (PDF or DOCX). Also tell me your target job title and preferred location.",
+      "input_timeout": 3600,
+      "children": ["n_parse"],
+      "x": 100, "y": 200
+    },
+    {
+      "id": "n_parse",
+      "title": "Parse Resume",
+      "type": "ai",
+      "ai": "claude",
+      "task": "Analyze the resume provided. Extract:\n1. Top 8 technical skills\n2. Years of experience per domain\n3. Target job title (from user input or inferred)\n4. Seniority level (junior/mid/senior)\n5. Preferred location\n\nOutput as structured text. End with:\nSET_VAR: job_title = <extracted job title>\nSET_VAR: location = <extracted location>",
+      "children": ["n_scrape"],
+      "x": 300, "y": 200
+    },
+    {
+      "id": "n_scrape",
+      "title": "Scrape Job Listings",
+      "type": "shell",
+      "ai": "claude",
+      "task": "npx firecrawl scrape \"https://www.linkedin.com/jobs/search/?keywords={{var:job_title}}&location={{var:location}}\" --format markdown 2>&1 | head -300",
+      "timeout": 90,
+      "children": ["n_filter"],
+      "x": 500, "y": 200
+    },
+    {
+      "id": "n_filter",
+      "title": "Filter & Rank Jobs",
+      "type": "ai",
+      "ai": "claude",
+      "task": "Review the scraped job listings against the candidate's resume profile from earlier context.\n\nSelect the top 5 most relevant jobs. For each:\n- Job Title\n- Company\n- Location\n- Why it matches (2 sentences)\n- Apply URL\n\nIf results are insufficient or irrelevant:\nRETRY_PARENT: The scraped results lacked relevant listings. Try a broader search query.",
+      "children": ["n_deliver"],
+      "x": 700, "y": 200
+    },
+    {
+      "id": "n_deliver",
+      "title": "Send Results",
+      "type": "deliver",
+      "ai": "claude",
+      "task": "🎯 Top Job Matches\n\n{{output}}\n\n---\nFound via RAPR AI Job Search Agent",
+      "deliver_channel": "telegram",
+      "deliver_to": "",
+      "children": [],
+      "x": 900, "y": 200
+    }
+  ],
+  "trigger": {
+    "telegram": true,
+    "schedule": {"enabled": false, "expression": "", "cron": "", "next_run": null, "input_data": null},
+    "webhook": {"enabled": true, "token": ""}
+  }
+}

@@ -20,9 +20,21 @@ let _edgeDrag = null;
 let _editingNodeId = null;
 let _nodeDrag = null;
 let _tempEdgeLine = null;
+let _builderChatHistory = [];
+let _builderChatSending = false;
+let _builderChatDesc = '';
 
 const PORT_COLORS = ['#f0a500','#4caf50','#a855f7'];
 const PORT_LABELS = ['Out 1','Out 2','Out 3'];
+const AG_NODE_CONFIG_KEYS = [
+  'timeout','http_method','http_url','http_headers','http_body',
+  'file_op','file_path','deliver_channel','deliver_to','deliver_subject',
+  'input_timeout','loop_max','retry_max',
+  'transform_op','transform_key','transform_pattern','transform_length',
+  'env_vars',
+  'manager_max_iter',
+  'join_separator',
+];
 
 function _esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function _setText(el,t){if(el)el.textContent=String(t==null?'':t);}
@@ -84,7 +96,7 @@ function _buildAgentCard(ag){
   _setText(meta,`${ag.node_count} steps · ${ag.run_count} runs · ${lr}`);
   row2.appendChild(meta);const sp=document.createElement('div');sp.style.flex='1';row2.appendChild(sp);
   const rb=_iconBtn('▶','Run','var(--acc)');rb.onclick=()=>runAgentNow(ag.id);
-  const eb=_iconBtn('✎','Edit','var(--dim)');eb.onclick=()=>openAgentBuilder(ag.id);
+  const eb=_iconBtn('✎','Edit','var(--dim)');eb.onclick=()=>openAgentBuilderWindow(ag.id);
   const db=_iconBtn('✕','Delete','#e06c75');db.onclick=()=>deleteAgent(ag.id);
   row2.appendChild(rb);row2.appendChild(eb);row2.appendChild(db);wrap.appendChild(row2);return wrap;
 }
@@ -92,10 +104,115 @@ function _buildAgentCard(ag){
 function _badge(text,bg,color){const s=document.createElement('span');s.style.cssText=`font-size:9px;padding:1px 5px;border-radius:8px;background:${bg};color:${color}`;s.textContent=text;return s;}
 function _iconBtn(icon,title,color){const b=document.createElement('button');b.style.cssText=`font-size:10px;padding:2px 6px;border-radius:3px;background:var(--inp);border:1px solid var(--border);color:${color};cursor:pointer`;b.title=title;b.textContent=icon;return b;}
 
-function runAgentNow(agentId){
-  fetch('/api/agents/'+agentId+'/run',{method:'POST'}).then(r=>r.json()).then(data=>{
-    if(data.run) openAgentRunOverlay(data.run);
-  }).catch(err=>alert('Failed to start: '+err));
+function _openAgentRunWindow(run){
+  if(!run||!run.id) return;
+  const url='/agent-run/'+encodeURIComponent(run.id);
+  const win=window.open(url,'agent-run-'+run.id,'width=1280,height=760');
+  if(!win){
+    openAgentRunOverlay(run);
+    return;
+  }
+  _flashStatus('Agent run opened in a separate window','#4caf50');
+}
+
+function _builderManagerTitle(){
+  const nameInp=document.getElementById('agent-name-inp');
+  const name=(nameInp&&nameInp.value||'').trim();
+  return name||'Manager Review';
+}
+
+function _workflowRootNodes(nodes){
+  const childIds=new Set();
+  (nodes||[]).forEach(n=>{
+    if((n.type||'ai')==='manager') return;
+    (n.children||[]).forEach(id=>childIds.add(id));
+  });
+  return (nodes||[]).filter(n=>(n.type||'ai')!=='manager'&&!childIds.has(n.id));
+}
+
+function _ensureBuilderManagerNode(){
+  if(!_builderNodes||!_builderNodes.length) return;
+  const title=_builderManagerTitle();
+  const managers=_builderNodes.filter(n=>(n.type||'ai')==='manager');
+  let manager=managers[0];
+  if(!manager){
+    const nonManagers=_builderNodes.filter(n=>(n.type||'ai')!=='manager');
+    const minX=nonManagers.length?Math.min(...nonManagers.map(n=>Number(n.x)||100)):100;
+    const maxX=nonManagers.length?Math.max(...nonManagers.map(n=>Number(n.x)||100)):100;
+    const minY=nonManagers.length?Math.min(...nonManagers.map(n=>Number(n.y)||100)):100;
+    manager={
+      id:_randomHex(10),
+      title,
+      type:'manager',
+      ai:'claude',
+      task:'Review the full workflow result with the user. Ask if they are happy with the output. If not, collect the issue, identify the node most responsible, improve that node, and rerun the workflow.',
+      children:[],
+      x:(minX+maxX)/2,
+      y:Math.max(20,minY-170),
+      manager_max_iter:3,
+      input_timeout:3600,
+      deliver_channel:'ui',
+      status:'pending',output:null,output_summary:null,error:null,stream_buffer:'',
+      session_id:null,started_at:null,completed_at:null,elapsed_seconds:0
+    };
+    _builderNodes.push(manager);
+  }
+  managers.slice(1).forEach(extra=>{
+    _builderNodes=_builderNodes.filter(n=>n.id!==extra.id);
+  });
+  manager.title=title;
+  manager.type='manager';
+  manager.ai=manager.ai||'claude';
+  manager.children=[];
+  manager.manager_max_iter=manager.manager_max_iter||3;
+  manager.input_timeout=manager.input_timeout||3600;
+  manager.deliver_channel=manager.deliver_channel||'ui';
+
+  const managerId=manager.id;
+  const nonManagers=_builderNodes.filter(n=>n.id!==managerId);
+  nonManagers.forEach(n=>{
+    n.children=(n.children||[]).filter(id=>id!==managerId);
+  });
+  if(nonManagers.length){
+    const minX=Math.min(...nonManagers.map(n=>Number(n.x)||100));
+    const maxX=Math.max(...nonManagers.map(n=>Number(n.x)||100));
+    const minY=Math.min(...nonManagers.map(n=>Number(n.y)||100));
+    manager.x=(minX+maxX)/2;
+    manager.y=Math.max(20,minY-170);
+  }
+  const roots=_workflowRootNodes(_builderNodes);
+  manager.children=(roots.length?roots:nonManagers.slice(0,1)).map(n=>n.id);
+}
+
+function openAgentBuilderWindow(agentId){
+  const params=new URLSearchParams();
+  params.set('agent_builder',agentId?'edit':'new');
+  if(agentId) params.set('agent_id',agentId);
+  const url='/?'+params.toString();
+  const win=window.open(url,'agent-builder-'+(agentId||'new'),'width=1440,height=860');
+  if(!win){
+    openAgentBuilder(agentId||null);
+    return;
+  }
+  _flashStatus('Agent builder opened in a separate window','#4caf50');
+}
+
+async function runAgentNow(agentId){
+  try{
+    const opts={method:'POST'};
+    let data=await fetch('/api/agents/'+agentId+'/run',opts).then(r=>r.json());
+    if(data.needs_input){
+      const input=await _safeCollectAgentInput(data.question||'This agent needs input to start. Please provide it:');
+      if(input===null) return;
+      data=await fetch('/api/agents/'+agentId+'/run',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({input_data:input})
+      }).then(r=>r.json());
+    }
+    if(data.run) _openAgentRunWindow(data.run);
+    else if(data.error) alert(data.error);
+  }catch(err){alert('Failed to start: '+err);}
 }
 
 function deleteAgent(agentId){
@@ -107,13 +224,22 @@ function deleteAgent(agentId){
 // Builder open / close
 // ---------------------------------------------------------------------------
 
-function openAgentBuilder(agentId){
+function openAgentBuilder(agentId, template){
   _builderAgentId=agentId;
   const overlay=document.getElementById('agent-builder-overlay');
   overlay.style.display='flex';
   const nameInp=document.getElementById('agent-name-inp');
   const descInp=document.getElementById('agent-desc-inp');
-  if(agentId&&_agents[agentId]){
+  if(template){
+    _builderAgentId=null;
+    if(nameInp) nameInp.value=template.name||'';
+    if(descInp) descInp.value=template.description||'';
+    _builderNodes=JSON.parse(JSON.stringify(template.nodes||[])).map(n=>({
+      ...n,status:'pending',output:null,output_summary:null,error:null,stream_buffer:'',
+      session_id:null,started_at:null,completed_at:null,elapsed_seconds:0
+    }));
+    _builderTrigger=JSON.parse(JSON.stringify(template.trigger||_defaultTrigger()));
+  }else if(agentId&&_agents[agentId]){
     const ag=_agents[agentId];
     if(nameInp) nameInp.value=ag.name||'';
     if(descInp) descInp.value=ag.description||'';
@@ -125,8 +251,14 @@ function openAgentBuilder(agentId){
     _builderNodes=[];_builderTrigger=_defaultTrigger();
   }
   _bPan={x:60,y:60};
+  _builderChatHistory=[];
+  _builderChatSending=false;
+  _builderChatDesc=(document.getElementById('agent-desc-inp')||{}).value||'';
+  _closeBuilderChat();
   _renderBuilderCanvas();
   _setupBuilderPan();
+  _ensureBuilderManagerNode();
+  _renderBuilderCanvas();
 }
 
 function closeAgentBuilder(){
@@ -134,7 +266,7 @@ function closeAgentBuilder(){
   _builderAgentId=null;_builderNodes=[];
 }
 
-function _defaultTrigger(){return{telegram:true,schedule:{enabled:false,expression:'',cron:'',next_run:null},webhook:{enabled:false,token:''}};}
+function _defaultTrigger(){return{telegram:true,schedule:{enabled:false,expression:'',cron:'',next_run:null,input_data:null},webhook:{enabled:false,token:''}};}
 
 // ---------------------------------------------------------------------------
 // Canvas rendering
@@ -224,6 +356,16 @@ function _makeNodeEl(node,isRun){
   const aiChip=document.createElement('span');
   aiChip.style.cssText='font-size:9px;padding:1px 5px;border-radius:4px;background:#2a2a2a;color:#888;flex-shrink:0;text-transform:uppercase;letter-spacing:.4px';
   aiChip.textContent=node.ai||'claude';
+  const typeChip=document.createElement('span');
+  typeChip.style.cssText='font-size:9px;padding:1px 5px;border-radius:4px;background:#232f42;color:#7a9eff;flex-shrink:0;text-transform:uppercase;letter-spacing:.4px';
+  typeChip.textContent=node.type||'ai';
+
+  if ((node.type || 'ai') === 'manager') {
+    el.style.border = '1px solid #9b59b6';
+    el.style.zIndex = '14';
+    typeChip.style.background = '#2d1b4e';
+    typeChip.style.color = '#c39bd3';
+  }
 
   const titleSpan=document.createElement('span');
   titleSpan.style.cssText='font-size:12px;font-weight:600;color:#e0e0e0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
@@ -241,7 +383,8 @@ function _makeNodeEl(node,isRun){
     titleSpan.textContent=node.title||'New Step';
   }
 
-  titleRow.appendChild(aiChip);
+  if((node.type||'ai')==='ai') titleRow.appendChild(aiChip);
+  titleRow.appendChild(typeChip);
   titleRow.appendChild(titleSpan);
   hdr.appendChild(titleRow);
 
@@ -276,6 +419,14 @@ function _makeNodeEl(node,isRun){
     elapsed.textContent=node.elapsed_seconds?`✓ ${node.elapsed_seconds.toFixed(1)}s`:'✓ done';
     hdr.appendChild(elapsed);
   }
+  if(isRun&&['input','manager'].includes(node.type||'ai')&&node.status==='running'){
+    const promptHint=document.createElement('div');
+    promptHint.style.cssText='font-size:10px;color:#f0c36a;margin-top:4px';
+    promptHint.textContent='Waiting for your input. Click here to continue.';
+    hdr.style.cursor='pointer';
+    hdr.title='Provide input or upload a file';
+    hdr.appendChild(promptHint);
+  }
   el.appendChild(hdr);
 
   if(!isRun){
@@ -285,13 +436,19 @@ function _makeNodeEl(node,isRun){
 
     const portsLabel=document.createElement('span');
     portsLabel.style.cssText='font-size:9px;color:#444';
-    portsLabel.textContent='outputs →';
+    const isManager=(node.type||'ai')==='manager';
+    portsLabel.textContent=isManager?'supervises workflow':'outputs →';
     portsWrap.appendChild(portsLabel);
 
     const portsDots=document.createElement('div');
     portsDots.style.cssText='display:flex;gap:10px;align-items:center';
 
-    PORT_COLORS.forEach((c,i)=>{
+    if(isManager){
+      const badge=document.createElement('span');
+      badge.style.cssText='font-size:9px;color:#c39bd3;background:#2d1b4e;border-radius:4px;padding:1px 5px';
+      badge.textContent=(node.children||[]).length+' roots';
+      portsDots.appendChild(badge);
+    }else PORT_COLORS.forEach((c,i)=>{
       const wrapper=document.createElement('div');
       wrapper.style.cssText='display:flex;flex-direction:column;align-items:center;gap:2px';
       const p=document.createElement('div');
@@ -317,6 +474,12 @@ function _makeNodeEl(node,isRun){
 
     hdr.addEventListener('click',()=>openNodeModal(node.id));
     el.addEventListener('mousedown',e=>{if(!e.target.classList.contains('ag-port'))_startNodeDrag(e,node.id);});
+  }else if(['input','manager'].includes(node.type||'ai')&&node.status==='running'){
+    hdr.addEventListener('click',e=>{
+      e.stopPropagation();
+      const payload=_pendingRunInput||_runInputPayloadFromNode(node);
+      _openAgentInputFromBanner(payload);
+    });
   }
   return el;
 }
@@ -339,11 +502,19 @@ function _drawEdges(svgId,nodes,isRun,pan){
       const child=map[childId];if(!child) return;
       const c=PORT_COLORS[portIdx%PORT_COLORS.length];
       // Translate canvas coords → SVG/wrapper coords by adding pan offset
-      const x1=parent.x+px+184, y1=parent.y+py+74; // right side of port row (port dots center)
-      const x2=child.x+px+100,  y2=child.y+py;      // top-center of child node
+      const isManager=(parent.type||'ai')==='manager';
+      const x1=isManager?parent.x+px+100:(isRun?parent.x+px+200:parent.x+px+184);
+      const y1=isManager?parent.y+py+74:(isRun?parent.y+py+22:parent.y+py+74);
+      const x2=isRun?child.x+px:child.x+px+100;
+      const y2=isRun?child.y+py+22:child.y+py;
       const dx=Math.abs(x2-x1);
       const path=document.createElementNS('http://www.w3.org/2000/svg','path');
-      path.setAttribute('d',`M ${x1} ${y1} C ${x1+Math.max(dx*0.5,60)} ${y1}, ${x2-Math.max(dx*0.5,60)} ${y2}, ${x2} ${y2}`);
+      if(isManager){
+        const midY=y1+Math.max((y2-y1)*0.5,50);
+        path.setAttribute('d',`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`);
+      }else{
+        path.setAttribute('d',`M ${x1} ${y1} C ${x1+Math.max(dx*0.5,60)} ${y1}, ${x2-Math.max(dx*0.5,60)} ${y2}, ${x2} ${y2}`);
+      }
       path.setAttribute('fill','none');
       path.setAttribute('stroke',c);
       path.setAttribute('stroke-width','2');
@@ -473,13 +644,15 @@ function _finishEdgeDrag(e){
 
 function agentAddNode(){
   const id=_randomHex(5);
-  const col=_builderNodes.length%4;
-  const row=Math.floor(_builderNodes.length/4);
+  const workerCount=_builderNodes.filter(n=>(n.type||'ai')!=='manager').length;
+  const col=workerCount%4;
+  const row=Math.floor(workerCount/4);
   const x=60+(col*240);
-  const y=60+(row*180);
-  _builderNodes.push({id,title:'New Step',task:'',ai:'claude',children:[],x,y,
+  const y=220+(row*180);
+  _builderNodes.push({id,title:'New Step',task:'',type:'ai',ai:'claude',children:[],x,y,
     status:'pending',output:null,output_summary:null,error:null,stream_buffer:'',
     session_id:null,started_at:null,completed_at:null,elapsed_seconds:0});
+  _ensureBuilderManagerNode();
   _renderBuilderCanvas();
   // Auto-open config for the new node
   setTimeout(()=>openNodeModal(id),50);
@@ -488,8 +661,11 @@ function agentAddNode(){
 function deleteAgentNode(){
   if(!_editingNodeId) return;
   const id=_editingNodeId;
+  const node=_builderNodes.find(n=>n.id===id);
+  if(node&&(node.type||'ai')==='manager'){_showManagerGuard();return;}
   _builderNodes=_builderNodes.filter(n=>n.id!==id);
   _builderNodes.forEach(n=>{n.children=n.children.filter(c=>c!==id);});
+  _ensureBuilderManagerNode();
   closeNodeModal();_renderBuilderCanvas();
 }
 
@@ -501,6 +677,7 @@ function openNodeModal(nodeId){
   const node=_builderNodes.find(n=>n.id===nodeId);if(!node) return;
   _editingNodeId=nodeId;
   const ti=document.getElementById('node-title-inp');if(ti) ti.value=node.title||'';
+  const ty=_ensureNodeTypeSelect();if(ty) ty.value=node.type||'ai';
   const ai=document.getElementById('node-ai-sel');if(ai){_populateNodeAiSelect();ai.value=node.ai||'claude';}
   const tk=document.getElementById('node-task-inp');if(tk) tk.value=node.task||'';
   // Update modal title
@@ -524,11 +701,36 @@ function _populateNodeAiSelect(){
   if(_availableAis){_fill();}else{_loadAvailableAis(_fill);}
 }
 
+function _ensureNodeTypeSelect(){
+  let sel=document.getElementById('node-type-sel');
+  if(sel) return sel;
+  const ai=document.getElementById('node-ai-sel');
+  if(!ai||!ai.parentElement) return null;
+  const row=document.createElement('div');
+  row.style.cssText='margin-bottom:8px';
+  const label=document.createElement('label');
+  label.textContent='Node Type';
+  label.style.cssText='display:block;font-size:11px;color:#888;margin-bottom:4px';
+  sel=document.createElement('select');
+  sel.id='node-type-sel';
+  sel.style.cssText='width:100%;background:#1a1a1a;color:#ccc;border:1px solid #333;border-radius:4px;padding:4px';
+  ['ai','shell','http','file','deliver','input','condition','loop','transform','join','manager'].forEach(t=>{
+    const opt=document.createElement('option');
+    opt.value=t;opt.textContent=t;
+    sel.appendChild(opt);
+  });
+  row.appendChild(label);
+  row.appendChild(sel);
+  ai.parentElement.insertBefore(row,ai.parentElement.firstChild);
+  return sel;
+}
+
 function closeNodeModal(){_editingNodeId=null;document.getElementById('agent-node-modal').style.display='none';}
 
 function saveNodeModal(){
   const node=_builderNodes.find(n=>n.id===_editingNodeId);if(!node) return;
   const ti=document.getElementById('node-title-inp');if(ti) node.title=ti.value.trim()||'Step';
+  const ty=document.getElementById('node-type-sel');if(ty) node.type=ty.value||'ai';
   const ai=document.getElementById('node-ai-sel');if(ai) node.ai=ai.value||'claude';
   const tk=document.getElementById('node-task-inp');if(tk) node.task=tk.value;
   closeNodeModal();_renderBuilderCanvas();
@@ -544,9 +746,16 @@ async function saveAgent(){
   if(!name){nameInp&&nameInp.focus();_flashStatus('Please enter an agent name ↑','#e06c75');return;}
   const descInp=document.getElementById('agent-desc-inp');
   const description=(descInp?descInp.value:'').trim();
+  _ensureBuilderManagerNode();
+  _renderBuilderCanvas();
   _flashStatus('Saving…','#888');
+  const serializeNode=n=>{
+    const out={id:n.id,title:n.title,type:n.type||'ai',task:n.task,ai:n.ai,children:n.children,x:n.x,y:n.y};
+    AG_NODE_CONFIG_KEYS.forEach(k=>{if(Object.prototype.hasOwnProperty.call(n,k)) out[k]=n[k];});
+    return out;
+  };
   const body={name,description,
-    nodes:_builderNodes.map(n=>({id:n.id,title:n.title,task:n.task,ai:n.ai,children:n.children,x:n.x,y:n.y})),
+    nodes:_builderNodes.map(serializeNode),
     trigger:_builderTrigger};
   try{
     let res;
@@ -558,10 +767,19 @@ async function saveAgent(){
     if(res.agent){
       _builderAgentId=res.agent.id;_agents[res.agent.id]=res.agent;_renderAgentsList();
       _flashStatus('✓ Saved','#4caf50');
+      _notifyAgentBuilderSaved(res.agent);
     }else{
       _flashStatus('✗ '+(res.error||'save failed'),'#e06c75');
     }
   }catch(err){_flashStatus('✗ Network error','#e06c75');}
+}
+
+function _notifyAgentBuilderSaved(agent){
+  try{
+    if(window.opener && !window.opener.closed && typeof window.opener.loadAgentsPanel==='function'){
+      window.opener.loadAgentsPanel();
+    }
+  }catch(e){}
 }
 
 function _flashStatus(msg,color){
@@ -580,6 +798,7 @@ function openAgentTriggers(){
   const tgCb=document.getElementById('trig-telegram');if(tgCb) tgCb.checked=t.telegram!==false;
   const sEn=document.getElementById('trig-schedule-enabled');if(sEn) sEn.checked=!!(t.schedule||{}).enabled;
   const sEx=document.getElementById('trig-schedule-expr');if(sEx){sEx.value=(t.schedule||{}).expression||'';sEx.disabled=!(t.schedule||{}).enabled;}
+  const sIn=document.getElementById('trig-schedule-input');if(sIn){sIn.value=(t.schedule||{}).input_data||'';sIn.disabled=!(t.schedule||{}).enabled;}
   const wEn=document.getElementById('trig-webhook-enabled');if(wEn) wEn.checked=!!(t.webhook||{}).enabled;
   const token=(t.webhook||{}).token||'';
   const urlEl=document.getElementById('trig-webhook-url');
@@ -590,7 +809,9 @@ function openAgentTriggers(){
 function toggleScheduleFields(){
   const en=document.getElementById('trig-schedule-enabled');
   const ex=document.getElementById('trig-schedule-expr');
-  if(en&&ex) ex.disabled=!en.checked;
+  const inp=document.getElementById('trig-schedule-input');
+  if(en && ex) ex.disabled=!en.checked;
+  if(en && inp) inp.disabled=!en.checked;
 }
 
 function closeAgentTriggers(){document.getElementById('agent-triggers-modal').style.display='none';}
@@ -600,7 +821,14 @@ function saveAgentTriggers(){
   const tgCb=document.getElementById('trig-telegram');_builderTrigger.telegram=tgCb?tgCb.checked:true;
   const sEn=document.getElementById('trig-schedule-enabled');
   const sEx=document.getElementById('trig-schedule-expr');
-  _builderTrigger.schedule={enabled:sEn?sEn.checked:false,expression:sEx?sEx.value.trim():'',cron:_builderTrigger.schedule?.cron||'',next_run:_builderTrigger.schedule?.next_run||null};
+  const sIn=document.getElementById('trig-schedule-input');
+  _builderTrigger.schedule={
+    enabled:sEn?sEn.checked:false,
+    expression:sEx?sEx.value.trim():'',
+    input_data:sIn?sIn.value.trim():null,
+    cron:_builderTrigger.schedule?.cron||'',
+    next_run:_builderTrigger.schedule?.next_run||null
+  };
   const wEn=document.getElementById('trig-webhook-enabled');
   _builderTrigger.webhook={enabled:wEn?wEn.checked:false,token:_builderTrigger.webhook?.token||''};
   closeAgentTriggers();_flashStatus('Triggers saved','#4caf50');
@@ -640,8 +868,13 @@ async function runAgentGenerate(){
     const data=await fetch('/api/agents/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({description:desc})}).then(r=>r.json());
     if(data.nodes&&data.nodes.length){
       _builderNodes=data.nodes.map(n=>({...n,status:'pending',output:null,output_summary:null,error:null,stream_buffer:'',session_id:null,started_at:null,completed_at:null,elapsed_seconds:0}));
+      _ensureBuilderManagerNode();
+      _builderChatDesc=desc;
+      _builderChatHistory=[];
       closeGenerateDialog();_renderBuilderCanvas();
       _flashStatus(`✓ Generated ${_builderNodes.length} steps — click nodes to review`,'#4caf50');
+      _openBuilderChat();
+      _addBuilderChatBubble('assistant',`I've generated ${_builderNodes.length} nodes for your workflow. Tell me what to change, or click Save if it looks good.`);
     }else{
       if(d) d.style.display='';
       if(loadingEl) loadingEl.style.display='none';
@@ -664,6 +897,8 @@ async function runAgentGenerate(){
 // ---------------------------------------------------------------------------
 
 let _runPollTimer = null;
+let _pendingRunInput = null;
+let _agentInputModalOpenFor = null;
 
 function openAgentRunOverlay(run){
   _activeRunId=run.id;_activeRunAgentId=run.agent_id;_runNodes=run.nodes||[];
@@ -672,12 +907,15 @@ function openAgentRunOverlay(run){
   _updateRunOverlayStatus(run);
   document.getElementById('agent-run-overlay').style.display='flex';
   _rPan={x:60,y:60};_renderRunCanvas();_setupRunPan();
+  _syncRunInputState(run);
   _startRunPoll(run.id);
 }
 
 function closeAgentRunOverlay(){
   document.getElementById('agent-run-overlay').style.display='none';
   _activeRunId=null;_runNodes=[];
+  _pendingRunInput=null;
+  _hideAgentInputBanner();
   _stopRunPoll();
 }
 
@@ -708,7 +946,8 @@ function _startRunPoll(runId){
         _runNodes=data.run.nodes||[];
         _updateRunOverlayStatus(data.run);
         _renderRunCanvas();
-        if(data.run.status!=='running') _stopRunPoll();
+        _syncRunInputState(data.run);
+        if(_isTerminalRunStatus(data.run.status)) _stopRunPoll();
       }
     }catch(e){missed++;if(missed>5) _stopRunPoll();}
   },2000);
@@ -724,19 +963,25 @@ function _updateRunOverlayStatus(run){
   const progEl=document.getElementById('agent-run-progress');
   const cancelBtn=document.getElementById('agent-run-cancel-btn');
   if(badge){
-    const colors={running:'#4a9eff',completed:'#4caf50',failed:'#e06c75',cancelled:'#888'};
+    const colors={running:'#4a9eff',waiting_input:'#f0a500',completed:'#4caf50',failed:'#e06c75',cancelled:'#888'};
     const c=colors[run.status]||'#888';
     badge.style.background=c+'22';badge.style.color=c;badge.textContent=run.status;
   }
   if(cancelBtn){
-    cancelBtn.style.display=run.status==='running'?'':'none';
+    cancelBtn.style.display=_isTerminalRunStatus(run.status)?'none':'inline-block';
     cancelBtn.disabled=false;cancelBtn.textContent='Stop';
+  }
+  if(run.status==='waiting_input'){
+    _showRunInputHeaderButton(_pendingRunInput||_runInputPayloadFromNode(null));
+  }else{
+    _hideRunInputHeaderButton();
   }
   if(progEl){
     const total=prog.total||_runNodes.length;
     const done=(prog.completed||0)+(prog.failed||0)+(prog.skipped||0);
     const running=(prog.running||0)||_runNodes.filter(n=>n.status==='running').length;
-    const label=running>0?`Step ${done+1}/${total} running`:done+'/'+total+' steps';
+    const waiting=run.status==='waiting_input'||_runNodes.some(n=>['input','manager'].includes(n.type||'ai')&&n.status==='running');
+    const label=waiting?`Step ${done+1}/${total} waiting for input`:(running>0?`Step ${done+1}/${total} running`:done+'/'+total+' steps');
     _setText(progEl,label);
   }
 }
@@ -776,9 +1021,8 @@ function handleAgentRunUpdate(run){
     _agents[run.agent_id].run_count=(_agents[run.agent_id].run_count||0)+1;
   }
   if(_activeRunId===run.id){
-    _runNodes=run.nodes||[];_updateRunOverlayStatus(run);_renderRunCanvas();
+    _runNodes=run.nodes||[];_updateRunOverlayStatus(run);_renderRunCanvas();_syncRunInputState(run);
   }
-  if(run.status==='running'&&!_activeRunId) openAgentRunOverlay(run);
 }
 
 function handleAgentRunStream(runId,nodeId,chunk){
@@ -794,6 +1038,234 @@ function handleAgentRunStream(runId,nodeId,chunk){
 // ---------------------------------------------------------------------------
 // Canvas background colour — force dark regardless of page theme
 // ---------------------------------------------------------------------------
+
+async function handleAgentRunWaitingInput(payload){
+  if(payload.run_id&&!_activeRunId){
+    _openAgentRunWindow({id:payload.run_id});
+  }
+  _pendingRunInput=payload;
+  _showAgentInputBanner(payload);
+}
+
+function _isTerminalRunStatus(status){
+  return status==='completed'||status==='failed'||status==='cancelled';
+}
+
+function _runInputPayloadFromNode(node){
+  const isManager=node&&(node.type||'ai')==='manager';
+  return {
+    run_id:_activeRunId,
+    node_id:node&&node.id,
+    kind:isManager?'feedback':'input',
+    question:(node&&node.task)||(isManager
+      ? 'Review the workflow output. Reply YES if you are happy with it, or describe what should be fixed.'
+      : 'This step needs input. Upload a file or paste text to continue.')
+  };
+}
+
+function _syncRunInputState(run){
+  if(!run||run.id!==_activeRunId) return;
+  const waitingNode=(run.nodes||[]).find(n=>{
+    const t=n.type||'ai';
+    return (t==='input'||t==='manager')&&n.status==='running';
+  });
+  if(run.status==='waiting_input'||waitingNode){
+    const payload=_pendingRunInput&&_pendingRunInput.run_id===run.id
+      ? _pendingRunInput
+      : _runInputPayloadFromNode(waitingNode);
+    _pendingRunInput=payload;
+    _showAgentInputBanner(payload);
+  }else if(_pendingRunInput&&_pendingRunInput.run_id===run.id){
+    _pendingRunInput=null;
+    _hideAgentInputBanner();
+  }
+}
+
+function _showAgentInputBanner(payload){
+  const overlay=document.getElementById('agent-run-overlay');
+  if(!overlay) return;
+  _showRunInputHeaderButton(payload);
+  const manager=_isManagerInputPayload(payload);
+  let banner=document.getElementById('agent-input-banner');
+  if(!banner){
+    banner=document.createElement('div');
+    banner.id='agent-input-banner';
+    banner.style.cssText='position:absolute;left:50%;top:76px;transform:translateX(-50%);z-index:80;width:min(760px,calc(100vw - 36px));background:#211a08;border:1px solid #9b6b13;border-radius:8px;color:#f5d38a;padding:10px 12px;box-shadow:0 8px 28px rgba(0,0,0,.45);display:flex;align-items:center;gap:12px';
+    const text=document.createElement('div');
+    text.className='agent-input-banner-text';
+    text.style.cssText='flex:1;min-width:0;font-size:12px;line-height:1.35';
+    banner.appendChild(text);
+    const btn=document.createElement('button');
+    btn.className='agent-input-banner-btn';
+    btn.style.cssText='flex-shrink:0;padding:7px 10px;border-radius:6px;border:1px solid #d8a33a;background:#33240d;color:#ffd887;cursor:pointer;font-size:12px';
+    btn.onclick=()=>_openAgentInputFromBanner(_pendingRunInput||payload);
+    banner.appendChild(btn);
+    overlay.appendChild(banner);
+  }
+  const text=banner.querySelector('.agent-input-banner-text');
+  const btn=banner.querySelector('.agent-input-banner-btn');
+  if(btn) btn.textContent=manager?'Chat with manager':'Provide input / upload file';
+  if(text) text.textContent=(manager
+    ? (payload.kind==='input'?'Manager is asking for input: ':'Manager is waiting for feedback: ')
+    : 'Waiting for input: ')+(payload.question||'Upload a file or paste text to continue.');
+  banner.style.display='flex';
+}
+
+function _hideAgentInputBanner(){
+  const banner=document.getElementById('agent-input-banner');
+  if(banner) banner.style.display='none';
+  _hideRunInputHeaderButton();
+}
+
+function _showRunInputHeaderButton(payload){
+  const progEl=document.getElementById('agent-run-progress');
+  if(!progEl||!progEl.parentElement) return;
+  let btn=document.getElementById('agent-run-input-btn');
+  if(!btn){
+    btn=document.createElement('button');
+    btn.id='agent-run-input-btn';
+    btn.style.cssText='background:#f0a50022;border:1px solid #f0a500;color:#f0c36a;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px';
+    progEl.parentElement.insertBefore(btn, document.getElementById('agent-run-cancel-btn'));
+  }
+  btn.textContent=_isManagerInputPayload(payload)?'Chat with manager':'Upload / provide input';
+  btn.style.display='inline-block';
+  btn.onclick=()=>_openAgentInputFromBanner(_pendingRunInput||payload||_runInputPayloadFromNode(null));
+}
+
+function _hideRunInputHeaderButton(){
+  const btn=document.getElementById('agent-run-input-btn');
+  if(btn) btn.style.display='none';
+}
+
+async function _openAgentInputFromBanner(payload){
+  if(!payload||!payload.run_id) return;
+  if(_agentInputModalOpenFor===payload.run_id) return;
+  _agentInputModalOpenFor=payload.run_id;
+  const manager=_isManagerInputPayload(payload);
+  const managerInput=manager&&payload.kind==='input';
+  const input=await _safeCollectAgentInput(
+    payload.question||'Please provide input to continue.',
+    manager?'Chat with manager':'Agent input required',
+    manager
+      ? (managerInput?'Reply with the information this step needs.':'Reply YES if you are happy with the result, or describe what should be fixed.')
+      : 'Paste resume text, preferences, approval, or any other required input here...'
+  );
+  _agentInputModalOpenFor=null;
+  if(input===null) return;
+  try{
+    const res=await fetch('/api/agents/runs/'+payload.run_id+'/resume',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({input})
+    }).then(r=>r.json());
+    if(res.error) alert(res.error);
+    else{
+      _pendingRunInput=null;
+      _hideAgentInputBanner();
+      try{
+        const data=await fetch('/api/agents/runs/'+payload.run_id).then(r=>r.json());
+        if(data.run){
+          _runNodes=data.run.nodes||[];
+          _updateRunOverlayStatus(data.run);
+          _renderRunCanvas();
+          _syncRunInputState(data.run);
+        }
+      }catch(e){}
+    }
+  }catch(err){alert('Failed to resume agent: '+err);}
+}
+
+async function _safeCollectAgentInput(question,titleText,placeholderText){
+  try{
+    if(typeof _collectAgentInput==='function') return await _collectAgentInput(question,titleText,placeholderText);
+  }catch(err){
+    console.error('Agent input modal failed:',err);
+  }
+  return prompt(question||'Please provide input to continue.');
+}
+
+function _isManagerInputPayload(payload){
+  if(!payload) return false;
+  const node=_runNodes.find(n=>n.id===payload.node_id);
+  if(node&&(node.type||'ai')==='manager') return true;
+  const managerNode=_runNodes.find(n=>(n.type||'ai')==='manager');
+  return !!(payload.session_id&&managerNode&&managerNode.session_id===payload.session_id);
+}
+
+function _collectAgentInput(question,titleText,placeholderText){
+  return new Promise(resolve=>{
+    const existing=document.getElementById('agent-input-modal');
+    if(existing) existing.remove();
+    const overlay=document.createElement('div');
+    overlay.id='agent-input-modal';
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+    const box=document.createElement('div');
+    box.style.cssText='width:min(720px,96vw);background:#171717;border:1px solid #333;border-radius:8px;padding:16px;color:#ddd;box-shadow:0 12px 40px rgba(0,0,0,.55)';
+    const title=document.createElement('div');
+    title.style.cssText='font-size:15px;font-weight:600;margin-bottom:8px';
+    title.textContent=titleText||'Agent input required';
+    const q=document.createElement('div');
+    q.style.cssText='font-size:12px;color:#aaa;line-height:1.45;margin-bottom:10px;white-space:pre-wrap';
+    q.textContent=question;
+    const ta=document.createElement('textarea');
+    ta.style.cssText='width:100%;height:180px;resize:vertical;background:#101010;color:#ddd;border:1px solid #333;border-radius:6px;padding:10px;font-family:inherit;font-size:12px;box-sizing:border-box';
+    ta.placeholder=placeholderText||'Paste resume text, preferences, approval, or any other required input here...';
+    const fileRow=document.createElement('div');
+    fileRow.style.cssText='display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap';
+    const file=document.createElement('input');
+    file.type='file';
+    file.accept='.pdf,.docx,.txt,.md,.csv,.json';
+    file.style.cssText='font-size:12px;color:#bbb';
+    const uploadStatus=document.createElement('span');
+    uploadStatus.style.cssText='font-size:11px;color:#888';
+    uploadStatus.textContent='Optional: upload a resume or source file';
+    fileRow.appendChild(file);
+    fileRow.appendChild(uploadStatus);
+    file.onchange=async()=>{
+      if(!file.files||!file.files.length) return;
+      const form=new FormData();
+      form.append('file',file.files[0]);
+      uploadStatus.textContent='Uploading and extracting...';
+      try{
+        const headers={};
+        if(typeof _csrfToken==='function') headers['x-csrf-token']=_csrfToken();
+        const data=await fetch('/api/agents/input-file',{method:'POST',headers,body:form}).then(r=>r.json());
+        if(data.error){uploadStatus.textContent=data.error;uploadStatus.style.color='#e06c75';return;}
+        const prefix=ta.value.trim()?ta.value.trim()+'\n\n':'';
+        ta.value=prefix+(data.input_text||`Uploaded file: ${data.filename}\nSaved path: ${data.path}`);
+        uploadStatus.textContent='Added '+(data.filename||'file')+' to input';
+        uploadStatus.style.color='#4caf50';
+      }catch(err){
+        uploadStatus.textContent='Upload failed: '+err;
+        uploadStatus.style.color='#e06c75';
+      }
+    };
+    const actions=document.createElement('div');
+    actions.style.cssText='display:flex;justify-content:flex-end;gap:8px;margin-top:14px';
+    const cancel=document.createElement('button');
+    cancel.textContent='Cancel';
+    cancel.style.cssText='padding:7px 12px;border-radius:6px;border:1px solid #444;background:#222;color:#bbb;cursor:pointer';
+    const submit=document.createElement('button');
+    submit.textContent='Continue';
+    submit.style.cssText='padding:7px 12px;border-radius:6px;border:1px solid #4a8;background:#1d3a2a;color:#9fdaaa;cursor:pointer';
+    actions.appendChild(cancel);
+    actions.appendChild(submit);
+    cancel.onclick=()=>{overlay.remove();resolve(null);};
+    submit.onclick=()=>{
+      const val=ta.value.trim();
+      if(!val){ta.focus();uploadStatus.textContent='Paste text or upload a file first.';uploadStatus.style.color='#e06c75';return;}
+      overlay.remove();resolve(val);
+    };
+    box.appendChild(title);
+    box.appendChild(q);
+    box.appendChild(ta);
+    box.appendChild(fileRow);
+    box.appendChild(actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    ta.focus();
+  });
+}
 
 function _fixCanvasBg(){
   ['agent-builder-overlay','agent-run-overlay','agent-canvas-wrap'].forEach(id=>{
@@ -818,7 +1290,229 @@ function _randomHex(n){
 // Init
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Builder Chat Panel
+// ---------------------------------------------------------------------------
+
+function toggleBuilderChat(){
+  const panel=document.getElementById('builder-chat-panel');
+  if(!panel) return;
+  if(panel.style.display==='none'||!panel.style.display){_openBuilderChat();}else{_closeBuilderChat();}
+}
+
+function _openBuilderChat(){
+  const panel=document.getElementById('builder-chat-panel');
+  if(panel) panel.style.display='flex';
+}
+
+function _closeBuilderChat(){
+  const panel=document.getElementById('builder-chat-panel');
+  if(panel) panel.style.display='none';
+}
+
+function _addBuilderChatBubble(role, text){
+  const msgs=document.getElementById('builder-chat-messages');
+  if(!msgs) return;
+  const wrap=document.createElement('div');
+  wrap.style.cssText='display:flex;flex-direction:column;align-items:'+(role==='user'?'flex-end':'flex-start')+';margin-bottom:8px';
+  const bubble=document.createElement('div');
+  bubble.style.cssText='max-width:90%;padding:7px 11px;border-radius:12px;font-size:12px;line-height:1.5;word-break:break-word;'+(role==='user'?'background:#2a2a2a;color:#ccc':'background:#1a2a3a;color:#9cc;border:1px solid #2a4a5a');
+  bubble.textContent=text;
+  wrap.appendChild(bubble);
+  msgs.appendChild(wrap);
+  msgs.scrollTop=msgs.scrollHeight;
+  _builderChatHistory.push({role,content:text});
+}
+
+function _addBuilderChatThinking(){
+  const msgs=document.getElementById('builder-chat-messages');
+  if(!msgs) return;
+  const wrap=document.createElement('div');
+  wrap.id='builder-chat-thinking';
+  wrap.style.cssText='display:flex;align-items:flex-start;margin-bottom:8px';
+  const bubble=document.createElement('div');
+  bubble.style.cssText='background:#1a2a3a;color:#9cc;border:1px solid #2a4a5a;padding:7px 11px;border-radius:12px;font-size:12px';
+  bubble.textContent='Thinking…';
+  wrap.appendChild(bubble);
+  msgs.appendChild(wrap);
+  msgs.scrollTop=msgs.scrollHeight;
+}
+
+function _removeBuilderChatThinking(){
+  const el=document.getElementById('builder-chat-thinking');
+  if(el) el.remove();
+}
+
+async function sendBuilderChat(){
+  if(_builderChatSending) return;
+  const inp=document.getElementById('builder-chat-inp');
+  if(!inp) return;
+  const msg=inp.value.trim();
+  if(!msg) return;
+
+  // Manager guard — intercept locally
+  const lc=msg.toLowerCase();
+  if((lc.includes('remov')||lc.includes('delet'))&&(lc.includes('manager')||lc.includes('supervisor')||lc.includes('review'))){
+    inp.value='';
+    _addBuilderChatBubble('user',msg);
+    _builderChatHistory.pop(); // don't keep user msg in history for local intercept
+    const guardMsg="I can't remove the Manager node — it's what makes your agent self-healing. When a node fails or the output isn't what you expected, the Manager reviews the result, identifies the failing node, fixes its task, and reruns automatically. Without it, a single failure stops the whole workflow. You can set Max Iterations to 1 (auto-approve after one review) if you want less interaction.";
+    _addBuilderChatBubble('assistant',guardMsg);
+    return;
+  }
+
+  inp.value='';
+  _addBuilderChatBubble('user',msg);
+  _builderChatSending=true;
+  _addBuilderChatThinking();
+
+  const sendBtn=document.getElementById('builder-chat-send-btn');
+  if(sendBtn) sendBtn.disabled=true;
+
+  try{
+    const body={
+      description:_builderChatDesc||'',
+      nodes:JSON.parse(JSON.stringify(_builderNodes)),
+      history:_builderChatHistory.slice(-20),
+      message:msg
+    };
+    const data=await fetch('/api/agents/builder-chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    }).then(r=>r.json());
+
+    _removeBuilderChatThinking();
+    if(data.error){
+      _addBuilderChatBubble('assistant','Error: '+data.error);
+    }else{
+      _addBuilderChatBubble('assistant',data.reply||'Done.');
+      if(data.nodes&&data.nodes.length>=1){
+        _applyBuilderChatNodes(data.nodes);
+      }
+    }
+  }catch(err){
+    _removeBuilderChatThinking();
+    _addBuilderChatBubble('assistant','Network error — please try again.');
+  }finally{
+    _builderChatSending=false;
+    if(sendBtn) sendBtn.disabled=false;
+    if(inp) inp.focus();
+
+  }
+}
+
+function _applyBuilderChatNodes(newNodes){
+  const oldIds=new Set(_builderNodes.map(n=>n.id));
+  const newIds=new Set(newNodes.map(n=>n.id));
+  const addedIds=newNodes.filter(n=>!oldIds.has(n.id)).map(n=>n.id);
+  const removedIds=[..._builderNodes.filter(n=>!newIds.has(n.id)).map(n=>n.id)];
+  const changedIds=newNodes.filter(n=>{
+    const old=_builderNodes.find(o=>o.id===n.id);
+    return old&&(old.task!==n.task||JSON.stringify(old.children)!==JSON.stringify(n.children));
+  }).map(n=>n.id);
+
+  _builderNodes=newNodes.map(n=>({
+    ...n,
+    status:n.status||'pending',output:n.output||null,output_summary:n.output_summary||null,
+    error:n.error||null,stream_buffer:n.stream_buffer||'',
+    session_id:n.session_id||null,started_at:n.started_at||null,
+    completed_at:n.completed_at||null,elapsed_seconds:n.elapsed_seconds||0
+  }));
+  _renderBuilderCanvas();
+
+  // Flash changed/added nodes
+  const toFlash=[...addedIds,...changedIds];
+  toFlash.forEach(id=>{
+    const el=document.getElementById('node-'+id);
+    if(!el) return;
+    el.style.transition='box-shadow 0.2s';
+    el.style.boxShadow='0 0 0 3px #f0a50088, 0 3px 16px rgba(0,0,0,0.6)';
+    setTimeout(()=>{el.style.boxShadow='';},800);
+  });
+}
+
+function _showManagerGuard(){
+  const existing=document.getElementById('manager-guard-panel');
+  if(existing){existing.remove();return;}
+
+  const panel=document.createElement('div');
+  panel.id='manager-guard-panel';
+  panel.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1c1c1c;border:1.5px solid #f0a500;border-radius:10px;padding:20px 24px;z-index:9999;max-width:400px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.7)';
+
+  const title=document.createElement('div');
+  title.style.cssText='font-size:14px;font-weight:700;color:#f0a500;margin-bottom:10px';
+  title.textContent='Keep the Manager node';
+  panel.appendChild(title);
+
+  const lines=[
+    "It's what makes your agent self-healing.",
+    "When a node fails or the output isn't what you expected, the Manager reviews the result with you, figures out which node needs fixing, updates its task, and reruns automatically.",
+    "Without it, a single failure stops the whole workflow.",
+    "If you want less interaction, lower its Max Iterations to 1 (auto-approve after one review)."
+  ];
+  lines.forEach(txt=>{
+    const p=document.createElement('p');
+    p.style.cssText='font-size:12px;color:#aaa;margin:6px 0;line-height:1.5';
+    p.textContent=txt;
+    panel.appendChild(p);
+  });
+
+  const btnRow=document.createElement('div');
+  btnRow.style.cssText='display:flex;gap:10px;margin-top:16px;justify-content:flex-end';
+
+  const autoBtn=document.createElement('button');
+  autoBtn.style.cssText='padding:6px 14px;border-radius:6px;background:#1a2a3a;border:1px solid #4a8ac8;color:#9cc;font-size:12px;cursor:pointer';
+  autoBtn.textContent='Set to auto-approve';
+  autoBtn.addEventListener('click',()=>{_setManagerAutoApprove();panel.remove();});
+
+  const okBtn=document.createElement('button');
+  okBtn.style.cssText='padding:6px 14px;border-radius:6px;background:#2a2a2a;border:1px solid #555;color:#ccc;font-size:12px;cursor:pointer';
+  okBtn.textContent='Got it';
+  okBtn.addEventListener('click',()=>panel.remove());
+
+  btnRow.appendChild(autoBtn);
+  btnRow.appendChild(okBtn);
+  panel.appendChild(btnRow);
+
+  document.body.appendChild(panel);
+  closeNodeModal();
+}
+
+function _setManagerAutoApprove(){
+  const mgr=_builderNodes.find(n=>(n.type||'ai')==='manager');
+  if(mgr) mgr.manager_max_iter=1;
+  _renderBuilderCanvas();
+}
+
+// Builder chat keyboard shortcut
+document.addEventListener('keydown',function(e){
+  const inp=document.getElementById('builder-chat-inp');
+  if(!inp||document.activeElement!==inp) return;
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendBuilderChat();}
+});
+
+// ---------------------------------------------------------------------------
 (function _agentsInit(){
+  function _maybeOpenBuilderFromUrl(){
+    const qs=new URLSearchParams(window.location.search||'');
+    const mode=qs.get('agent_builder');
+    if(!mode||window.__agentBuilderUrlOpened) return;
+    window.__agentBuilderUrlOpened=true;
+    if(mode==='edit'){
+      const agentId=qs.get('agent_id');
+      if(!agentId) return;
+      fetch('/api/agents/'+encodeURIComponent(agentId)).then(r=>r.json()).then(data=>{
+        if(data.agent){
+          _agents[data.agent.id]=data.agent;
+          openAgentBuilder(data.agent.id);
+        }
+      }).catch(()=>{});
+      return;
+    }
+    openAgentBuilder(null);
+  }
+
   function _hookAgentsSection(){
     const section=document.querySelector('[data-section="agents"]');
     if(!section) return;
@@ -831,9 +1525,10 @@ function _randomHex(n){
     if(section.classList.contains('open')) loadAgentsPanel();
   }
   if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded',_hookAgentsSection);
+    document.addEventListener('DOMContentLoaded',()=>{_hookAgentsSection();_maybeOpenBuilderFromUrl();});
   }else{
     _hookAgentsSection();
+    _maybeOpenBuilderFromUrl();
   }
 
   // Fix canvas background on builder open

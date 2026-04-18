@@ -95,3 +95,242 @@ def test_shell_node_var_substitution():
     task = "mkdir -p {{var:output_dir}}"
     result = substitute_vars(task, run)
     assert result == "mkdir -p /tmp/results"
+
+
+from helm.agent.nodes.input_node import extract_file_text_from_telegram
+
+def test_extract_file_text_returns_none_for_no_file():
+    result = asyncio.run(
+        extract_file_text_from_telegram(file_id=None, mime_type=None, bot=None)
+    )
+    assert result is None
+
+def test_extract_file_text_unsupported_mime():
+    result = asyncio.run(
+        extract_file_text_from_telegram(file_id="abc", mime_type="image/png", bot=None)
+    )
+    assert result is None
+
+
+from helm.agent.executor import _build_failure_summary
+
+def test_build_failure_summary_lists_failed_nodes():
+    nodes = [
+        {"title": "Step 1", "status": "completed", "error": None},
+        {"title": "Step 2", "status": "failed", "error": "HTTP 500"},
+        {"title": "Step 3", "status": "skipped", "error": None},
+    ]
+    summary = _build_failure_summary(nodes)
+    assert "Step 2" in summary
+    assert "HTTP 500" in summary
+    assert "Step 1" not in summary
+
+def test_build_failure_summary_no_failures():
+    nodes = [{"title": "Step 1", "status": "completed", "error": None}]
+    summary = _build_failure_summary(nodes)
+    assert summary == ""
+
+
+from helm.agent.nodes.shell import execute_shell_node
+
+def test_shell_node_env_var_injection():
+    cmd = "echo %MY_SECRET_KEY%" if sys.platform == "win32" else "echo $MY_SECRET_KEY"
+    node = make_node("Env Test", cmd, node_type="shell")
+    node["env_vars"] = {"MY_SECRET_KEY": "super_secret_123"}
+    result = asyncio.run(
+        execute_shell_node(node, context="", cwd=".")
+    )
+    assert "super_secret_123" in result
+
+def test_shell_node_env_var_not_in_task():
+    """Env vars must not appear in task text — they're injected separately."""
+    cmd = "echo %MY_KEY%" if sys.platform == "win32" else "echo $MY_KEY"
+    node = make_node("Safe", cmd, node_type="shell")
+    node["env_vars"] = {"MY_KEY": "abc"}
+    assert "abc" not in node["task"]
+
+
+from helm.agent.nodes.join import execute_join_node
+
+def test_join_node_merges_parent_outputs():
+    parent_a = make_node("Branch A", "result A", node_id="pa")
+    parent_a["output"] = "Result from Branch A"
+    parent_b = make_node("Branch B", "result B", node_id="pb")
+    parent_b["output"] = "Result from Branch B"
+    join = make_node("Join", "", node_type="join", node_id="jn")
+    join["children"] = []
+    parent_a["children"] = ["jn"]
+    parent_b["children"] = ["jn"]
+
+    # In actual run, build_node_context would be called.
+    # We simulate the merged context here.
+    context = "Result from Branch A\n\nResult from Branch B"
+    result = asyncio.run(
+        execute_join_node(join, context=context)
+    )
+    assert "Result from Branch A" in result
+    assert "Result from Branch B" in result
+
+
+from helm.agent.runner import trigger_agent_run
+from unittest.mock import patch, AsyncMock
+
+def test_schedule_trigger_uses_static_input():
+    node = make_node("Step", "analyze")
+    agent = make_agent("Sched Agent", nodes=[node])
+    agent["id"] = "ag-sched-test"
+    agent["trigger"]["schedule"]["input_data"] = "My saved resume text"
+    _st.agents[agent["id"]] = agent
+
+    with patch("helm.agent.executor.execute_agent_run", new_callable=AsyncMock):
+        run = asyncio.run(
+            trigger_agent_run(agent["id"], trigger="schedule")
+        )
+    assert run["input_data"] == "My saved resume text"
+
+
+from helm.agent.executor import _expand_loop_children
+
+def test_expand_loop_children_creates_clones():
+    """After loop node completes with 3 items, 3 child clones should exist."""
+    loop_node = make_node("Loop", "", node_type="loop", node_id="loop1")
+    child = make_node("Process Item", "analyze {{loop_item}}", node_id="child1")
+    loop_node["children"] = ["child1"]
+    loop_node["output"] = "1. Python Developer\n2. Data Scientist\n3. ML Engineer"
+    loop_node["status"] = "completed"
+
+    nodes = [loop_node, child]
+    new_nodes = _expand_loop_children(loop_node, nodes)
+
+    # Original child replaced by 3 clones
+    clone_ids = [n["id"] for n in new_nodes if n["id"] != "loop1"]
+    assert len(clone_ids) == 3
+    # Each clone has _loop_item set
+    clones = [n for n in new_nodes if n.get("_loop_item")]
+    assert len(clones) == 3
+    items = [n["_loop_item"] for n in clones]
+    assert "Python Developer" in items
+
+
+from helm.agent.executor import _is_final_worker_node
+
+def test_final_worker_node_detects_only_non_manager_leaf_nodes():
+    first = make_node("First", "do first", node_id="first")
+    final = make_node("Final", "write report", node_id="final")
+    manager = make_node("Manager", "review", node_type="manager", node_id="manager")
+    first["children"] = ["final"]
+    final["children"] = []
+    manager["children"] = ["first", "final"]
+    run = {"nodes": [first, final, manager]}
+    assert _is_final_worker_node(run, first) is False
+    assert _is_final_worker_node(run, final) is True
+    assert _is_final_worker_node(run, manager) is False
+
+
+from helm.agent.nodes.manager import focus_manager_session, parse_manager_reply, is_approval
+
+def test_is_approval_yes():
+    assert is_approval("yes") is True
+    assert is_approval("YES") is True
+    assert is_approval("looks good") is True
+    assert is_approval("approved") is True
+    assert is_approval("lgtm") is True
+
+def test_is_approval_negative():
+    assert is_approval("no, the jobs are too senior") is False
+    assert is_approval("the results are wrong") is False
+    assert is_approval("missing salary info") is False
+
+def test_parse_manager_reply_returns_feedback():
+    reply = "The job titles are too senior, I need junior roles"
+    feedback = parse_manager_reply(reply)
+    assert feedback["approved"] is False
+    assert "junior" in feedback["feedback"].lower()
+
+
+def test_focus_manager_session_sets_focused_waiting_session():
+    from helm.agent.nodes import input_node
+
+    old_sessions = dict(_st.sessions)
+    old_focused = _st.focused_id
+    old_pending = dict(input_node._pending_input_sessions)
+    try:
+        _st.sessions.clear()
+        _st.focused_id = None
+        input_node._pending_input_sessions.clear()
+        run = {
+            "id": "run-manager-focus",
+            "agent_id": "ag-manager-focus",
+            "agent_name": "Manager Focus Test",
+            "session_id": None,
+        }
+        node = make_node("Manager Review", "Review output", node_type="manager")
+
+        sess = asyncio.run(focus_manager_session(node, run, summary="Step output"))
+
+        assert _st.focused_id == sess["id"]
+        assert sess["name"] == "Manager Focus Test"
+        assert node["session_id"] == sess["id"]
+        assert run["manager_session_id"] == sess["id"]
+        assert sess["agent_manager"] is True
+        assert sess["agent_manager_waiting_run_id"] == run["id"]
+        assert input_node._pending_input_sessions[sess["id"]] == (run["id"], node["id"])
+    finally:
+        _st.sessions.clear()
+        _st.sessions.update(old_sessions)
+        _st.focused_id = old_focused
+        input_node._pending_input_sessions.clear()
+        input_node._pending_input_sessions.update(old_pending)
+
+
+def test_input_node_wait_uses_run_session_not_manager_session():
+    from unittest.mock import AsyncMock, patch
+    from helm.agent.nodes import input_node
+    from helm.agent.nodes.input_node import execute_input_node, resume_run
+
+    old_sessions = dict(_st.sessions)
+    old_focused = _st.focused_id
+    old_pending = dict(input_node._pending_input_sessions)
+    try:
+        _st.sessions.clear()
+        _st.focused_id = "main-session"
+        _st.sessions["main-session"] = {
+            "id": "main-session",
+            "name": "Main",
+            "cwd": ".",
+            "ai": "claude",
+            "status": "idle",
+            "last_used": 0,
+        }
+        run = {
+            "id": "run-input-direct",
+            "agent_id": "ag-input-direct",
+            "agent_name": "Input Direct Test",
+            "session_id": "main-session",
+            "nodes": [
+                make_node("Needs Input", "Please provide details", node_type="input", node_id="input"),
+                make_node("Manager", "Review", node_type="manager", node_id="manager"),
+            ],
+        }
+        node = run["nodes"][0]
+
+        async def _exercise():
+            task = asyncio.create_task(execute_input_node(node, run, context=""))
+            await asyncio.sleep(0)
+            assert input_node._pending_input_sessions["main-session"] == (run["id"], node["id"])
+            assert run.get("manager_session_id") is None
+            assert _st.focused_id == "main-session"
+            assert resume_run(run["id"], "resume text") is True
+            return await task
+
+        with patch("helm.broadcast.broadcast", new_callable=AsyncMock), patch(
+            "helm.broadcast.push_message", new_callable=AsyncMock
+        ):
+            result = asyncio.run(_exercise())
+        assert result == "resume text"
+    finally:
+        _st.sessions.clear()
+        _st.sessions.update(old_sessions)
+        _st.focused_id = old_focused
+        input_node._pending_input_sessions.clear()
+        input_node._pending_input_sessions.update(old_pending)

@@ -484,9 +484,11 @@ async def _main():
             webbrowser.open(url)
 
     # Load agents and start the agent schedule cron runner
-    from helm.agent.runner import register_agent_schedules, agent_cron_runner
+    from helm.agent.runner import register_agent_schedules, agent_cron_runner, resume_interrupted_runs
     register_agent_schedules()
     asyncio.create_task(agent_cron_runner())
+    # A4: clean up any runs that were in-flight when the server last stopped
+    asyncio.create_task(resume_interrupted_runs())
 
     # Load persisted scheduled tasks and start the cron runner
     load_scheduled_tasks()

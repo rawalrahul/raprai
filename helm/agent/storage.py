@@ -56,7 +56,14 @@ def save_agent(agent: dict) -> None:
         saveable = dict(agent)
         saveable["nodes"] = [
             {k: v for k, v in n.items()
-             if k in ("id", "title", "task", "ai", "children", "x", "y")}
+             if k in (
+                 "id", "title", "task", "type", "ai", "children", "x", "y",
+                 "timeout", "http_method", "http_url", "http_headers", "http_body",
+                 "file_op", "file_path", "deliver_channel", "deliver_to",
+                 "deliver_subject", "input_timeout", "loop_max", "retry_max",
+                 "transform_op", "transform_key", "transform_pattern", "transform_length",
+                 "env_vars", "join_separator", "manager_max_iter",
+             )}
             for n in agent.get("nodes", [])
         ]
         db.execute(
