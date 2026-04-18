@@ -96,9 +96,12 @@ function _buildAgentCard(ag){
   _setText(meta,`${ag.node_count} steps · ${ag.run_count} runs · ${lr}`);
   row2.appendChild(meta);const sp=document.createElement('div');sp.style.flex='1';row2.appendChild(sp);
   const rb=_iconBtn('▶','Run','var(--acc)');rb.onclick=()=>runAgentNow(ag.id);
+  const tb=_iconBtn('⚗','Test Run (dry)','#8b5cf6');tb.onclick=()=>runAgentNow(ag.id,true);
   const eb=_iconBtn('✎','Edit','var(--dim)');eb.onclick=()=>openAgentBuilderWindow(ag.id);
+  const vb=_iconBtn('⏱','Versions','#c8844a');vb.onclick=()=>_openVersionsModal(ag.id);
+  const xb=_iconBtn('↓','Export JSON','var(--dim)');xb.onclick=()=>_exportAgent(ag.id,ag.name);
   const db=_iconBtn('✕','Delete','#e06c75');db.onclick=()=>deleteAgent(ag.id);
-  row2.appendChild(rb);row2.appendChild(eb);row2.appendChild(db);wrap.appendChild(row2);return wrap;
+  row2.appendChild(rb);row2.appendChild(tb);row2.appendChild(eb);row2.appendChild(vb);row2.appendChild(xb);row2.appendChild(db);wrap.appendChild(row2);return wrap;
 }
 
 function _badge(text,bg,color){const s=document.createElement('span');s.style.cssText=`font-size:9px;padding:1px 5px;border-radius:8px;background:${bg};color:${color}`;s.textContent=text;return s;}
@@ -197,9 +200,10 @@ function openAgentBuilderWindow(agentId){
   _flashStatus('Agent builder opened in a separate window','#4caf50');
 }
 
-async function runAgentNow(agentId){
+async function runAgentNow(agentId, dryRun=false){
   try{
-    const opts={method:'POST'};
+    const body=dryRun?{dry_run:true}:{};
+    const opts={method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)};
     let data=await fetch('/api/agents/'+agentId+'/run',opts).then(r=>r.json());
     if(data.needs_input){
       const input=await _safeCollectAgentInput(data.question||'This agent needs input to start. Please provide it:');
@@ -207,7 +211,7 @@ async function runAgentNow(agentId){
       data=await fetch('/api/agents/'+agentId+'/run',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({input_data:input})
+        body:JSON.stringify({input_data:input,dry_run:dryRun})
       }).then(r=>r.json());
     }
     if(data.run) _openAgentRunWindow(data.run);
@@ -218,6 +222,172 @@ async function runAgentNow(agentId){
 function deleteAgent(agentId){
   if(!confirm('Delete this agent and all its run history?')) return;
   fetch('/api/agents/'+agentId,{method:'DELETE'}).then(()=>{delete _agents[agentId];_renderAgentsList();});
+}
+
+// ---------------------------------------------------------------------------
+// Export / Import (frontend2 — same API as helm/frontend/agents.js)
+// ---------------------------------------------------------------------------
+
+function _exportAgent(agentId, agentName){
+  fetch('/api/agents/'+agentId+'/export')
+    .then(r=>r.blob())
+    .then(blob=>{
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url;
+      const safe=(agentName||'agent').replace(/[^a-zA-Z0-9_\- ]/g,'_');
+      a.download=safe+'.json';
+      document.body.appendChild(a);a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+}
+
+function _importAgentFromFile(){
+  const inp=document.createElement('input');
+  inp.type='file';inp.accept='.json,application/json';
+  inp.onchange=async()=>{
+    const file=inp.files[0];if(!file) return;
+    try{
+      const text=await file.text();
+      const data=JSON.parse(text);
+      const res=await fetch('/api/agents/import',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(data),
+      }).then(r=>r.json());
+      if(res.error){alert('Import failed: '+res.error);return;}
+      await _fetchAgents();
+      _renderAgentsList();
+      alert('Imported: '+res.name);
+    }catch(e){alert('Import failed: '+e);}
+  };
+  inp.click();
+}
+
+async function _openVersionsModal(agentId){
+  let modal=document.getElementById('ag-versions-modal');
+  if(!modal){
+    modal=document.createElement('div');
+    modal.id='ag-versions-modal';
+    modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center';
+    modal.addEventListener('click',e=>{if(e.target===modal) modal.style.display='none';});
+    const box=document.createElement('div');
+    box.style.cssText='background:#161616;border:1px solid #333;border-radius:8px;width:480px;max-width:95vw;max-height:70vh;display:flex;flex-direction:column;overflow:hidden';
+    const hdr=document.createElement('div');
+    hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #2a2a2a';
+    const title=document.createElement('span');title.id='ag-ver-title';title.style.cssText='font-size:13px;font-weight:600;color:#e0e0e0';
+    const cls=document.createElement('button');cls.textContent='✕';cls.style.cssText='background:none;border:none;color:#888;cursor:pointer;font-size:14px';cls.onclick=()=>modal.style.display='none';
+    hdr.appendChild(title);hdr.appendChild(cls);
+    const list=document.createElement('div');list.id='ag-ver-list';list.style.cssText='padding:8px 14px;overflow-y:auto;flex:1';
+    box.appendChild(hdr);box.appendChild(list);modal.appendChild(box);document.body.appendChild(modal);
+  }
+  modal.style.display='flex';
+  const agName=(_agents[agentId]||{}).name||agentId;
+  document.getElementById('ag-ver-title').textContent='Versions — '+agName;
+  const list=document.getElementById('ag-ver-list');
+  while(list.firstChild) list.removeChild(list.firstChild);
+  const loading=document.createElement('div');loading.style.cssText='color:#666;font-size:11px;padding:8px 0';loading.textContent='Loading…';list.appendChild(loading);
+  try{
+    const data=await fetch('/api/agents/'+agentId+'/versions').then(r=>r.json());
+    while(list.firstChild) list.removeChild(list.firstChild);
+    const versions=data.versions||[];
+    if(!versions.length){const em=document.createElement('div');em.style.cssText='color:#555;font-size:11px;padding:8px 0';em.textContent='No versions yet.';list.appendChild(em);return;}
+    versions.forEach((v,idx)=>{
+      const row=document.createElement('div');row.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid #1e1e1e';
+      const label=document.createElement('span');label.style.cssText='font-size:11px;color:#ccc';label.textContent=`v${v.version_num} — ${v.saved_at?new Date(v.saved_at*1000).toLocaleString():'?'}`;
+      if(idx===0){const cur=document.createElement('span');cur.style.cssText='font-size:9px;color:#4caf50;margin-left:6px';cur.textContent='current';label.appendChild(cur);}
+      row.appendChild(label);
+      if(idx>0){
+        const btn=document.createElement('button');btn.textContent='Restore';btn.style.cssText='font-size:10px;padding:2px 8px;border-radius:3px;background:#1a1a1a;border:1px solid #c8844a;color:#c8844a;cursor:pointer';
+        btn.onclick=async()=>{
+          if(!confirm('Restore to v'+v.version_num+'?')) return;
+          const res=await fetch('/api/agents/'+agentId+'/versions/'+v.id+'/restore',{method:'POST'}).then(r=>r.json());
+          if(res.error){alert('Restore failed: '+res.error);return;}
+          if(res.agent) _agents[agentId]=res.agent;
+          modal.style.display='none';_renderAgentsList();alert('Restored to v'+v.version_num);
+        };
+        row.appendChild(btn);
+      }
+      list.appendChild(row);
+    });
+  }catch(e){while(list.firstChild) list.removeChild(list.firstChild);const err=document.createElement('div');err.style.cssText='color:#e06c75;font-size:11px';err.textContent='Error: '+e;list.appendChild(err);}
+}
+
+async function _openMonitorDashboard(){
+  let modal=document.getElementById('ag-monitor-modal');
+  if(!modal){
+    modal=document.createElement('div');modal.id='ag-monitor-modal';modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center';
+    modal.addEventListener('click',e=>{if(e.target===modal) modal.style.display='none';});
+    const box=document.createElement('div');box.style.cssText='background:#161616;border:1px solid #333;border-radius:8px;width:800px;max-width:97vw;max-height:80vh;display:flex;flex-direction:column;overflow:hidden';
+    const hdr=document.createElement('div');hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid #2a2a2a';
+    const title=document.createElement('span');title.style.cssText='font-size:14px;font-weight:700;color:#e0e0e0';title.textContent='Agent Monitor';
+    const cls=document.createElement('button');cls.textContent='✕';cls.style.cssText='background:none;border:none;color:#888;cursor:pointer;font-size:14px';cls.onclick=()=>modal.style.display='none';
+    hdr.appendChild(title);hdr.appendChild(cls);
+    const body=document.createElement('div');body.id='ag-monitor-body';body.style.cssText='padding:14px 16px;overflow-y:auto;flex:1';
+    box.appendChild(hdr);box.appendChild(body);modal.appendChild(box);document.body.appendChild(modal);
+  }
+  modal.style.display='flex';
+  const body=document.getElementById('ag-monitor-body');while(body.firstChild) body.removeChild(body.firstChild);
+  const loading=document.createElement('div');loading.style.cssText='color:#666;font-size:11px';loading.textContent='Loading…';body.appendChild(loading);
+  try{
+    const data=await fetch('/api/agents/stats').then(r=>r.json());
+    while(body.firstChild) body.removeChild(body.firstChild);
+    const t=data.totals||{};
+    const banner=document.createElement('div');banner.style.cssText='display:flex;gap:20px;margin-bottom:16px;flex-wrap:wrap';
+    const stat=(label,val,color)=>{const d=document.createElement('div');d.style.cssText='text-align:center;min-width:80px';const v=document.createElement('div');v.style.cssText=`font-size:22px;font-weight:700;color:${color||'#e0e0e0'}`;v.textContent=val==null?'—':val;const l=document.createElement('div');l.style.cssText='font-size:10px;color:#666;margin-top:2px';l.textContent=label;d.appendChild(v);d.appendChild(l);return d;};
+    banner.appendChild(stat('Total Runs',t.total_runs,'#4a9eff'));banner.appendChild(stat('Successful',t.ok_runs,'#4caf50'));banner.appendChild(stat('Failed',t.fail_runs,'#e06c75'));banner.appendChild(stat('Success Rate',t.success_rate!=null?(t.success_rate*100).toFixed(1)+'%':null,'#f5a623'));
+    body.appendChild(banner);
+    const table=document.createElement('table');table.style.cssText='width:100%;border-collapse:collapse;font-size:11px';
+    const thead=document.createElement('thead');const hr=document.createElement('tr');
+    ['Agent','Runs','OK','Fail','Rate','Avg (s)','Last Run','Status'].forEach(h=>{const th=document.createElement('th');th.style.cssText='text-align:left;padding:5px 8px;color:#888;border-bottom:1px solid #2a2a2a;font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.4px';th.textContent=h;hr.appendChild(th);});
+    thead.appendChild(hr);table.appendChild(thead);
+    const tbody=document.createElement('tbody');
+    (data.agents||[]).forEach((ag,i)=>{
+      const tr=document.createElement('tr');tr.style.background=i%2===0?'#111':'#141414';
+      const cell=(val,color)=>{const td=document.createElement('td');td.style.cssText=`padding:6px 8px;color:${color||'#ccc'};`;td.textContent=val==null?'—':val;return td;};
+      const statusColor={'completed':'#4caf50','failed':'#e06c75','running':'#4a9eff'}[ag.last_status]||'#888';
+      const rate=ag.success_rate!=null?(ag.success_rate*100).toFixed(0)+'%':null;
+      const rateColor=ag.success_rate!=null?(ag.success_rate>=0.9?'#4caf50':ag.success_rate>=0.7?'#f5a623':'#e06c75'):'#888';
+      tr.appendChild(cell(ag.name));tr.appendChild(cell(ag.total_runs,'#ccc'));tr.appendChild(cell(ag.ok_runs,'#4caf50'));tr.appendChild(cell(ag.fail_runs,ag.fail_runs>0?'#e06c75':'#4caf50'));tr.appendChild(cell(rate,rateColor));tr.appendChild(cell(ag.avg_duration,'#ccc'));tr.appendChild(cell(ag.last_run_at?new Date(ag.last_run_at*1000).toLocaleDateString():'never','#888'));tr.appendChild(cell(ag.last_status||'—',statusColor));tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);body.appendChild(table);
+  }catch(e){while(body.firstChild) body.removeChild(body.firstChild);const err=document.createElement('div');err.style.cssText='color:#e06c75;font-size:11px';err.textContent='Error: '+e;body.appendChild(err);}
+}
+
+function _openNodeInspector(node){
+  let modal=document.getElementById('ag-inspector-modal');
+  if(!modal){
+    modal=document.createElement('div');modal.id='ag-inspector-modal';modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center';
+    modal.addEventListener('click',e=>{if(e.target===modal) modal.style.display='none';});
+    const box=document.createElement('div');box.style.cssText='background:#161616;border:1px solid #333;border-radius:8px;width:680px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;overflow:hidden';
+    const hdr=document.createElement('div');hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #2a2a2a';
+    const title=document.createElement('span');title.id='ag-insp-title';title.style.cssText='font-size:13px;font-weight:600;color:#e0e0e0';
+    const cls=document.createElement('button');cls.textContent='✕';cls.style.cssText='background:none;border:none;color:#888;cursor:pointer;font-size:14px';cls.onclick=()=>modal.style.display='none';
+    hdr.appendChild(title);hdr.appendChild(cls);
+    const body=document.createElement('div');body.id='ag-insp-body';body.style.cssText='padding:12px 14px;overflow-y:auto;flex:1;font-size:11px;color:#ccc;line-height:1.5';
+    box.appendChild(hdr);box.appendChild(body);modal.appendChild(box);document.body.appendChild(modal);
+  }
+  modal.style.display='flex';
+  document.getElementById('ag-insp-title').textContent=`${node.title||'Node'} — ${node.status}`;
+  const body=document.getElementById('ag-insp-body');while(body.firstChild) body.removeChild(body.firstChild);
+  const section=(label,value,color)=>{
+    if(!value&&value!==0) return;
+    const h=document.createElement('div');h.style.cssText='font-size:10px;color:#888;margin-top:10px;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px';h.textContent=label;
+    const v=document.createElement('pre');v.style.cssText=`white-space:pre-wrap;word-break:break-word;background:#0d0d0d;border:1px solid #222;border-radius:4px;padding:8px;font-size:11px;color:${color||'#ccc'};max-height:200px;overflow-y:auto;margin:0`;
+    v.textContent=typeof value==='string'?value:JSON.stringify(value,null,2);
+    body.appendChild(h);body.appendChild(v);
+  };
+  const timingDiv=document.createElement('div');timingDiv.style.cssText='display:flex;gap:16px;flex-wrap:wrap;margin-bottom:6px';
+  const pill=(label,val)=>{const s=document.createElement('span');s.style.cssText='font-size:10px;padding:2px 8px;border-radius:4px;background:#1a1a1a;color:#aaa;border:1px solid #2a2a2a';s.textContent=`${label}: ${val}`;return s;};
+  timingDiv.appendChild(pill('Type',node.type||'ai'));timingDiv.appendChild(pill('AI',node.ai||'claude'));timingDiv.appendChild(pill('Status',node.status));
+  if(node.elapsed_seconds!=null) timingDiv.appendChild(pill('Duration',node.elapsed_seconds.toFixed(2)+'s'));
+  if(node.started_at) timingDiv.appendChild(pill('Started',new Date(node.started_at*1000).toLocaleTimeString()));
+  body.appendChild(timingDiv);
+  section('Task / Instructions',node.task||'(none)','#c0c0c0');
+  if(node.status==='completed') section('Output',node.output||'(empty)','#4caf50');
+  if(node.output_summary) section('Summary',node.output_summary,'#888');
+  if(node.error) section('Error',node.error,'#e06c75');
 }
 
 // ---------------------------------------------------------------------------
@@ -480,6 +650,10 @@ function _makeNodeEl(node,isRun){
       const payload=_pendingRunInput||_runInputPayloadFromNode(node);
       _openAgentInputFromBanner(payload);
     });
+  }else if(isRun&&['completed','failed','skipped'].includes(node.status)){
+    hdr.style.cursor='pointer';
+    hdr.title='Click to inspect node output';
+    hdr.addEventListener('click',e=>{e.stopPropagation();_openNodeInspector(node);});
   }
   return el;
 }

@@ -25,6 +25,10 @@ from .models import (
 )
 
 
+# Node types that have external side effects — skipped in dry-run mode.
+_SIDE_EFFECT_TYPES: frozenset[str] = frozenset(("shell", "http", "deliver"))
+
+
 async def broadcast_run_update(run: dict):
     """Broadcast full run state to all WS clients."""
     from helm.broadcast import broadcast
@@ -160,8 +164,16 @@ async def _execute_node(run: dict, node: dict, semaphore: asyncio.Semaphore):
         # Apply var substitution to node task text for all node types
         task_text = substitute_vars(node.get("task", ""), run)
 
+        # Dry-run: skip side-effect nodes, return descriptive mock output
+        _dry_run = run.get("dry_run", False)
+
         try:
-            if node_type == "shell":
+            if _dry_run and node_type in _SIDE_EFFECT_TYPES:
+                task_preview = (task_text or node.get("task", "")).strip()[:120]
+                output = (
+                    f"[DRY RUN] {node_type.upper()} node skipped — would execute:\n{task_preview}"
+                )
+            elif node_type == "shell":
                 shell_node = dict(node)
                 shell_node["task"] = task_text
                 output = await execute_shell_node(shell_node, context=context, cwd=cwd)

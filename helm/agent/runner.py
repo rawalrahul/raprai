@@ -27,6 +27,7 @@ async def trigger_agent_run(
     trigger: str,
     session_id: Optional[str] = None,
     input_data: Optional[str] = None,
+    dry_run: bool = False,
 ) -> Optional[dict]:
     """
     Create an AgentRun and launch the executor as a background task.
@@ -57,6 +58,8 @@ async def trigger_agent_run(
         input_data = agent.get("trigger", {}).get("schedule", {}).get("input_data") or None
 
     run = make_run(agent, trigger=trigger, session_id=session_id, input_data=input_data)
+    if dry_run:
+        run["dry_run"] = True
     _prepare_initial_input_node(run)
     _st.agent_runs[run["id"]] = run
 

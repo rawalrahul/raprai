@@ -280,3 +280,91 @@ def test_memory_after_node_complete_no_crash():
         await after_node_complete(run, node)
 
     _asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Sprint 5 feature tests
+# ---------------------------------------------------------------------------
+
+def test_dry_run_shell_node_skipped():
+    """Dry-run: shell nodes return descriptive mock, not real execution."""
+    import asyncio
+    from helm.agent.executor import _execute_node
+    from helm.agent.models import make_run, make_node
+
+    ag = {"id": "a1", "name": "Test", "nodes": []}
+    node = make_node("rm -rf everything", "rm -rf /tmp/test_dry", node_type="shell")
+    node["id"] = "n1"
+    ag["nodes"] = [node]
+    run = make_run(ag, trigger="ui")
+    run["dry_run"] = True
+    run["nodes"] = [node]
+
+    asyncio.run(_execute_node(run, node, asyncio.Semaphore(1)))
+    assert "DRY RUN" in (node.get("output") or "")
+    assert node["status"] == "completed"
+
+
+def test_dry_run_http_node_skipped():
+    """Dry-run: http nodes return mock output, no real HTTP call."""
+    import asyncio
+    from helm.agent.executor import _execute_node
+    from helm.agent.models import make_run, make_node
+
+    ag = {"id": "a2", "name": "Test", "nodes": []}
+    node = make_node("Fetch data", "fetch https://example.com", node_type="http")
+    node["id"] = "n2"
+    node["http_method"] = "GET"
+    node["http_url"] = "https://example.com"
+    ag["nodes"] = [node]
+    run = make_run(ag, trigger="ui")
+    run["dry_run"] = True
+    run["nodes"] = [node]
+
+    asyncio.run(_execute_node(run, node, asyncio.Semaphore(1)))
+    assert "DRY RUN" in (node.get("output") or "")
+    assert node["status"] == "completed"
+
+
+def test_dry_run_ai_node_not_skipped():
+    """Dry-run flag does NOT skip AI nodes — only side-effect nodes."""
+    import asyncio
+    from helm.agent.executor import _SIDE_EFFECT_TYPES
+    assert "shell" in _SIDE_EFFECT_TYPES
+    assert "http" in _SIDE_EFFECT_TYPES
+    assert "deliver" in _SIDE_EFFECT_TYPES
+    assert "ai" not in _SIDE_EFFECT_TYPES
+    assert "file" not in _SIDE_EFFECT_TYPES
+
+
+def test_storage_strip_runtime_removes_runtime_fields():
+    """_strip_runtime removes runtime-only fields like status, output, error."""
+    from helm.agent.storage import _strip_runtime
+    agent = {
+        "id": "a1", "name": "Test", "nodes": [
+            {"id": "n1", "title": "Step", "task": "do thing", "type": "ai",
+             "status": "completed", "output": "some output", "error": None,
+             "stream_buffer": "...", "ai": "claude", "children": []}
+        ]
+    }
+    stripped = _strip_runtime(agent)
+    n = stripped["nodes"][0]
+    assert "status" not in n
+    assert "output" not in n
+    assert "stream_buffer" not in n
+    assert n["task"] == "do thing"
+    assert n["ai"] == "claude"
+
+
+def test_load_all_run_stats_returns_list():
+    """load_all_run_stats returns a list (even if empty DB)."""
+    from helm.agent.storage import load_all_run_stats
+    result = load_all_run_stats()
+    assert isinstance(result, list)
+
+
+def test_load_agent_versions_returns_list_for_unknown():
+    """load_agent_versions returns empty list for unknown agent."""
+    from helm.agent.storage import load_agent_versions
+    result = load_agent_versions("nonexistent-agent-xyz")
+    assert result == []

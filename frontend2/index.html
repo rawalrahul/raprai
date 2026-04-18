@@ -171,7 +171,11 @@
       </div>
       <div class="sb-section-body" id="sb-panel-agents">
         <div id="agents-list"><div class="sb-empty">No agents yet.</div></div>
-        <button class="sb-add-btn" style="margin:6px 8px 4px" onclick="openAgentBuilderWindow()">✦ New Agent</button>
+        <div style="display:flex;gap:4px;margin:6px 8px 4px;flex-wrap:wrap">
+          <button class="sb-add-btn" style="flex:1" onclick="openAgentBuilderWindow()">✦ New Agent</button>
+          <button class="sb-add-btn" style="background:#1a1a2a;border-color:#3a3a6a;color:#8b9eff" onclick="_importAgentFromFile()" title="Import agent from JSON file">↑ Import</button>
+          <button class="sb-add-btn" style="background:#1a1a2a;border-color:#3a3a6a;color:#8b9eff" onclick="_openMonitorDashboard()" title="Agent run statistics">⚡ Monitor</button>
+        </div>
       </div>
     </div>
 

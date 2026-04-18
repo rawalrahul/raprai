@@ -351,6 +351,23 @@ def v10_add_agent_tables(conn: sqlite3.Connection):
     conn.commit()
 
 
+def v11_add_agent_versions(conn: sqlite3.Connection):
+    """Version 11: Agent version history — snapshot on every save, keep last 10."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS agent_versions (
+            id          TEXT PRIMARY KEY,
+            agent_id    TEXT NOT NULL,
+            version_num INTEGER NOT NULL,
+            graph_json  TEXT NOT NULL,
+            saved_at    REAL NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_versions_agent_id
+            ON agent_versions(agent_id);
+    """)
+    conn.commit()
+
+
 MIGRATIONS: list[tuple[int, str, callable]] = [
     (1, "Initial schema", v1_initial),
     (2, "Add FTS5 full-text search", v2_add_content_fts),
@@ -362,6 +379,7 @@ MIGRATIONS: list[tuple[int, str, callable]] = [
     (8, "Encrypt memory content at rest", v8_encrypt_memory_content),
     (9, "Add keywords/updated_at to packages", v9_add_packages_keywords),
     (10, "Add agents + agent_runs tables", v10_add_agent_tables),
+    (11, "Add agent version history", v11_add_agent_versions),
 ]
 
 

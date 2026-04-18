@@ -52,25 +52,35 @@ def load_all_agents() -> None:
         logger.warning("Could not load agents from DB: %s", exc)
 
 
+_NODE_SAVE_KEYS = (
+    "id", "title", "task", "type", "ai", "children", "x", "y",
+    "timeout", "http_method", "http_url", "http_headers", "http_body",
+    "file_op", "file_path", "deliver_channel", "deliver_to",
+    "deliver_subject", "input_timeout", "loop_max", "retry_max",
+    "transform_op", "transform_key", "transform_pattern", "transform_length",
+    "env_vars", "join_separator", "manager_max_iter", "manager_reset_vars",
+    "condition_expr", "loop_input_key",
+)
+_MAX_VERSIONS = 10
+
+
+def _strip_runtime(agent: dict) -> dict:
+    """Return a copy of agent with only saveable fields in nodes."""
+    saveable = dict(agent)
+    saveable["nodes"] = [
+        {k: v for k, v in n.items() if k in _NODE_SAVE_KEYS}
+        for n in agent.get("nodes", [])
+    ]
+    return saveable
+
+
 def save_agent(agent: dict) -> None:
-    """Upsert an agent into the agents table."""
+    """Upsert an agent and snapshot a version row (keeping last 10)."""
     try:
         db = get_db()
         agent["updated_at"] = time.time()
-        # Store only node definitions (strip runtime state)
-        saveable = dict(agent)
-        saveable["nodes"] = [
-            {k: v for k, v in n.items()
-             if k in (
-                 "id", "title", "task", "type", "ai", "children", "x", "y",
-                 "timeout", "http_method", "http_url", "http_headers", "http_body",
-                 "file_op", "file_path", "deliver_channel", "deliver_to",
-                 "deliver_subject", "input_timeout", "loop_max", "retry_max",
-                 "transform_op", "transform_key", "transform_pattern", "transform_length",
-                 "env_vars", "join_separator", "manager_max_iter",
-             )}
-            for n in agent.get("nodes", [])
-        ]
+        saveable = _strip_runtime(agent)
+        graph_json = json.dumps(saveable, ensure_ascii=False)
         db.execute(
             """INSERT OR REPLACE INTO agents
                (id, name, description, graph_json, created_at, updated_at)
@@ -79,11 +89,39 @@ def save_agent(agent: dict) -> None:
                 agent["id"],
                 agent["name"],
                 agent.get("description", ""),
-                json.dumps(saveable, ensure_ascii=False),
+                graph_json,
                 agent.get("created_at", time.time()),
                 agent["updated_at"],
             ),
         )
+        # Version snapshot
+        try:
+            last = db.execute(
+                "SELECT MAX(version_num) AS v FROM agent_versions WHERE agent_id = ?",
+                (agent["id"],),
+            ).fetchone()
+            next_ver = (last["v"] or 0) + 1
+            db.execute(
+                """INSERT INTO agent_versions (id, agent_id, version_num, graph_json, saved_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (
+                    f"{agent['id']}_v{next_ver}",
+                    agent["id"],
+                    next_ver,
+                    graph_json,
+                    agent["updated_at"],
+                ),
+            )
+            # Trim to last _MAX_VERSIONS
+            old = db.execute(
+                "SELECT id FROM agent_versions WHERE agent_id = ? "
+                "ORDER BY version_num DESC LIMIT -1 OFFSET ?",
+                (agent["id"], _MAX_VERSIONS),
+            ).fetchall()
+            for row in old:
+                db.execute("DELETE FROM agent_versions WHERE id = ?", (row["id"],))
+        except Exception as exc:
+            logger.debug("Version snapshot skipped (table may not exist yet): %s", exc)
         db.commit()
     except Exception as exc:
         logger.warning("Could not save agent %s: %s", agent.get("id", "?"), exc)
@@ -161,3 +199,65 @@ def load_run(run_id: str) -> dict | None:
     except Exception as exc:
         logger.warning("Could not load run %s: %s", run_id, exc)
     return None
+
+
+# ---------------------------------------------------------------------------
+# Agent versions
+# ---------------------------------------------------------------------------
+
+def load_agent_versions(agent_id: str) -> list[dict]:
+    """Return version list for an agent, newest first."""
+    try:
+        db = get_db()
+        rows = db.execute(
+            "SELECT id, version_num, saved_at FROM agent_versions "
+            "WHERE agent_id = ? ORDER BY version_num DESC",
+            (agent_id,),
+        ).fetchall()
+        return [{"id": r["id"], "version_num": r["version_num"], "saved_at": r["saved_at"]} for r in rows]
+    except Exception as exc:
+        logger.warning("Could not load versions for %s: %s", agent_id, exc)
+        return []
+
+
+def load_agent_version(version_id: str) -> dict | None:
+    """Load a specific version's graph JSON."""
+    try:
+        db = get_db()
+        row = db.execute(
+            "SELECT graph_json FROM agent_versions WHERE id = ?", (version_id,)
+        ).fetchone()
+        if row:
+            return json.loads(row["graph_json"])
+    except Exception as exc:
+        logger.warning("Could not load version %s: %s", version_id, exc)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Monitoring stats
+# ---------------------------------------------------------------------------
+
+def load_all_run_stats() -> list[dict]:
+    """Aggregate run stats per agent from DB (used by monitoring dashboard)."""
+    try:
+        db = get_db()
+        rows = db.execute(
+            """SELECT agent_id,
+                      COUNT(*)                                   AS total,
+                      SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS ok,
+                      SUM(CASE WHEN status='failed'    THEN 1 ELSE 0 END) AS fail,
+                      AVG(CASE WHEN completed_at IS NOT NULL
+                               THEN completed_at - started_at END)        AS avg_sec,
+                      MAX(started_at)                            AS last_at,
+                      MAX(CASE WHEN started_at = (SELECT MAX(started_at)
+                                                    FROM agent_runs ar2
+                                                   WHERE ar2.agent_id = agent_runs.agent_id)
+                               THEN status END)                  AS last_status
+               FROM agent_runs
+               GROUP BY agent_id"""
+        ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception as exc:
+        logger.warning("Could not load run stats: %s", exc)
+        return []

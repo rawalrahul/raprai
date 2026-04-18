@@ -28,6 +28,7 @@ from helm.agent.repair import (
 )
 from helm.agent.storage import (
     save_agent, delete_agent, save_run, load_recent_runs, load_run,
+    load_agent_versions, load_agent_version, load_all_run_stats,
 )
 from helm.agent.runner import trigger_agent_run
 
@@ -194,9 +195,10 @@ async def run_agent(agent_id: str, request: Request):
     fs = focused_session()
     session_id = body.get("session_id") or (fs["id"] if fs else None)
     input_data = body.get("input_data") or None
+    dry_run = bool(body.get("dry_run", False))
 
     ag = _st.agents.get(agent_id)
-    if ag and input_data is None and _agent_requires_initial_input(ag):
+    if ag and input_data is None and not dry_run and _agent_requires_initial_input(ag):
         return JSONResponse({
             "needs_input": True,
             "question": _agent_initial_input_question(ag),
@@ -207,6 +209,7 @@ async def run_agent(agent_id: str, request: Request):
         trigger="ui",
         session_id=session_id,
         input_data=input_data,
+        dry_run=dry_run,
     )
     if not run:
         return JSONResponse({"error": "Agent not found or has no nodes"}, status_code=404)
@@ -897,3 +900,127 @@ def _apply_trigger(ag: dict, trigger_body: dict) -> None:
         webhook["enabled"] = bool(webhook_body["enabled"])
     if not webhook.get("token"):
         webhook["token"] = make_webhook_token()
+
+
+# ---------------------------------------------------------------------------
+# Export / Import
+# ---------------------------------------------------------------------------
+
+@router.get("/api/agents/{agent_id}/export")
+async def export_agent(agent_id: str):
+    """Download agent definition as JSON."""
+    ag = _st.agents.get(agent_id)
+    if not ag:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    from helm.agent.storage import _strip_runtime
+    export_data = _strip_runtime(ag)
+    export_data.pop("id", None)          # strip ID — re-import creates a fresh one
+    export_data.pop("created_at", None)
+    export_data.pop("updated_at", None)
+    safe_name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in ag["name"])
+    return JSONResponse(
+        export_data,
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.json"'},
+    )
+
+
+@router.post("/api/agents/import")
+async def import_agent(request: Request):
+    """Create a new agent from an exported JSON payload."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    name = (body.get("name") or "Imported Agent").strip()
+    description = (body.get("description") or "").strip()
+    new_id = agent_slug(name)
+    # Avoid ID collisions
+    base = new_id
+    counter = 2
+    while new_id in _st.agents:
+        new_id = f"{base}_{counter}"
+        counter += 1
+
+    agent = make_agent(new_id, name, description)
+    agent["nodes"] = body.get("nodes", [])
+    agent["trigger"] = body.get("trigger", {})
+    _ensure_manager_node(agent)
+    _st.agents[agent["id"]] = agent
+    save_agent(agent)
+    return JSONResponse({"id": agent["id"], "name": agent["name"]})
+
+
+# ---------------------------------------------------------------------------
+# Agent version history
+# ---------------------------------------------------------------------------
+
+@router.get("/api/agents/{agent_id}/versions")
+async def list_agent_versions(agent_id: str):
+    """List saved versions for an agent."""
+    if agent_id not in _st.agents:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    versions = load_agent_versions(agent_id)
+    return JSONResponse({"versions": versions})
+
+
+@router.post("/api/agents/{agent_id}/versions/{version_id}/restore")
+async def restore_agent_version(agent_id: str, version_id: str):
+    """Restore agent to a previous version snapshot."""
+    ag = _st.agents.get(agent_id)
+    if not ag:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    snapshot = load_agent_version(version_id)
+    if not snapshot:
+        return JSONResponse({"error": "version not found"}, status_code=404)
+    # Merge snapshot nodes/trigger back, keep current id/name/description
+    ag["nodes"] = snapshot.get("nodes", ag["nodes"])
+    ag["trigger"] = snapshot.get("trigger", ag.get("trigger", {}))
+    _ensure_manager_node(ag)
+    save_agent(ag)
+    return JSONResponse({"ok": True, "agent": ag})
+
+
+# ---------------------------------------------------------------------------
+# Monitoring / stats
+# ---------------------------------------------------------------------------
+
+@router.get("/api/agents/stats")
+async def agent_stats():
+    """Aggregate run stats across all agents for the monitoring dashboard."""
+    rows = load_all_run_stats()
+    stats_by_agent = {r["agent_id"]: r for r in rows}
+
+    agents_out = []
+    total_runs = total_ok = total_fail = 0
+    for ag in _st.agents.values():
+        s = stats_by_agent.get(ag["id"], {})
+        n_total = s.get("total", 0) or 0
+        n_ok    = s.get("ok", 0) or 0
+        n_fail  = s.get("fail", 0) or 0
+        avg_sec = s.get("avg_sec")
+        agents_out.append({
+            "id":           ag["id"],
+            "name":         ag["name"],
+            "total_runs":   n_total,
+            "ok_runs":      n_ok,
+            "fail_runs":    n_fail,
+            "success_rate": round(n_ok / n_total, 3) if n_total else None,
+            "avg_duration": round(avg_sec, 1) if avg_sec is not None else None,
+            "last_run_at":  s.get("last_at"),
+            "last_status":  s.get("last_status"),
+        })
+        total_runs += n_total
+        total_ok   += n_ok
+        total_fail += n_fail
+
+    agents_out.sort(key=lambda a: a["last_run_at"] or 0, reverse=True)
+    return JSONResponse({
+        "agents": agents_out,
+        "totals": {
+            "total_runs":   total_runs,
+            "ok_runs":      total_ok,
+            "fail_runs":    total_fail,
+            "success_rate": round(total_ok / total_runs, 3) if total_runs else None,
+        },
+    })
