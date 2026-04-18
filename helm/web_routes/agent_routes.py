@@ -315,6 +315,20 @@ async def webhook_trigger(token: str, request: Request):
     return JSONResponse({"error": "Invalid webhook token"}, status_code=404)
 
 
+# B20: rotate webhook token — invalidates old token, issues fresh one
+@router.post("/api/agents/{agent_id}/webhook/rotate")
+async def rotate_webhook_token(agent_id: str):
+    """Generate a new webhook token for an agent and invalidate the old one."""
+    ag = _st.agents.get(agent_id)
+    if not ag:
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
+    trig = ag.setdefault("trigger", {})
+    webhook = trig.setdefault("webhook", {"enabled": False})
+    webhook["token"] = make_webhook_token()
+    save_agent(ag)
+    return JSONResponse({"token": webhook["token"]})
+
+
 @router.post("/api/agents/runs/{run_id}/resume")
 async def resume_agent_run(run_id: str, request: Request):
     """Resume a run waiting for human input."""

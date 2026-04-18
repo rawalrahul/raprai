@@ -338,6 +338,7 @@ function _drawEdges(svgId,nodes,isRun,pan){
     (parent.children||[]).forEach((childId,portIdx)=>{
       const child=map[childId];if(!child) return;
       const c=PORT_COLORS[portIdx%PORT_COLORS.length];
+      const isManager=(parent.type||'ai')==='manager';
       // Translate canvas coords → SVG/wrapper coords by adding pan offset
       const x1=parent.x+px+184, y1=parent.y+py+74; // right side of port row (port dots center)
       const x2=child.x+px+100,  y2=child.y+py;      // top-center of child node
@@ -345,10 +346,11 @@ function _drawEdges(svgId,nodes,isRun,pan){
       const path=document.createElementNS('http://www.w3.org/2000/svg','path');
       path.setAttribute('d',`M ${x1} ${y1} C ${x1+Math.max(dx*0.5,60)} ${y1}, ${x2-Math.max(dx*0.5,60)} ${y2}, ${x2} ${y2}`);
       path.setAttribute('fill','none');
-      path.setAttribute('stroke',c);
-      path.setAttribute('stroke-width','2');
-      path.setAttribute('opacity','0.8');
-      if(isRun&&map[childId]?.status==='pending') path.setAttribute('stroke-dasharray','5,4');
+      path.setAttribute('stroke',isManager?'#888':c);
+      path.setAttribute('stroke-width',isManager?'1.5':'2');
+      path.setAttribute('opacity',isManager?'0.45':'0.8');
+      if(isManager) path.setAttribute('stroke-dasharray','6,4');
+      else if(isRun&&map[childId]?.status==='pending') path.setAttribute('stroke-dasharray','5,4');
       svg.appendChild(path);
       // Arrowhead dot
       const arrow=document.createElementNS('http://www.w3.org/2000/svg','circle');
