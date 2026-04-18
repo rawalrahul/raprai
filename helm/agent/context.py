@@ -45,6 +45,21 @@ def build_node_context(run: dict, node: dict) -> str:
 
 import re as _re
 
+# Pre-compiled regex patterns for performance
+_VAR_SUB_PATTERN = _re.compile(r"\{\{var:([^}]+)\}\}")
+_HEREDOC_PATTERN = _re.compile(
+    r"SET_VAR\s*:\s*(\w+)\s*<<(\w+)\n(.*?)\n\2",
+    _re.IGNORECASE | _re.DOTALL,
+)
+_QUOTED_VAR_PATTERN = _re.compile(
+    r'SET_VAR\s*:\s*(\w+)\s*=\s*"((?:[^"\\]|\\.)*)"',
+    _re.IGNORECASE,
+)
+_PLAIN_VAR_PATTERN = _re.compile(
+    r"SET_VAR\s*:\s*(\w+)\s*=\s*(.+)",
+    _re.IGNORECASE,
+)
+
 
 def substitute_vars(text: str, run: dict) -> str:
     """Replace {{var:key}} placeholders with values from run['vars']."""
@@ -52,7 +67,7 @@ def substitute_vars(text: str, run: dict) -> str:
     def _replace(m):
         key = m.group(1).strip()
         return vars_store.get(key, m.group(0))
-    return _re.sub(r"\{\{var:([^}]+)\}\}", _replace, text)
+    return _VAR_SUB_PATTERN.sub(_replace, text)
 
 
 def extract_var_assignments(output: str) -> dict:
@@ -79,11 +94,7 @@ def extract_var_assignments(output: str) -> dict:
     heredoc_spans: list[tuple[int, int]] = []
 
     # Pass 1 — heredoc blocks (multi-line, must go first).
-    heredoc_pat = _re.compile(
-        r"SET_VAR\s*:\s*(\w+)\s*<<(\w+)\n(.*?)\n\2",
-        _re.IGNORECASE | _re.DOTALL,
-    )
-    for m in heredoc_pat.finditer(output):
+    for m in _HEREDOC_PATTERN.finditer(output):
         key = m.group(1)
         body = m.group(3)
         # Strip leading/trailing blank lines from body.
@@ -110,16 +121,12 @@ def extract_var_assignments(output: str) -> dict:
             continue
         stripped = line.strip()
         # Quoted form: SET_VAR: key = "..."
-        m = _re.match(
-            r'SET_VAR\s*:\s*(\w+)\s*=\s*"((?:[^"\\]|\\.)*)"',
-            stripped,
-            _re.IGNORECASE,
-        )
+        m = _QUOTED_VAR_PATTERN.match(stripped)
         if m:
             result[m.group(1)] = m.group(2)
             continue
         # Plain form: SET_VAR: key = value
-        m = _re.match(r"SET_VAR\s*:\s*(\w+)\s*=\s*(.+)", stripped, _re.IGNORECASE)
+        m = _PLAIN_VAR_PATTERN.match(stripped)
         if m:
             result[m.group(1)] = m.group(2).strip()
 
