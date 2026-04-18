@@ -296,6 +296,13 @@ async def _execute_node(run: dict, node: dict, semaphore: asyncio.Semaphore):
             node["stream_buffer"] = ""
             node["output_summary"] = await _maybe_summarize(output, node.get("ai", "claude"))
 
+            # A2: Layer 1+2 memory — index output + persist summary
+            try:
+                from helm.agent.memory import after_node_complete
+                await after_node_complete(run, node)
+            except Exception:
+                pass
+
             elapsed = f"{node['elapsed_seconds']:.1f}s"
             logger.info(
                 "Agent run %s node %s (%s) completed in %s",
@@ -613,6 +620,13 @@ async def execute_agent_run(run_id: str) -> None:
             logger.warning("Could not save final agent run: %s", e)
 
         _st.agent_runs.pop(run_id, None)
+
+        # A2: Layer 3 — write run observation to claude-mem (best-effort)
+        try:
+            from helm.agent.memory import write_run_observation
+            await write_run_observation(run)
+        except Exception:
+            pass
 
         progress = {s: 0 for s in ("completed", "failed", "skipped")}
         for n in run["nodes"]:
