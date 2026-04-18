@@ -151,3 +151,46 @@ def test_manager_reset_vars_in_node_definition():
     }
     defn = node_definition(node)
     assert defn.get("manager_reset_vars") is True
+
+
+# ---------------------------------------------------------------------------
+# B8: Cycle detection in workflow graph
+# ---------------------------------------------------------------------------
+
+def test_has_cycle_detects_simple_cycle():
+    from helm.web_routes.agent_routes import _has_cycle
+    nodes = [
+        {"id": "a", "children": ["b"]},
+        {"id": "b", "children": ["a"]},
+    ]
+    assert _has_cycle(nodes) is True
+
+
+def test_has_cycle_no_cycle():
+    from helm.web_routes.agent_routes import _has_cycle
+    nodes = [
+        {"id": "a", "children": ["b"]},
+        {"id": "b", "children": ["c"]},
+        {"id": "c", "children": []},
+    ]
+    assert _has_cycle(nodes) is False
+
+
+def test_has_cycle_three_node_cycle():
+    from helm.web_routes.agent_routes import _has_cycle
+    nodes = [
+        {"id": "a", "children": ["b"]},
+        {"id": "b", "children": ["c"]},
+        {"id": "c", "children": ["a"]},
+    ]
+    assert _has_cycle(nodes) is True
+
+
+# ---------------------------------------------------------------------------
+# B18: Webhook rate limiting
+# ---------------------------------------------------------------------------
+
+def test_webhook_rate_limit_constants():
+    from helm.web_routes.agent_routes import _WEBHOOK_MIN_INTERVAL, _webhook_last_trigger
+    assert _WEBHOOK_MIN_INTERVAL > 0
+    assert isinstance(_webhook_last_trigger, dict)

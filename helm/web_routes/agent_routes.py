@@ -33,6 +33,36 @@ from helm.agent.runner import trigger_agent_run
 
 router = APIRouter()
 
+# B8: cycle detection — reject graphs with A→B→A cycles on save
+def _has_cycle(nodes: list[dict]) -> bool:
+    """DFS cycle detection on node children graph. Returns True if any cycle found."""
+    children_map: dict[str, list[str]] = {n["id"]: list(n.get("children", [])) for n in nodes}
+    visited: set[str] = set()
+    in_stack: set[str] = set()
+
+    def dfs(node_id: str) -> bool:
+        visited.add(node_id)
+        in_stack.add(node_id)
+        for child_id in children_map.get(node_id, []):
+            if child_id not in visited:
+                if dfs(child_id):
+                    return True
+            elif child_id in in_stack:
+                return True
+        in_stack.discard(node_id)
+        return False
+
+    for node_id in children_map:
+        if node_id not in visited:
+            if dfs(node_id):
+                return True
+    return False
+
+
+# B18: per-agent webhook throttle — track last trigger time
+_webhook_last_trigger: dict[str, float] = {}
+_WEBHOOK_MIN_INTERVAL = 5.0  # seconds
+
 
 # ---------------------------------------------------------------------------
 # List / Get agents
@@ -89,10 +119,13 @@ async def create_agent(request: Request):
     if not name:
         return JSONResponse({"error": "name is required"}, status_code=400)
 
+    parsed_nodes = [_parse_node(n) for n in body.get("nodes", [])]
+    if _has_cycle(parsed_nodes):
+        return JSONResponse({"error": "Workflow graph contains a cycle"}, status_code=400)
     ag = make_agent(
         name=name,
         description=body.get("description", ""),
-        nodes=[_parse_node(n) for n in body.get("nodes", [])],
+        nodes=parsed_nodes,
     )
     _ensure_manager_node(ag["nodes"], manager_title=name)
 
@@ -118,7 +151,10 @@ async def update_agent(agent_id: str, request: Request):
     if "description" in body:
         ag["description"] = body["description"]
     if "nodes" in body:
-        ag["nodes"] = [_parse_node(n) for n in body["nodes"]]
+        parsed_nodes = [_parse_node(n) for n in body["nodes"]]
+        if _has_cycle(parsed_nodes):
+            return JSONResponse({"error": "Workflow graph contains a cycle"}, status_code=400)
+        ag["nodes"] = parsed_nodes
         _ensure_manager_node(ag["nodes"], manager_title=ag["name"])
     if "trigger" in body:
         _apply_trigger(ag, body["trigger"])
@@ -257,6 +293,16 @@ async def webhook_trigger(token: str, request: Request):
     for ag in _st.agents.values():
         webhook = ag.get("trigger", {}).get("webhook", {})
         if webhook.get("enabled") and webhook.get("token") == token:
+            # B18: per-agent rate limit — reject triggers fired too quickly
+            now = time.time()
+            min_interval = webhook.get("min_interval", _WEBHOOK_MIN_INTERVAL)
+            last = _webhook_last_trigger.get(ag["id"], 0.0)
+            if now - last < min_interval:
+                return JSONResponse(
+                    {"error": "Rate limited", "retry_after": min_interval - (now - last)},
+                    status_code=429,
+                )
+            _webhook_last_trigger[ag["id"]] = now
             run = await trigger_agent_run(
                 ag["id"],
                 trigger="webhook",
