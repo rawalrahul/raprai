@@ -435,6 +435,8 @@ Return a JSON array of up to 7 workflow steps (nodes). The backend will add the 
 Rules:
 - Use "input" where user data or approval is required.
 - Use "ai" for reasoning/research/writing/ranking, "shell" for local CLI, "http" for APIs, "file" for files, "condition" for branches, "loop" for repeated item processing, "transform" for cheap data cleanup, "join" for merging branches, and "deliver" for final delivery.
+- PREFER PARALLEL DAGs over linear chains: if two or more steps are independent (do not need each other's output), give them the same parent so they run concurrently. Always use a "join" node to merge parallel branches before steps that need all their outputs.
+- Example parallel pattern: root → [branch_a, branch_b] both as children of root, then join → deliver. Do NOT chain branch_a → branch_b if they are independent.
 - Add RETRY_PARENT guidance to validation/review nodes when quality matters.
 - Include optional config fields only when useful: retry_max, loop_max, timeout, http_method, http_url, file_op, file_path, deliver_channel, deliver_to, input_timeout, transform_op, transform_key, transform_pattern, transform_length, join_separator, manager_max_iter, env_vars.
 - Max 3 children per node
