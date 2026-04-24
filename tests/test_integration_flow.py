@@ -86,3 +86,18 @@ def test_builtin_api_integrations_use_env_key_reference(monkeypatch):
     assert "--api-key-env" in openrouter_cmd
     assert "OPENROUTER_API_KEY" in openrouter_cmd
     assert "secret-openrouter" not in openrouter_cmd
+
+
+def test_openclaw_uses_direct_host_cli(monkeypatch):
+    import integrations.openclaw as openclaw
+
+    monkeypatch.setenv("OPENCLAW_AGENT", "main")
+    monkeypatch.delenv("OPENCLAW_MODEL", raising=False)
+
+    cmd = openclaw.build_command("hello")
+
+    assert cmd[:2] == ["openclaw", "agent"]
+    assert "wsl.exe" not in cmd
+    assert "bash" not in cmd
+    assert "--message" in cmd
+    assert cmd[cmd.index("--message") + 1] == "hello"

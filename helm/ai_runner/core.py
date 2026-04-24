@@ -186,21 +186,9 @@ def is_backend_available(ai_key: str) -> bool:
         except Exception:
             result = False
     elif ai_key == "openclaw":
-        # Check whether openclaw binary is reachable.
-        # Windows: openclaw lives inside WSL2 — probe with wsl -e which.
-        # Linux/Mac: standard PATH check.
-        if sys.platform == "win32":
-            try:
-                rc = subprocess.run(
-                    ["wsl.exe", "-e", "bash", "-lc",
-                     'export PATH="$HOME/.local/bin:$PATH" && which openclaw'],
-                    capture_output=True, timeout=5,
-                ).returncode
-                result = rc == 0
-            except Exception:
-                result = False
-        else:
-            result = bool(shutil.which("openclaw"))
+        # OpenClaw is the direct host CLI integration. WSL probing belongs to
+        # NemoClaw, not OpenClaw.
+        result = bool(shutil.which("openclaw"))
     else:
         # Registered integration — check CLI binary first, then API key env vars
         info = _st.integrations.get(ai_key)
