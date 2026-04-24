@@ -172,9 +172,9 @@
       <div class="sb-section-body" id="sb-panel-agents">
         <div id="agents-list"><div class="sb-empty">No agents yet.</div></div>
         <div style="display:flex;gap:4px;margin:6px 8px 4px;flex-wrap:wrap">
-          <button class="sb-add-btn" style="flex:1" onclick="openAgentBuilderWindow()">✦ New Agent</button>
-          <button class="sb-add-btn" style="background:#1a1a2a;border-color:#3a3a6a;color:#8b9eff" onclick="_importAgentFromFile()" title="Import agent from JSON file">↑ Import</button>
-          <button class="sb-add-btn" style="background:#1a1a2a;border-color:#3a3a6a;color:#8b9eff" onclick="_openMonitorDashboard()" title="Agent run statistics">⚡ Monitor</button>
+          <button id="agent-new-btn" class="sb-add-btn" style="flex:1" title="Create a new agent">✦ New Agent</button>
+          <button id="agent-import-btn" class="sb-add-btn" style="background:#1a1a2a;border-color:#3a3a6a;color:#8b9eff" title="Import agent from JSON file">↑ Import</button>
+          <button id="agent-monitor-btn" class="sb-add-btn" style="background:#1a1a2a;border-color:#3a3a6a;color:#8b9eff" title="Agent run statistics">⚡ Monitor</button>
         </div>
       </div>
     </div>
@@ -756,10 +756,69 @@ Example:
         <div class="ai-int-list" id="ai-int-list">
           <div style="font-size:12px;color:var(--muted);padding:4px 0">Loading…</div>
         </div>
+        <details class="sb-add-form" open style="margin-top:8px">
+          <summary style="cursor:pointer;font-size:11px;color:#06b6d4">Configure Groq, OpenRouter &amp; Local AI</summary>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;font-size:11px">
+            <div class="settings-row" style="padding:0">
+              <label>Groq API key
+                <small>Paste once here. Leave blank to keep the saved key.</small>
+              </label>
+              <div style="display:flex;flex-direction:column;gap:4px;flex:1">
+                <input class="settings-input wide" type="password" id="st-GROQ_API_KEY" placeholder="gsk_..." autocomplete="off">
+                <span id="st-GROQ_API_KEY-status" style="font-size:10px;color:var(--muted)"></span>
+              </div>
+            </div>
+            <div class="settings-row" style="padding:0">
+              <label>OpenRouter API key
+                <small>Paste once here. Leave blank to keep the saved key.</small>
+              </label>
+              <div style="display:flex;flex-direction:column;gap:4px;flex:1">
+                <input class="settings-input wide" type="password" id="st-OPENROUTER_API_KEY" placeholder="sk-or-..." autocomplete="off">
+                <span id="st-OPENROUTER_API_KEY-status" style="font-size:10px;color:var(--muted)"></span>
+              </div>
+            </div>
+            <div class="settings-row" style="padding:0">
+              <label>GitHub Token
+                <small>PAT for GitHub Models (gpt-4o, Llama, Phi-4). No scopes needed.</small>
+              </label>
+              <div style="display:flex;flex-direction:column;gap:4px;flex:1">
+                <input class="settings-input wide" type="password" id="st-GITHUB_TOKEN" placeholder="ghp_..." autocomplete="off">
+                <span id="st-GITHUB_TOKEN-status" style="font-size:10px;color:var(--muted)"></span>
+              </div>
+            </div>
+            <div class="settings-row" style="padding:0">
+              <label>Local AI URL
+                <small>LM Studio: http://localhost:1234, Jan.ai: http://localhost:1337</small>
+              </label>
+              <input class="settings-input wide" type="text" id="st-LOCAL_AI_URL" placeholder="http://localhost:1234">
+            </div>
+            <div class="settings-row" style="padding:0">
+              <label>Local AI model
+                <small>Use the model name shown by your local server</small>
+              </label>
+              <input class="settings-input wide" type="text" id="st-LOCAL_AI_MODEL" placeholder="local-model">
+            </div>
+            <button class="settings-save-btn" onclick="saveSettings()" style="font-size:11px;padding:5px 12px;align-self:flex-start">Save LLM Provider Settings</button>
+          </div>
+        </details>
         <!-- Custom AI integrations -->
         <div id="custom-ai-list" style="margin-top:8px"></div>
         <details class="sb-add-form" style="margin-top:8px">
-          <summary style="cursor:pointer;font-size:11px;color:var(--claude)">+ Add Custom AI</summary>
+          <summary style="cursor:pointer;font-size:11px;color:#06b6d4">+ Add OpenAI-Compatible API</summary>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;font-size:11px">
+            <div style="font-size:10px;color:var(--muted)">Works with: Groq, Together AI, Fireworks AI, LM Studio, Jan.ai, any OpenAI-compatible endpoint</div>
+            <div style="display:flex;gap:6px">
+              <input id="oai-name" placeholder="Display name (e.g. Together AI)" style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px">
+              <input id="oai-emoji" placeholder="Emoji" value="🔌" style="width:50px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px;text-align:center">
+            </div>
+            <input id="oai-url" placeholder="Base URL: https://api.groq.com/openai/v1  or  http://localhost:1234/v1" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px;font-family:monospace">
+            <input id="oai-model" placeholder="Default model: llama-3.3-70b-versatile" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px;font-family:monospace">
+            <input id="oai-key" type="password" placeholder="API key (leave blank for local servers)" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px">
+            <button class="sb-add-btn" onclick="addOpenAICompatIntegration()" style="font-size:11px">Add API Integration</button>
+          </div>
+        </details>
+        <details class="sb-add-form" style="margin-top:8px">
+          <summary style="cursor:pointer;font-size:11px;color:var(--claude)">+ Add Custom CLI Integration</summary>
           <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;font-size:11px">
             <div style="display:flex;gap:6px">
               <input id="cai-key" placeholder="Key (e.g. mygpt)" style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px">
@@ -1203,12 +1262,12 @@ Example:
 </div>
 
 </div><!-- /app -->
-<script src="/js/complete.js?v=3"></script>
+<script src="/js/complete.js?v=6"></script>
 <script src="/js/packages.js?v=2"></script>
 <script src="/js/memory.js?v=2"></script>
-<script src="/js/custom_ai.js?v=2"></script>
+<script src="/js/custom_ai.js?v=3"></script>
 <script src="/js/backup.js?v=2"></script>
-<script src="/js/agents.js?v=9"></script>
+<script src="/js/agents.js?v=10"></script>
 <script>
 // Register PWA service worker
 if ('serviceWorker' in navigator) {

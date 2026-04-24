@@ -53,11 +53,13 @@ def _save_custom_json(entries: list[dict]) -> None:
 def _build_command_fn(command_template: str, stdin_prompt: bool = False):
     """Create a build_command function from a command template string.
 
-    Template supports {prompt} and {model} placeholders.
+    Template supports {python}, {prompt}, and {model} placeholders.
     If stdin_prompt is True, {prompt} is removed from args (piped via stdin).
     """
     def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
         tpl = command_template
+        python_token = "__RAPR_PYTHON_EXE__"
+        tpl = tpl.replace("{python}", python_token)
         if model:
             tpl = tpl.replace("{model}", model)
         else:
@@ -68,9 +70,16 @@ def _build_command_fn(command_template: str, stdin_prompt: bool = False):
             tpl = tpl.replace("{prompt}", prompt)
         else:
             tpl = tpl.replace("{prompt}", "").strip()
-        # Handle Windows .cmd wrappers
-        parts = shlex.split(tpl) if sys.platform != "win32" else tpl.split()
-        return [p for p in parts if p]  # remove empties
+        parts = shlex.split(tpl, posix=(sys.platform != "win32"))
+        cleaned = []
+        for part in parts:
+            part = part.strip()
+            if sys.platform == "win32":
+                part = part.strip('"')
+            if not part:
+                continue
+            cleaned.append(sys.executable if part == python_token else part)
+        return cleaned
     return build_command
 
 
@@ -91,7 +100,12 @@ def add_custom(entry: dict) -> str:
     key = (entry.get("key") or "").strip().lower()
     if not key or not _KEY_RE.match(key):
         raise ValueError(f"Invalid key: must be lowercase alphanumeric, 1-32 chars (got '{key}')")
-    if key in ("claude", "ollama", "shell"):
+    _RESERVED = {
+        "claude", "ollama", "shell",
+        "gemini", "codex", "openrouter", "groq",
+        "local_ai", "github_models", "nemoclaw", "openclaw",
+    }
+    if key in _RESERVED:
         raise ValueError(f"Cannot override built-in AI: {key}")
 
     required = ["name", "command"]
@@ -153,6 +167,12 @@ def remove_custom(key: str) -> bool:
     _st.integrations.pop(key, None)
     logger.info("Custom integration removed: %s", key)
     return True
+
+
+def get_telegram_bot():
+    """Return the configured Telegram bot instance, if available."""
+    app = getattr(_st, "telegram_app", None)
+    return getattr(app, "bot", None) if app else None
 
 
 def _register_custom(entry: dict) -> None:

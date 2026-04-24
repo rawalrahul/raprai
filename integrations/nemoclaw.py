@@ -67,12 +67,16 @@ def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
     Build a WSL command that SSHs into the NemoClaw sandbox and runs
     openclaw agent with the prompt.
 
-    The prompt is piped via stdin (STDIN_PROMPT = True) to avoid hitting
-    Windows' 32 KB CreateProcess command-line length limit.
-
-    Uses SSH with the openshell ssh-proxy to run commands non-interactively
-    inside the sandbox (openshell sandbox connect doesn't support -- commands).
+    Requires Windows with WSL2. Prompt piped via stdin (STDIN_PROMPT = True)
+    to avoid the 32 KB CreateProcess command-line limit.
+    Uses openshell ssh-proxy to run commands non-interactively inside the sandbox.
     """
+    if sys.platform != "win32":
+        raise RuntimeError(
+            "NemoClaw requires Windows with WSL2. "
+            "Not supported on this platform."
+        )
+
     sandbox = _sandbox_name()
 
     # The WSL script:
@@ -118,7 +122,7 @@ STDIN_PROMPT = True
 
 # ── Metadata ─────────────────────────────────────────────────────────────────
 
-ENV_VARS: list[str] = ["NEMOCLAW_SANDBOX"]
+ENV_VARS: list[str] = ["NEMOCLAW_SANDBOX", "OPENSHELL_GATEWAY"]
 
 SETUP_HINT: str = (
     "NemoClaw requires WSL2 + Docker Desktop + OpenShell.  |  "

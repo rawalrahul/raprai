@@ -124,6 +124,49 @@ def test_deliver_node_log_channel():
     assert "delivered" in result.lower() or "ok" in result.lower()
 
 
+def test_deliver_node_terminal_returns_context():
+    node = make_node("Show", "Final:\n\n{{output}}", node_type="deliver")
+    node["deliver_channel"] = "terminal"
+    result = run(execute_deliver_node(node, context="LinkedIn post draft"))
+    assert "Final:" in result
+    assert "LinkedIn post draft" in result
+
+
+def test_deliver_node_telegram_uses_configured_chat_when_missing_to():
+    class FakeBot:
+        def __init__(self):
+            self.messages = []
+
+        async def send_message(self, **kwargs):
+            self.messages.append(kwargs)
+
+    class FakeApp:
+        def __init__(self):
+            self.bot = FakeBot()
+
+    import helm.state as _st
+
+    old_app = _st.telegram_app
+    old_chat_id = _st.telegram_chat_id
+    app = FakeApp()
+    try:
+        _st.telegram_app = app
+        _st.telegram_chat_id = 12345
+        node = make_node("Send", "{{output}}", node_type="deliver")
+        node["deliver_channel"] = "telegram"
+        node["deliver_to"] = ""
+
+        result = run(execute_deliver_node(node, context="final output"))
+    finally:
+        _st.telegram_app = old_app
+        _st.telegram_chat_id = old_chat_id
+
+    assert "ok" in result.lower()
+    assert app.bot.messages
+    assert app.bot.messages[0]["chat_id"] == 12345
+    assert app.bot.messages[0]["text"] == "final output"
+
+
 def test_condition_positive_match():
     result = run(evaluate_condition("Does this text mention Python?", "I love Python programming"))
     assert result is True

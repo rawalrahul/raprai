@@ -99,6 +99,47 @@ async def list_agent_templates():
     return JSONResponse({"templates": templates})
 
 
+@router.get("/api/agents/stats")
+async def agent_stats():
+    """Aggregate run stats across all agents for the monitoring dashboard."""
+    rows = load_all_run_stats()
+    stats_by_agent = {r["agent_id"]: r for r in rows}
+
+    agents_out = []
+    total_runs = total_ok = total_fail = 0
+    for ag in _st.agents.values():
+        s = stats_by_agent.get(ag["id"], {})
+        n_total = s.get("total", 0) or 0
+        n_ok = s.get("ok", 0) or 0
+        n_fail = s.get("fail", 0) or 0
+        avg_sec = s.get("avg_sec")
+        agents_out.append({
+            "id": ag["id"],
+            "name": ag["name"],
+            "total_runs": n_total,
+            "ok_runs": n_ok,
+            "fail_runs": n_fail,
+            "success_rate": round(n_ok / n_total, 3) if n_total else None,
+            "avg_duration": round(avg_sec, 1) if avg_sec is not None else None,
+            "last_run_at": s.get("last_at"),
+            "last_status": s.get("last_status"),
+        })
+        total_runs += n_total
+        total_ok += n_ok
+        total_fail += n_fail
+
+    agents_out.sort(key=lambda a: a["last_run_at"] or 0, reverse=True)
+    return JSONResponse({
+        "agents": agents_out,
+        "totals": {
+            "total_runs": total_runs,
+            "ok_runs": total_ok,
+            "fail_runs": total_fail,
+            "success_rate": round(total_ok / total_runs, 3) if total_runs else None,
+        },
+    })
+
+
 @router.get("/api/agents/{agent_id}")
 async def get_agent(agent_id: str):
     """Get full agent definition."""
@@ -942,10 +983,14 @@ async def import_agent(request: Request):
         new_id = f"{base}_{counter}"
         counter += 1
 
-    agent = make_agent(new_id, name, description)
-    agent["nodes"] = body.get("nodes", [])
+    parsed_nodes = [_parse_node(n) for n in body.get("nodes", [])]
+    if _has_cycle(parsed_nodes):
+        return JSONResponse({"error": "Workflow graph contains a cycle"}, status_code=400)
+
+    agent = make_agent(name=name, description=description, nodes=parsed_nodes)
+    agent["id"] = new_id
     agent["trigger"] = body.get("trigger", {})
-    _ensure_manager_node(agent)
+    _ensure_manager_node(agent["nodes"], manager_title=agent["name"])
     _st.agents[agent["id"]] = agent
     save_agent(agent)
     return JSONResponse({"id": agent["id"], "name": agent["name"]})
@@ -976,51 +1021,8 @@ async def restore_agent_version(agent_id: str, version_id: str):
     # Merge snapshot nodes/trigger back, keep current id/name/description
     ag["nodes"] = snapshot.get("nodes", ag["nodes"])
     ag["trigger"] = snapshot.get("trigger", ag.get("trigger", {}))
-    _ensure_manager_node(ag)
+    _ensure_manager_node(ag["nodes"], manager_title=ag["name"])
     save_agent(ag)
     return JSONResponse({"ok": True, "agent": ag})
 
 
-# ---------------------------------------------------------------------------
-# Monitoring / stats
-# ---------------------------------------------------------------------------
-
-@router.get("/api/agents/stats")
-async def agent_stats():
-    """Aggregate run stats across all agents for the monitoring dashboard."""
-    rows = load_all_run_stats()
-    stats_by_agent = {r["agent_id"]: r for r in rows}
-
-    agents_out = []
-    total_runs = total_ok = total_fail = 0
-    for ag in _st.agents.values():
-        s = stats_by_agent.get(ag["id"], {})
-        n_total = s.get("total", 0) or 0
-        n_ok    = s.get("ok", 0) or 0
-        n_fail  = s.get("fail", 0) or 0
-        avg_sec = s.get("avg_sec")
-        agents_out.append({
-            "id":           ag["id"],
-            "name":         ag["name"],
-            "total_runs":   n_total,
-            "ok_runs":      n_ok,
-            "fail_runs":    n_fail,
-            "success_rate": round(n_ok / n_total, 3) if n_total else None,
-            "avg_duration": round(avg_sec, 1) if avg_sec is not None else None,
-            "last_run_at":  s.get("last_at"),
-            "last_status":  s.get("last_status"),
-        })
-        total_runs += n_total
-        total_ok   += n_ok
-        total_fail += n_fail
-
-    agents_out.sort(key=lambda a: a["last_run_at"] or 0, reverse=True)
-    return JSONResponse({
-        "agents": agents_out,
-        "totals": {
-            "total_runs":   total_runs,
-            "ok_runs":      total_ok,
-            "fail_runs":    total_fail,
-            "success_rate": round(total_ok / total_runs, 3) if total_runs else None,
-        },
-    })

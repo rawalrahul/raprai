@@ -9,6 +9,8 @@ async def execute_deliver_node(node: dict, context: str) -> str:
     template = node.get("task", "").strip()
     message = template.replace("{{output}}", context) if template else context
 
+    if channel in {"", "ui", "terminal", "chat"}:
+        return message
     if channel == "telegram":
         return await _deliver_telegram(node, message)
     if channel == "email":
@@ -21,11 +23,12 @@ async def execute_deliver_node(node: dict, context: str) -> str:
 
 async def _deliver_telegram(node: dict, message: str) -> str:
     try:
+        import helm.state as _st
         from helm.integrations import get_telegram_bot
         bot = get_telegram_bot()
         if not bot:
             return "Error: Telegram bot not configured"
-        chat_id = node.get("deliver_to", "")
+        chat_id = node.get("deliver_to", "") or _st.telegram_chat_id
         if not chat_id:
             return "Error: deliver_to (chat_id) required for telegram channel"
         for chunk_start in range(0, len(message), 4000):

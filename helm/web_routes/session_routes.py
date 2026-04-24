@@ -5,6 +5,7 @@ helm/web_routes/session_routes.py — Session creation/deletion, integration sta
 import asyncio
 import os
 import pathlib
+import re
 import string as _string
 import sys
 from fastapi import APIRouter
@@ -12,10 +13,51 @@ from fastapi.responses import JSONResponse
 
 import helm.state as _st
 from helm.session_mgr import session_cwd
-from .app import _find_cli, windows_folder_picker
+from .app import _find_cli, update_env, windows_folder_picker
 
 
 router = APIRouter()
+
+
+_CUSTOM_ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,127}$")
+
+
+def _command_binary_found(cmd: list[str]) -> bool:
+    """Return whether the executable from a generated integration command exists."""
+    if not cmd:
+        return False
+    exe = (cmd[0] or "").strip()
+    if not exe:
+        return False
+    if exe == sys.executable:
+        return pathlib.Path(exe).exists()
+    if os.path.isabs(exe):
+        return pathlib.Path(exe).exists()
+    return _find_cli(exe)
+
+
+def _integration_ready(key: str, info: dict) -> bool:
+    """Readiness check for both CLI and Python/API-backed integrations."""
+    if key == "nemoclaw":
+        try:
+            from helm.ai_runner.nemoclaw_bridge import is_available
+            return bool(is_available())
+        except Exception:
+            return False
+
+    if key in {"openrouter", "groq", "local_ai"}:
+        try:
+            from helm.ai_runner.core import is_backend_available
+            return bool(is_backend_available(key))
+        except Exception:
+            pass
+
+    env_vars_ok = all(os.environ.get(v, "").strip() for v in info.get("env_vars", []))
+    try:
+        command_ok = _command_binary_found(info["build_command"]("test", model=None))
+    except Exception:
+        command_ok = False
+    return command_ok and env_vars_ok
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +143,7 @@ async def list_integrations_endpoint():
             else:
                 cli_ok = _find_cli(key)
             env_vars_ok = all(os.environ.get(v, "").strip() for v in info.get("env_vars", []))
-            ready = cli_ok and env_vars_ok
+            ready = _integration_ready(key, info)
             result.append({
                 "key":        key,
                 "name":       info["name"],
@@ -263,7 +305,7 @@ async def rescan_integrations():
                 found = False
                 try:
                     cmd = info["build_command"]("test", model=None)
-                    found = _find_cli(cmd[0]) if cmd else False
+                    found = _integration_ready(key, info)
                 except Exception:
                     pass
             items.append({
@@ -385,6 +427,7 @@ class CustomAIRequest(BaseModel):
     color: str = "#6b7280"
     command: str                  # e.g. "mygpt --model {model} --prompt {prompt}"
     env_vars: list[str] = []
+    env_values: dict[str, str] = {}
     setup_hint: str = ""
     stdin_prompt: bool = False
 
@@ -412,7 +455,21 @@ async def add_custom_integration(req: CustomAIRequest):
     """Add a new custom AI integration."""
     from helm.integrations import add_custom
     try:
-        key = add_custom(req.model_dump())
+        payload = req.model_dump()
+        env_values = payload.pop("env_values", {}) or {}
+        pending_env = []
+        for env_key, env_value in env_values.items():
+            env_key = (env_key or "").strip().upper()
+            env_value = (env_value or "").strip()
+            if not env_key or not env_value:
+                continue
+            if not _CUSTOM_ENV_RE.match(env_key):
+                return {"ok": False, "error": f"Invalid env var name: {env_key}"}
+            pending_env.append((env_key, env_value))
+        key = add_custom(payload)
+        for env_key, env_value in pending_env:
+            update_env(env_key, env_value)
+            os.environ[env_key] = env_value
         return {"ok": True, "key": key}
     except ValueError as e:
         return {"ok": False, "error": str(e)}

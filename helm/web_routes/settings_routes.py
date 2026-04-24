@@ -6,6 +6,9 @@ import asyncio
 import json
 import os
 import pathlib
+import shlex
+import urllib.error
+import urllib.request
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
@@ -17,6 +20,83 @@ from .helpers import _fetch_claude_models, _fetch_ollama_models, _fetch_openai_m
 
 
 router = APIRouter()
+
+
+_KNOWN_OPENROUTER_MODELS = [
+    "anthropic/claude-sonnet-4-5",
+    "openai/gpt-4o",
+    "google/gemini-2.0-flash-001",
+    "meta-llama/llama-3.3-70b-instruct",
+    "mistralai/mistral-large-2411",
+    "deepseek/deepseek-chat-v3-0324",
+]
+
+_KNOWN_GROQ_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "deepseek-r1-distill-llama-70b",
+    "gemma2-9b-it",
+    "mixtral-8x7b-32768",
+]
+
+
+def _clear_backend_availability_cache(*keys: str) -> None:
+    """Clear cached provider availability after settings/API keys change."""
+    try:
+        from helm.ai_runner.core import _availability_cache
+        for key in keys:
+            _availability_cache.pop(key, None)
+    except Exception:
+        pass
+
+
+def _split_integration_command(command: str) -> list[str]:
+    return [p.strip('"') for p in shlex.split(command or "", posix=False) if p.strip()]
+
+
+def _command_arg(parts: list[str], flag: str) -> str:
+    try:
+        idx = parts.index(flag)
+    except ValueError:
+        return ""
+    return parts[idx + 1] if idx + 1 < len(parts) else ""
+
+
+def _fetch_openai_compat_models(base_url: str, api_key: str = "", timeout: int = 5) -> list[str]:
+    """Fetch model ids from an OpenAI-compatible /models endpoint."""
+    if not base_url:
+        return []
+    url = base_url.rstrip("/") + "/models"
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, json.JSONDecodeError):
+        return []
+    data = body.get("data", body if isinstance(body, list) else [])
+    models = []
+    for item in data:
+        if isinstance(item, dict) and item.get("id"):
+            models.append(str(item["id"]))
+        elif isinstance(item, str):
+            models.append(item)
+    return sorted(set(models))
+
+
+def _custom_openai_models(entry: dict) -> list[str]:
+    command = entry.get("command", "")
+    if "_openai_compat_cli" not in command:
+        return []
+    parts = _split_integration_command(command)
+    base_url = _command_arg(parts, "--base-url")
+    api_key = _command_arg(parts, "--api-key")
+    api_key_env = _command_arg(parts, "--api-key-env")
+    if not api_key and api_key_env:
+        api_key = os.environ.get(api_key_env, "")
+    return _fetch_openai_compat_models(base_url, api_key=api_key)
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +137,7 @@ async def save_settings(request: Request):
     # Reload dotenv so any module that reads os.environ gets fresh values
     from helm.web_routes.app import reload_env
     reload_env()
+    _clear_backend_availability_cache("local_ai")
     return JSONResponse({"saved": saved, "skipped": skipped})
 
 
@@ -145,6 +226,44 @@ async def integration_models():
             info["models"]["gemini"] = []
             info.setdefault("errors", {})["gemini"] = str(e)
 
+        try:
+            fetched = _fetch_openai_compat_models(
+                "https://openrouter.ai/api/v1",
+                api_key=os.environ.get("OPENROUTER_API_KEY", ""),
+            )
+            info["models"]["openrouter"] = fetched or _KNOWN_OPENROUTER_MODELS
+        except Exception as e:
+            info["models"]["openrouter"] = _KNOWN_OPENROUTER_MODELS
+            info.setdefault("errors", {})["openrouter"] = str(e)
+
+        try:
+            fetched = _fetch_openai_compat_models(
+                "https://api.groq.com/openai/v1",
+                api_key=os.environ.get("GROQ_API_KEY", ""),
+            )
+            info["models"]["groq"] = fetched or _KNOWN_GROQ_MODELS
+        except Exception as e:
+            info["models"]["groq"] = _KNOWN_GROQ_MODELS
+            info.setdefault("errors", {})["groq"] = str(e)
+
+        try:
+            local_url = os.environ.get("LOCAL_AI_URL", "http://localhost:1234").rstrip("/") + "/v1"
+            info["models"]["local_ai"] = _fetch_openai_compat_models(local_url)
+        except Exception as e:
+            info["models"]["local_ai"] = []
+            info.setdefault("errors", {})["local_ai"] = str(e)
+
+        try:
+            from helm.integrations import list_custom
+            for entry in list_custom():
+                key = entry.get("key")
+                if key and key not in info["models"]:
+                    info["models"][key] = _custom_openai_models(entry)
+        except Exception as e:
+            info.setdefault("errors", {})["custom"] = str(e)
+
+        info["status"] = "ok"
+
         return info
 
     result = await asyncio.to_thread(_gather)
@@ -200,7 +319,7 @@ async def integration_models_debug():
 async def save_api_key(request: Request):
     """Save a core API key through the encrypted vault.
 
-    Body: ``{"env_key": "GEMINI_API_KEY", "value": "AIza..."}``
+    Body: ``{"env_key": "GROQ_API_KEY", "value": "gsk_..."}``
 
     The key is encrypted via Fernet and stored in the SQLite token_vault.
     The ``.env`` file receives a ``vault-managed`` placeholder so the
@@ -226,6 +345,13 @@ async def save_api_key(request: Request):
     store_token(env_key, value)
     # Replace .env entry with placeholder
     update_env(env_key, "vault-managed")
+    os.environ[env_key] = value
+    if env_key == "GROQ_API_KEY":
+        _clear_backend_availability_cache("groq")
+    elif env_key == "OPENROUTER_API_KEY":
+        _clear_backend_availability_cache("openrouter")
+    elif env_key == "GITHUB_TOKEN":
+        _clear_backend_availability_cache("github_models")
 
     logger.info("API key saved via vault: %s", env_key)
     return JSONResponse({"ok": True, "env_key": env_key})
@@ -245,6 +371,13 @@ async def delete_api_key(env_key: str):
 
     delete_token(env_key)
     update_env(env_key, "")
+    os.environ.pop(env_key, None)
+    if env_key == "GROQ_API_KEY":
+        _clear_backend_availability_cache("groq")
+    elif env_key == "OPENROUTER_API_KEY":
+        _clear_backend_availability_cache("openrouter")
+    elif env_key == "GITHUB_TOKEN":
+        _clear_backend_availability_cache("github_models")
     logger.info("API key removed from vault: %s", env_key)
     return JSONResponse({"ok": True, "env_key": env_key})
 

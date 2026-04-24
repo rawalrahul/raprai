@@ -25,7 +25,7 @@ EMOJI = "⭐"          # Single emoji shown on the button (keep it one char).
 
 # ── Command builder (REQUIRED) ────────────────────────────────────────────────
 
-def build_command(prompt: str) -> list[str]:
+def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
     """
     Return the shell command that runs your AI CLI with `prompt` as input.
 

@@ -25,6 +25,14 @@ async function loadIntegrations(){
     const res = await fetch('/integrations');
     if(!res.ok) return;
     const integrations = await res.json();
+    document.querySelectorAll('.ai-menu-item[data-new-ai]').forEach(btn=>btn.remove());
+    const oldStyle = document.getElementById('dynamic-integration-styles');
+    if(oldStyle) oldStyle.remove();
+    Object.keys(_integrationKeys || {}).forEach(key=>{
+      delete AI_LABEL[key];
+      delete AI_COLOR[key];
+    });
+    _integrationKeys = {};
     if(!integrations.length) return;
     const root = document.documentElement;
     let css = '';
@@ -55,6 +63,7 @@ async function loadIntegrations(){
       shellBtn.parentNode.insertBefore(btn, shellBtn);
     }
     const styleEl = document.createElement('style');
+    styleEl.id = 'dynamic-integration-styles';
     styleEl.textContent = css;
     document.head.appendChild(styleEl);
     _sbSchedPopulateAi();
@@ -1816,13 +1825,59 @@ function closeSettings(){
   document.getElementById('st-pin-err').style.display = 'none';
 }
 
+const _PROVIDER_API_KEY_SETTINGS = ['GROQ_API_KEY', 'OPENROUTER_API_KEY', 'GITHUB_TOKEN'];
+
+function _setProviderApiKeyStatus(key, item){
+  const statusEl = document.getElementById('st-' + key + '-status');
+  const inputEl = document.getElementById('st-' + key);
+  if(inputEl) inputEl.value = '';
+  if(!statusEl) return;
+  if(item && item.configured){
+    statusEl.textContent = 'Saved securely' + (item.preview ? ` (${item.preview})` : '');
+    statusEl.style.color = 'var(--accent)';
+  } else {
+    statusEl.textContent = 'Not configured';
+    statusEl.style.color = 'var(--muted)';
+  }
+}
+
+function loadProviderApiKeyStatus(){
+  return fetch('/settings/api-keys')
+    .then(r=>r.json())
+    .then(d=>{
+      _PROVIDER_API_KEY_SETTINGS.forEach(k=>_setProviderApiKeyStatus(k, d[k]));
+    })
+    .catch(()=>{});
+}
+
+function saveProviderApiKeys(){
+  const saves = [];
+  _PROVIDER_API_KEY_SETTINGS.forEach(k=>{
+    const el = document.getElementById('st-' + k);
+    const value = el ? el.value.trim() : '';
+    if(!value) return;
+    saves.push(
+      fetch('/settings/api-keys', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','x-csrf-token':_csrfToken()},
+        body: JSON.stringify({env_key: k, value})
+      }).then(r=>{
+        if(!r.ok) throw new Error('Failed to save ' + k);
+        return r.json();
+      })
+    );
+  });
+  return Promise.all(saves);
+}
+
 function loadSettings(){
   fetch('/settings').then(r=>r.json()).then(d=>{
     const keys = ['OUTPUT_IDLE_TIMEOUT','OUTPUT_MAX_WAIT','OUTPUT_NO_RESPONSE',
                   'CLAUDE_TIMEOUT','SESSION_DAYS','WEB_PORT','WEB_HOST',
                   'HEARTBEAT_ENABLED','HEARTBEAT_AI',
                   'AI_MAX_RETRIES','AI_AUTO_SWITCH',
-                  'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD'];
+                  'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD',
+                  'LOCAL_AI_URL','LOCAL_AI_MODEL'];
     keys.forEach(k=>{
       const el = document.getElementById('st-'+k);
       if(el && d[k] !== undefined && d[k] !== '') el.value = d[k];
@@ -1845,6 +1900,7 @@ function loadSettings(){
 
     // Dynamically populate AI dropdowns (heartbeat + pipeline planner)
     _populateAiDropdowns(d);
+    loadProviderApiKeyStatus();
   }).catch(()=>{});
 }
 
@@ -1885,7 +1941,8 @@ function saveSettings(){
                 'CLAUDE_TIMEOUT','SESSION_DAYS','WEB_PORT','WEB_HOST',
                 'HEARTBEAT_ENABLED','HEARTBEAT_AI',
                 'AI_MAX_RETRIES','AI_AUTO_SWITCH',
-                'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD'];
+                'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD',
+                'LOCAL_AI_URL','LOCAL_AI_MODEL'];
   const body = {};
   keys.forEach(k=>{
     const el = document.getElementById('st-'+k);
@@ -1900,7 +1957,11 @@ function saveSettings(){
   }
   fetch('/settings',{method:'POST',headers:{'Content-Type':'application/json','x-csrf-token':_csrfToken()},body:JSON.stringify(body)})
     .then(r=>r.json())
+    .then(()=>saveProviderApiKeys())
     .then(()=>{
+      loadProviderApiKeyStatus();
+      loadIntegrationStatus();
+      loadDefaultModels();
       const msg = document.getElementById('st-msg');
       msg.textContent = 'Saved ✓';
       msg.classList.add('show');

@@ -227,6 +227,362 @@ def test_final_worker_node_detects_only_non_manager_leaf_nodes():
     assert _is_final_worker_node(run, manager) is False
 
 
+def test_telegram_final_output_sends_only_leaf_node():
+    from helm.agent.executor import _send_final_node_output_to_telegram
+
+    class FakeBot:
+        def __init__(self):
+            self.messages = []
+
+        async def send_message(self, **kwargs):
+            self.messages.append(kwargs)
+
+    class FakeApp:
+        def __init__(self):
+            self.bot = FakeBot()
+
+    old_app = _st.telegram_app
+    old_chat_id = _st.telegram_chat_id
+    app = FakeApp()
+    try:
+        _st.telegram_app = app
+        _st.telegram_chat_id = 12345
+
+        first = make_node("First", "do first", node_id="first")
+        final = make_node("Final", "write report", node_id="final")
+        manager = make_node("Manager", "review", node_type="manager", node_id="manager")
+        first["children"] = ["final"]
+        first["output"] = "intermediate output"
+        final["output"] = "final output"
+        manager["children"] = ["first", "final"]
+        run = {"trigger": "ui", "nodes": [first, final, manager]}
+
+        asyncio.run(_send_final_node_output_to_telegram(run, first))
+        asyncio.run(_send_final_node_output_to_telegram(run, final))
+    finally:
+        _st.telegram_app = old_app
+        _st.telegram_chat_id = old_chat_id
+
+    assert len(app.bot.messages) == 1
+    assert app.bot.messages[0]["chat_id"] == 12345
+    assert "Final output - Final" in app.bot.messages[0]["text"]
+    assert "final output" in app.bot.messages[0]["text"]
+    assert "intermediate output" not in app.bot.messages[0]["text"]
+
+
+def test_telegram_final_output_skips_telegram_deliver_node_to_avoid_duplicate():
+    from helm.agent.executor import _send_final_node_output_to_telegram
+
+    class FakeBot:
+        def __init__(self):
+            self.messages = []
+
+        async def send_message(self, **kwargs):
+            self.messages.append(kwargs)
+
+    class FakeApp:
+        def __init__(self):
+            self.bot = FakeBot()
+
+    old_app = _st.telegram_app
+    old_chat_id = _st.telegram_chat_id
+    app = FakeApp()
+    try:
+        _st.telegram_app = app
+        _st.telegram_chat_id = 12345
+
+        deliver = make_node("Deliver", "", node_type="deliver", node_id="deliver")
+        deliver["deliver_channel"] = "telegram"
+        deliver["output"] = "OK: delivered 12 chars to Telegram chat 12345"
+        run = {"trigger": "telegram", "nodes": [deliver]}
+
+        asyncio.run(_send_final_node_output_to_telegram(run, deliver))
+    finally:
+        _st.telegram_app = old_app
+        _st.telegram_chat_id = old_chat_id
+
+    assert app.bot.messages == []
+
+
+def test_telegram_final_output_sends_final_file_artifact():
+    from helm.agent.executor import _send_final_node_output_to_telegram
+    import pathlib
+    import shutil
+
+    class FakeBot:
+        def __init__(self):
+            self.messages = []
+            self.documents = []
+
+        async def send_message(self, **kwargs):
+            self.messages.append(kwargs)
+
+        async def send_document(self, **kwargs):
+            self.documents.append({
+                "chat_id": kwargs["chat_id"],
+                "name": pathlib.Path(kwargs["document"].name).name,
+                "caption": kwargs.get("caption", ""),
+            })
+
+    class FakeApp:
+        def __init__(self):
+            self.bot = FakeBot()
+
+    tmp_path = pathlib.Path(os.getcwd()) / f"pytest-agent-telegram-file-{time.time_ns()}"
+    tmp_path.mkdir()
+    final_file = tmp_path / "final_post.html"
+    old_app = _st.telegram_app
+    old_chat_id = _st.telegram_chat_id
+    app = FakeApp()
+    try:
+        final_file.write_text("<h1>Final post</h1>", encoding="utf-8")
+        _st.telegram_app = app
+        _st.telegram_chat_id = 12345
+
+        final = make_node("Final", "create html", node_id="final")
+        final["status"] = "completed"
+        final["output"] = "Created final_post.html"
+        run = {
+            "trigger": "ui",
+            "nodes": [final],
+            "_generated_files": [str(final_file)],
+            "_generated_files_by_node": {"final": [str(final_file)]},
+        }
+
+        asyncio.run(_send_final_node_output_to_telegram(run, final))
+    finally:
+        _st.telegram_app = old_app
+        _st.telegram_chat_id = old_chat_id
+        shutil.rmtree(tmp_path, ignore_errors=True)
+
+    assert len(app.bot.messages) == 1
+    assert len(app.bot.documents) == 1
+    assert app.bot.documents[0]["chat_id"] == 12345
+    assert app.bot.documents[0]["name"] == "final_post.html"
+    assert "final_post.html" in app.bot.documents[0]["caption"]
+
+
+def test_cleanup_intermediate_generated_files_preserves_final_leaf_output():
+    from helm.agent.executor import _cleanup_intermediate_generated_files
+    import pathlib
+    import shutil
+
+    tmp_path = pathlib.Path(os.getcwd()) / f"pytest-agent-cleanup-{time.time_ns()}"
+    tmp_path.mkdir()
+    intermediate = tmp_path / "scratch.py"
+    final_output = tmp_path / "Final_Report.md"
+    preexisting = tmp_path / "keep_existing.txt"
+    try:
+        intermediate.write_text("temporary script", encoding="utf-8")
+        final_output.write_text("final report", encoding="utf-8")
+        preexisting.write_text("not generated by workflow", encoding="utf-8")
+
+        first = make_node("Scratch", "make scratch", node_id="first")
+        first["status"] = "completed"
+        final = make_node("Final", "make final", node_id="final")
+        final["status"] = "completed"
+        first["children"] = ["final"]
+        run = {
+            "id": "run-cleanup-leaf",
+            "nodes": [first, final],
+            "_workflow_cwds": [str(tmp_path)],
+            "_generated_files": [str(intermediate), str(final_output)],
+            "_final_output_files": [str(final_output)],
+            "_generated_files_by_node": {
+                "first": [str(intermediate)],
+                "final": [str(final_output)],
+            },
+        }
+
+        deleted = asyncio.run(_cleanup_intermediate_generated_files(run))
+
+        assert str(intermediate.resolve()) in deleted
+        assert not intermediate.exists()
+        assert final_output.exists()
+        assert preexisting.exists()
+    finally:
+        shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+def test_cleanup_preserves_final_leaf_generated_script_when_expected_output():
+    from helm.agent.executor import _cleanup_intermediate_generated_files
+    import pathlib
+    import shutil
+
+    tmp_path = pathlib.Path(os.getcwd()) / f"pytest-agent-cleanup-{time.time_ns()}"
+    tmp_path.mkdir()
+    scratch = tmp_path / "scratch.json"
+    final_script = tmp_path / "deliverable_script.py"
+    try:
+        scratch.write_text("scratch", encoding="utf-8")
+        final_script.write_text("print('deliverable')", encoding="utf-8")
+
+        first = make_node("Scratch", "make scratch", node_id="first")
+        first["status"] = "completed"
+        final = make_node("Final Script", "create final script", node_id="final")
+        final["status"] = "completed"
+        first["children"] = ["final"]
+        run = {
+            "id": "run-cleanup-script",
+            "nodes": [first, final],
+            "_workflow_cwds": [str(tmp_path)],
+            "_generated_files": [str(scratch), str(final_script)],
+            "_generated_files_by_node": {
+                "first": [str(scratch)],
+                "final": [str(final_script)],
+            },
+        }
+
+        deleted = asyncio.run(_cleanup_intermediate_generated_files(run))
+
+        assert str(scratch.resolve()) in deleted
+        assert not scratch.exists()
+        assert final_script.exists()
+    finally:
+        shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+def test_persist_final_text_output_creates_output_file_and_cleanup_removes_script():
+    from helm.agent.executor import _cleanup_intermediate_generated_files, _persist_final_text_output
+    import pathlib
+    import shutil
+
+    tmp_path = pathlib.Path(os.getcwd()) / f"pytest-agent-cleanup-{time.time_ns()}"
+    tmp_path.mkdir()
+    script = tmp_path / "searchnews.py"
+    try:
+        script.write_text("print('helper')", encoding="utf-8")
+
+        draft = make_node("Draft LinkedIn Post", "draft", node_id="draft")
+        draft["status"] = "completed"
+        deliver = make_node("Final Delivery", "", node_type="deliver", node_id="deliver")
+        deliver["status"] = "completed"
+        deliver["deliver_channel"] = "terminal"
+        draft["children"] = ["deliver"]
+
+        run = {
+            "id": "run-linkedin-test",
+            "agent_name": "LinkedIn Content Generator",
+            "nodes": [draft, deliver],
+            "_workflow_cwds": [str(tmp_path)],
+            "_generated_files": [str(script)],
+            "_generated_files_by_node": {"draft": [str(script)]},
+        }
+
+        output_path = asyncio.run(
+            _persist_final_text_output(
+                run,
+                deliver,
+                str(tmp_path),
+                "Here is the final LinkedIn post.",
+            )
+        )
+        deleted = asyncio.run(_cleanup_intermediate_generated_files(run))
+
+        assert output_path
+        final_file = pathlib.Path(output_path)
+        assert final_file.exists()
+        assert "Here is the final LinkedIn post." in final_file.read_text(encoding="utf-8")
+        assert str(script.resolve()) in deleted
+        assert not script.exists()
+    finally:
+        shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+def test_cleanup_runs_after_workflow_output_before_manager_review():
+    from helm.agent.executor import _cleanup_after_workflow_outputs
+    import pathlib
+    import shutil
+
+    tmp_path = pathlib.Path(os.getcwd()) / f"pytest-agent-cleanup-{time.time_ns()}"
+    tmp_path.mkdir()
+    script = tmp_path / "generate_news_report.py"
+    data = tmp_path / "trending_ai_news_2026.json"
+    final_output = tmp_path / "linkedin_content_generator_final_delivery.txt"
+    try:
+        script.write_text("print('helper')", encoding="utf-8")
+        data.write_text('{"items": []}', encoding="utf-8")
+        final_output.write_text("final LinkedIn post", encoding="utf-8")
+
+        topic = make_node("Topic Selection", "topic", node_id="topic")
+        topic["status"] = "completed"
+        draft = make_node("Draft LinkedIn Post", "draft", node_id="draft")
+        draft["status"] = "completed"
+        deliver = make_node("Final Delivery", "", node_type="deliver", node_id="deliver")
+        deliver["status"] = "completed"
+        deliver["deliver_channel"] = "ui"
+        manager = make_node("Manager Review", "review", node_type="manager", node_id="manager")
+        manager["status"] = "pending"
+        topic["children"] = ["draft"]
+        draft["children"] = ["deliver"]
+        manager["children"] = ["topic", "draft", "deliver"]
+        run = {
+            "id": "run-cleanup-before-manager",
+            "nodes": [topic, draft, deliver, manager],
+            "_workflow_cwds": [str(tmp_path)],
+            "_generated_files": [str(script), str(data), str(final_output)],
+            "_final_output_files": [str(final_output)],
+            "_generated_files_by_node": {
+                "topic": [str(data)],
+                "draft": [str(script)],
+                "deliver": [str(final_output)],
+            },
+        }
+
+        asyncio.run(_cleanup_after_workflow_outputs(run))
+
+        assert not script.exists()
+        assert not data.exists()
+        assert final_output.exists()
+        assert run["_workflow_output_cleanup_done"] is True
+    finally:
+        shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+def test_cleanup_intermediate_generated_files_preserves_delivered_parent_output():
+    from helm.agent.executor import _cleanup_intermediate_generated_files
+    import pathlib
+    import shutil
+
+    tmp_path = pathlib.Path(os.getcwd()) / f"pytest-agent-cleanup-{time.time_ns()}"
+    tmp_path.mkdir()
+    scratch = tmp_path / "scratch.json"
+    final_output = tmp_path / "final.md"
+    try:
+        scratch.write_text("scratch", encoding="utf-8")
+        final_output.write_text("final", encoding="utf-8")
+
+        first = make_node("Scratch", "make scratch", node_id="first")
+        first["status"] = "completed"
+        final_file = make_node("Final File", "make final", node_type="file", node_id="final_file")
+        final_file["status"] = "completed"
+        final_file["file_op"] = "write"
+        final_file["file_path"] = str(final_output)
+        deliver = make_node("Deliver", "", node_type="deliver", node_id="deliver")
+        deliver["status"] = "completed"
+        first["children"] = ["final_file"]
+        final_file["children"] = ["deliver"]
+
+        run = {
+            "id": "run-cleanup-deliver",
+            "nodes": [first, final_file, deliver],
+            "_workflow_cwds": [str(tmp_path)],
+            "_generated_files": [str(scratch), str(final_output)],
+            "_generated_files_by_node": {
+                "first": [str(scratch)],
+                "final_file": [str(final_output)],
+            },
+        }
+
+        deleted = asyncio.run(_cleanup_intermediate_generated_files(run))
+
+        assert str(scratch.resolve()) in deleted
+        assert not scratch.exists()
+        assert final_output.exists()
+    finally:
+        shutil.rmtree(tmp_path, ignore_errors=True)
+
+
 from helm.agent.nodes.manager import focus_manager_session, parse_manager_reply, is_approval
 
 def test_is_approval_yes():

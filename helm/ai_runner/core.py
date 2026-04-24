@@ -173,10 +173,36 @@ def is_backend_available(ai_key: str) -> bool:
     elif ai_key == "ollama":
         result = bool(shutil.which("ollama"))
     elif ai_key == "openrouter":
-        # OpenRouter uses HTTP API — available when API key is set
         result = bool(os.environ.get("OPENROUTER_API_KEY", "").strip())
+    elif ai_key == "groq":
+        result = bool(os.environ.get("GROQ_API_KEY", "").strip())
+    elif ai_key == "local_ai":
+        # Available when LOCAL_AI_URL is set or when the default LM Studio port responds
+        url = os.environ.get("LOCAL_AI_URL", "http://localhost:1234").rstrip("/")
+        try:
+            import urllib.request as _ur
+            _ur.urlopen(f"{url}/v1/models", timeout=1)
+            result = True
+        except Exception:
+            result = False
+    elif ai_key == "openclaw":
+        # Check whether openclaw binary is reachable.
+        # Windows: openclaw lives inside WSL2 — probe with wsl -e which.
+        # Linux/Mac: standard PATH check.
+        if sys.platform == "win32":
+            try:
+                rc = subprocess.run(
+                    ["wsl.exe", "-e", "bash", "-lc",
+                     'export PATH="$HOME/.local/bin:$PATH" && which openclaw'],
+                    capture_output=True, timeout=5,
+                ).returncode
+                result = rc == 0
+            except Exception:
+                result = False
+        else:
+            result = bool(shutil.which("openclaw"))
     else:
-        # Registered integration — check CLI binary
+        # Registered integration — check CLI binary first, then API key env vars
         info = _st.integrations.get(ai_key)
         if not info:
             result = False
@@ -184,7 +210,17 @@ def is_backend_available(ai_key: str) -> bool:
             try:
                 test_cmd = info["build_command"]("test", model=None)
                 cli_name = test_cmd[0] if test_cmd else ai_key
-                result = bool(shutil.which(cli_name))
+                env_vars = info.get("env_vars", [])
+                if cli_name == sys.executable:
+                    # Python-subprocess integration — check env vars, not PATH
+                    result = (
+                        any(os.environ.get(v, "").strip() for v in env_vars)
+                        if env_vars else True
+                    )
+                elif shutil.which(cli_name):
+                    result = True
+                else:
+                    result = False
             except Exception:
                 result = False
 
@@ -218,12 +254,20 @@ def resolve_ai_spec(ai_spec: str) -> tuple[str, str | None]:
     # Map provider aliases to known backend keys
     _PROVIDER_MAP = {
         "anthropic": "claude",
-        "claude": "claude",
-        "ollama": "ollama",
-        "gemini": "gemini",
-        "google": "gemini",
+        "claude":    "claude",
+        "ollama":    "ollama",
+        "gemini":    "gemini",
+        "google":    "gemini",
         "openrouter": "openrouter",
-        "codex": "codex",
+        "codex":     "codex",
+        "groq":      "groq",
+        "local_ai":       "local_ai",
+        "local":          "local_ai",
+        "lmstudio":       "local_ai",
+        "jan":            "local_ai",
+        "github_models":  "github_models",
+        "github":         "github_models",
+        "openclaw":       "openclaw",
     }
     backend = _PROVIDER_MAP.get(provider, provider)
     return backend, model
@@ -246,18 +290,17 @@ def _find_available_ais(exclude: str) -> list[str]:
         elif ai_key == "ollama" and shutil.which("ollama"):
             available.append(ai_key)
 
-    # Check registered integration CLIs
-    for ai_key, info in _st.integrations.items():
+    # Check registered integrations via is_backend_available (uses cache).
+    # Avoids the sys.executable / wsl.exe false-positive: both always pass
+    # shutil.which even when the underlying binary or API key is absent.
+    for ai_key in _st.integrations:
         if ai_key == exclude:
             continue
-        # Integration build_command returns a list; the first element is the CLI name
         try:
-            test_cmd = info["build_command"]("test", model=None)
-            cli_name = test_cmd[0] if test_cmd else ai_key
-            if shutil.which(cli_name):
+            if is_backend_available(ai_key):
                 available.append(ai_key)
         except Exception:
-            pass  # skip broken integrations
+            pass
 
     return available
 
@@ -772,7 +815,7 @@ async def process_message(text: str, source: str = "web",
         mid = add_memory(
             content=content,
             category=category,
-            source_ai=ai,
+            source_ai=sess.get("ai", "unknown"),
             session_id=sid,
         )
         msg = f"🧠 Remembered: **[{category}]** {content}"

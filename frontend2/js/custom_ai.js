@@ -71,14 +71,66 @@ function addCustomAI(){
   }).catch(e => alert('Failed: ' + e.message));
 }
 
+function addOpenAICompatIntegration(){
+  const name  = (document.getElementById('oai-name')?.value  || '').trim();
+  const emoji = (document.getElementById('oai-emoji')?.value || 'ðŸ”Œ').trim();
+  const url   = (document.getElementById('oai-url')?.value   || '').trim();
+  const model = (document.getElementById('oai-model')?.value || '').trim();
+  const apiKey= (document.getElementById('oai-key')?.value   || '').trim();
+
+  if(!name || !url || !model){
+    alert('Name, Base URL, and Default Model are required');
+    return;
+  }
+
+  const key = 'oai_' + name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  const envKey = 'CUSTOM_AI_' + key.toUpperCase().replace(/[^A-Z0-9]+/g, '_') + '_API_KEY';
+
+  const cmd_parts = ['{python}', '-m', 'helm.ai_runner._openai_compat_cli',
+                     '--base-url', url, '--model', model];
+  if(apiKey) cmd_parts.push('--api-key-env', envKey);
+  const command = cmd_parts.join(' ');
+
+  const env_vars = apiKey ? [envKey] : [];
+  const env_values = apiKey ? {[envKey]: apiKey} : {};
+
+  fetch('/integrations/custom', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      key, name, emoji,
+      color: '#06b6d4',
+      command,
+      env_vars,
+      env_values,
+      setup_hint: `OpenAI-compatible endpoint: ${url}  |  Model: ${model}`,
+      stdin_prompt: true,
+    })
+  }).then(r=>r.json()).then(d=>{
+    if(d.ok){
+      ['oai-name','oai-url','oai-model','oai-key'].forEach(id=>{
+        const el = document.getElementById(id);
+        if(el) el.value = '';
+      });
+      const emojiEl = document.getElementById('oai-emoji');
+      if(emojiEl) emojiEl.value = 'ðŸ”Œ';
+      loadCustomAIs();
+      loadIntegrations();
+      loadIntegrationStatus();
+    } else {
+      alert(d.error || 'Failed to add integration');
+    }
+  }).catch(e => alert('Failed: ' + e.message));
+}
+
 function removeCustomAI(key){
   if(!confirm('Remove custom AI "' + key + '"? This will remove it from the UI.')) return;
   fetch('/integrations/custom/' + key, {method: 'DELETE'})
     .then(r=>r.json()).then(d=>{
       if(d.ok){
         loadCustomAIs();
-        // Note: removed integration stays in AI menu until page refresh
-        // since dynamic button injection is additive. That's fine.
+        loadIntegrations();
+        loadIntegrationStatus();
       } else {
         alert('Failed to remove');
       }

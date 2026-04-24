@@ -188,6 +188,10 @@ function _ensureBuilderManagerNode(){
 }
 
 function openAgentBuilderWindow(agentId){
+  if(!agentId){
+    openAgentBuilder(null);
+    return;
+  }
   const params=new URLSearchParams();
   params.set('agent_builder',agentId?'edit':'new');
   if(agentId) params.set('agent_id',agentId);
@@ -246,6 +250,8 @@ function _exportAgent(agentId, agentName){
 function _importAgentFromFile(){
   const inp=document.createElement('input');
   inp.type='file';inp.accept='.json,application/json';
+  inp.style.display='none';
+  inp.addEventListener('cancel',()=>inp.remove());
   inp.onchange=async()=>{
     const file=inp.files[0];if(!file) return;
     try{
@@ -257,11 +263,14 @@ function _importAgentFromFile(){
         body:JSON.stringify(data),
       }).then(r=>r.json());
       if(res.error){alert('Import failed: '+res.error);return;}
-      await _fetchAgents();
+      const list=await fetch('/api/agents').then(r=>r.json());
+      (list.agents||[]).forEach(a=>{_agents[a.id]=a;});
       _renderAgentsList();
       alert('Imported: '+res.name);
     }catch(e){alert('Import failed: '+e);}
+    finally{inp.remove();}
   };
+  document.body.appendChild(inp);
   inp.click();
 }
 
@@ -677,7 +686,6 @@ function _drawEdges(svgId,nodes,isRun,pan){
       const c=PORT_COLORS[portIdx%PORT_COLORS.length];
       const isManager=(parent.type||'ai')==='manager';
       // Translate canvas coords → SVG/wrapper coords by adding pan offset
-      const isManager=(parent.type||'ai')==='manager';
       const x1=isManager?parent.x+px+100:(isRun?parent.x+px+200:parent.x+px+184);
       const y1=isManager?parent.y+py+74:(isRun?parent.y+py+22:parent.y+py+74);
       const x2=isRun?child.x+px:child.x+px+100;
@@ -1724,6 +1732,30 @@ document.addEventListener('keydown',function(e){
 
 // ---------------------------------------------------------------------------
 (function _agentsInit(){
+  function _exposeAgentGlobals(){
+    window.loadAgentsPanel=loadAgentsPanel;
+    window.openAgentBuilder=openAgentBuilder;
+    window.openAgentBuilderWindow=openAgentBuilderWindow;
+    window._importAgentFromFile=_importAgentFromFile;
+    window._openMonitorDashboard=_openMonitorDashboard;
+  }
+
+  function _bindAgentSidebarButtons(){
+    const bind=(id,handler)=>{
+      const btn=document.getElementById(id);
+      if(!btn||btn.dataset.agentBound) return;
+      btn.dataset.agentBound='1';
+      btn.addEventListener('click',e=>{
+        e.preventDefault();
+        e.stopPropagation();
+        handler();
+      });
+    };
+    bind('agent-new-btn',()=>openAgentBuilder(null));
+    bind('agent-import-btn',()=>_importAgentFromFile());
+    bind('agent-monitor-btn',()=>_openMonitorDashboard());
+  }
+
   function _maybeOpenBuilderFromUrl(){
     const qs=new URLSearchParams(window.location.search||'');
     const mode=qs.get('agent_builder');
@@ -1754,9 +1786,11 @@ document.addEventListener('keydown',function(e){
     obs.observe(section,{attributes:true});
     if(section.classList.contains('open')) loadAgentsPanel();
   }
+  _exposeAgentGlobals();
   if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded',()=>{_hookAgentsSection();_maybeOpenBuilderFromUrl();});
+    document.addEventListener('DOMContentLoaded',()=>{_bindAgentSidebarButtons();_hookAgentsSection();_maybeOpenBuilderFromUrl();});
   }else{
+    _bindAgentSidebarButtons();
     _hookAgentsSection();
     _maybeOpenBuilderFromUrl();
   }
