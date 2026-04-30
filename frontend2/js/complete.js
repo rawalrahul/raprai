@@ -355,6 +355,18 @@ function applyState(s){
       picker.className = 'ai-picker';
       if(badge) badge.textContent = '';
     }
+    // Sync header context strip (Phase F)
+    const hDot  = document.getElementById('hctx-dot');
+    const hName = document.getElementById('hctx-name');
+    if(hDot && hName){
+      if(focusedSess){
+        hDot.className = 'hctx-dot ' + (focusedSess.ai || 'shell');
+        hName.textContent = focusedSess.name || AI_LABEL[focusedSess.ai] || 'Session';
+      } else {
+        hDot.className = 'hctx-dot';
+        hName.textContent = 'No session';
+      }
+    }
     if(s.focused_cwd) applyCwd(s.focused_cwd);
     // After focus may have changed, update the thinking indicator so it always
     // reflects the currently focused session (not whatever was thinking before).
@@ -386,6 +398,9 @@ function applyState(s){
     document.getElementById('dot').className = 'dot ' + key;
     document.getElementById('ai-label').textContent = AI_LABEL[key] || key;
     picker.className = 'ai-picker' + (activeAi ? ' active-' + activeAi : '');
+    const hDot2  = document.getElementById('hctx-dot');
+    const hName2 = document.getElementById('hctx-name');
+    if(hDot2 && hName2){ hDot2.className = 'hctx-dot ' + key; hName2.textContent = AI_LABEL[key] || key; }
     if(s.cwd) applyCwd(s.cwd);
   }
 }

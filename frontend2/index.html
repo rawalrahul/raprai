@@ -13,27 +13,29 @@
 <meta name="apple-mobile-web-app-title" content="RAPR AI">
 <link rel="apple-touch-icon" href="/static/logo.png">
 <meta name="description" content="RAPR AI — Your AI Control Center">
-<link rel="stylesheet" href="/css/design-system.css?v=2">
-<link rel="stylesheet" href="/css/original.css?v=2">
-<link rel="stylesheet" href="/css/premium.css?v=2">
+<link rel="stylesheet" href="/css/design-system.css?v=3">
+<link rel="stylesheet" href="/css/original.css?v=3">
+<link rel="stylesheet" href="/css/premium.css?v=3">
+<link rel="stylesheet" href="/css/overhaul.css?v=1">
+<link rel="stylesheet" href="/css/impeccable.css?v=2">
 </head>
 <body>
-<div id="app">
+<div id="app" class="main-layout">
 
 <!-- --- Left Sidebar --- -->
 <div id="left-sidebar">
   <div class="sb-search">
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-    <input id="sb-search-inp" placeholder="Search sessions..." oninput="filterSidebarHistory(this.value)" autocomplete="off">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input id="sb-search-inp" placeholder="Search sessions..." oninput="filterSidebarHistory(this.value)" autocomplete="off" aria-label="Search session history">
   </div>
-  <div class="sb-sections" id="sb-sections">
+  <div class="sb-sections" id="sb-sections" role="navigation" aria-label="Main sidebar sections">
 
     <!-- History -->
-    <div class="sb-section open" data-section="history">
-      <div class="sb-section-header" onclick="toggleSbSection(this)">
-        <span class="sb-section-arrow">▶</span>
+    <div class="sb-section open" data-section="history" id="sb-section-history">
+      <div class="sb-section-header" onclick="toggleSbSection(this)" role="button" aria-expanded="true" aria-controls="sb-panel-history">
+        <span class="sb-section-arrow" aria-hidden="true">▶</span>
         <span class="sb-section-label">History</span>
-        <span class="sb-section-count" id="sb-count-history"></span>
+        <span class="sb-section-count" id="sb-count-history" aria-live="polite"></span>
       </div>
       <div class="sb-section-body" id="sb-panel-history">
         <div class="sb-empty">No saved sessions yet</div>
@@ -41,27 +43,27 @@
     </div>
 
     <!-- Templates -->
-    <div class="sb-section" data-section="templates">
-      <div class="sb-section-header" onclick="toggleSbSection(this)">
-        <span class="sb-section-arrow">▶</span>
+    <div class="sb-section" data-section="templates" id="sb-section-templates">
+      <div class="sb-section-header" onclick="toggleSbSection(this)" role="button" aria-expanded="false" aria-controls="sb-panel-templates">
+        <span class="sb-section-arrow" aria-hidden="true">▶</span>
         <span class="sb-section-label">Templates</span>
       </div>
       <div class="sb-section-body" id="sb-panel-templates">
-        <div id="sb-templates-list"><div class="sb-empty">No templates yet</div></div>
+        <div id="sb-templates-list"><div class="sb-empty" role="status">No templates yet</div></div>
         <details class="sb-add-form" style="padding:8px 14px">
-          <summary style="cursor:pointer">+ New Template</summary>
+          <summary style="cursor:pointer" role="button">New Template</summary>
           <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;font-size:11px">
-            <input id="sb-templ-name" placeholder="Template name..." style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px">
-            <select id="sb-templ-ai" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px">
+            <input id="sb-templ-name" placeholder="Template name..." style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px" aria-label="Template name">
+            <select id="sb-templ-ai" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px" aria-label="Assigned AI">
               <option value="">Shell</option>
               <option value="claude">Claude Code</option>
               <option value="gemini">Gemini</option>
             </select>
             <div style="display:flex;gap:4px">
-              <input id="sb-templ-cwd" placeholder="Folder path..." style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px">
-              <button onclick="openBrowse('sb-templ-cwd')" title="Browse" style="padding:4px 6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:11px">📂</button>
+              <input id="sb-templ-cwd" placeholder="Folder path..." style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px" aria-label="Folder path">
+              <button onclick="openBrowse('sb-templ-cwd')" title="Browse" style="padding:4px 6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:11px" aria-label="Browse folders">📂</button>
             </div>
-            <textarea id="sb-templ-prompt" rows="2" placeholder="Initial prompt..." style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px;font-family:inherit"></textarea>
+            <textarea id="sb-templ-prompt" rows="2" placeholder="Initial prompt..." style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px;font-family:inherit" aria-label="Initial prompt"></textarea>
             <button class="sb-add-btn" onclick="sbSaveTemplate()" style="font-size:11px">Save Template</button>
           </div>
         </details>
@@ -69,17 +71,17 @@
     </div>
 
     <!-- Scheduled -->
-    <div class="sb-section" data-section="scheduled">
-      <div class="sb-section-header" onclick="toggleSbSection(this)">
-        <span class="sb-section-arrow">▶</span>
+    <div class="sb-section" data-section="scheduled" id="sb-section-scheduled">
+      <div class="sb-section-header" onclick="toggleSbSection(this)" role="button" aria-expanded="false" aria-controls="sb-panel-scheduled">
+        <span class="sb-section-arrow" aria-hidden="true">▶</span>
         <span class="sb-section-label">Scheduled</span>
       </div>
       <div class="sb-section-body" id="sb-panel-scheduled">
-        <div id="sb-sched-list"><div class="sb-empty">Loading...</div></div>
+        <div id="sb-sched-list"><div class="sb-empty" role="status">Loading...</div></div>
         <details class="sb-add-form">
-          <summary>+ Add scheduled task</summary>
+          <summary role="button">+ Add scheduled task</summary>
           <div class="sched-picker">
-            <select id="sb-sched-freq" onchange="sbSchedFreqChange()">
+            <select id="sb-sched-freq" onchange="sbSchedFreqChange()" aria-label="Frequency">
               <option value="daily">Daily</option>
               <option value="weekly">Weekly / Multiple Days</option>
               <option value="monthly">Monthly</option>
@@ -97,32 +99,32 @@
               </div>
             </div>
             <div id="sb-sched-monthday-row" style="display:none">
-              <select id="sb-sched-monthday" style="width:100%"></select>
+              <select id="sb-sched-monthday" style="width:100%" aria-label="Day of month"></select>
             </div>
             <div id="sb-sched-time-row" class="sched-time-row">
-              <select id="sb-sched-hour"></select>
-              <span style="color:var(--muted);font-size:12px;align-self:center">:</span>
-              <select id="sb-sched-min">
+              <select id="sb-sched-hour" aria-label="Hour"></select>
+              <span style="color:var(--muted);font-size:12px;align-self:center" aria-hidden="true">:</span>
+              <select id="sb-sched-min" aria-label="Minute">
                 <option value="0">00</option>
                 <option value="15">15</option>
                 <option value="30">30</option>
                 <option value="45">45</option>
               </select>
-              <select id="sb-sched-ampm">
+              <select id="sb-sched-ampm" aria-label="AM/PM">
                 <option value="am">AM</option>
                 <option value="pm">PM</option>
               </select>
             </div>
           </div>
           <div style="display:flex;gap:4px">
-            <input id="sb-sched-cwd" placeholder="Folder path..." style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 6px;font-size:11px">
-            <button onclick="openBrowse('sb-sched-cwd')" title="Browse folders" style="padding:4px 6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:11px">📂</button>
+            <input id="sb-sched-cwd" placeholder="Folder path..." style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 6px;font-size:11px" aria-label="Working directory">
+            <button onclick="openBrowse('sb-sched-cwd')" title="Browse folders" style="padding:4px 6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:11px" aria-label="Browse folders">📂</button>
           </div>
-          <select id="sb-sched-ai">
+          <select id="sb-sched-ai" aria-label="Assigned AI">
             <option value="claude">Claude Code</option>
             <option value="">Shell</option>
           </select>
-          <textarea id="sb-sched-prompt" rows="2" placeholder="Prompt to run..."></textarea>
+          <textarea id="sb-sched-prompt" rows="2" placeholder="Prompt to run..." aria-label="Task prompt"></textarea>
           <button class="sb-add-btn" onclick="sbSchedAdd()">Schedule</button>
         </details>
       </div>
@@ -162,51 +164,51 @@
     </div>
 
     <!-- Agents -->
-    <div class="sb-section" data-section="agents">
-      <div class="sb-section-header" onclick="toggleSbSection(this)">
-        <span class="sb-section-arrow">▶</span>
+    <div class="sb-section" data-section="agents" id="sb-section-agents">
+      <div class="sb-section-header" onclick="toggleSbSection(this)" role="button" aria-expanded="false" aria-controls="sb-panel-agents">
+        <span class="sb-section-arrow" aria-hidden="true">▶</span>
         <span class="sb-section-label">Agent Builder</span>
-        <span class="sb-section-count" id="sb-count-agents"></span>
-        <button onclick="event.stopPropagation();loadAgentsPanel()" class="sb-section-action" title="Refresh">⟳</button>
+        <span class="sb-section-count" id="sb-count-agents" aria-live="polite"></span>
+        <button onclick="event.stopPropagation();loadAgentsPanel()" class="sb-section-action" title="Refresh" aria-label="Refresh agents list">⟳</button>
       </div>
       <div class="sb-section-body" id="sb-panel-agents">
-        <div id="agents-list"><div class="sb-empty">No agents yet.</div></div>
+        <div id="agents-list"><div class="sb-empty" role="status">No agents yet.</div></div>
         <div style="display:flex;gap:4px;margin:6px 8px 4px;flex-wrap:wrap">
           <button id="agent-new-btn" class="sb-add-btn" style="flex:1" title="Create a new agent">✦ New Agent</button>
-          <button id="agent-import-btn" class="sb-add-btn" style="background:#1a1a2a;border-color:#3a3a6a;color:#8b9eff" title="Import agent from JSON file">↑ Import</button>
-          <button id="agent-monitor-btn" class="sb-add-btn" style="background:#1a1a2a;border-color:#3a3a6a;color:#8b9eff" title="Agent run statistics">⚡ Monitor</button>
+          <button id="agent-import-btn" class="sb-add-btn" style="background:var(--bg-secondary);border-color:var(--border-subtle);color:var(--accent)" title="Import agent from JSON file">↑ Import</button>
+          <button id="agent-monitor-btn" class="sb-add-btn" style="background:var(--bg-secondary);border-color:var(--border-subtle);color:var(--accent)" title="Agent run statistics">⚡ Monitor</button>
         </div>
       </div>
     </div>
 
     <!-- Memory -->
-    <div class="sb-section" data-section="memory">
-      <div class="sb-section-header" onclick="toggleSbSection(this)">
-        <span class="sb-section-arrow">▶</span>
+    <div class="sb-section" data-section="memory" id="sb-section-memory">
+      <div class="sb-section-header" onclick="toggleSbSection(this)" role="button" aria-expanded="false" aria-controls="sb-panel-memory">
+        <span class="sb-section-arrow" aria-hidden="true">▶</span>
         <span class="sb-section-label">Memory</span>
-        <span class="sb-section-count" id="sb-count-memory"></span>
+        <span class="sb-section-count" id="sb-count-memory" aria-live="polite"></span>
         <button onclick="event.stopPropagation();openKnowledgeTransfer()" class="sb-section-action" title="Import knowledge from other AIs" style="font-size:11px">🔄 Transfer</button>
-        <button onclick="event.stopPropagation();loadMemoryPanel()" class="sb-section-action" title="Refresh">⟳</button>
+        <button onclick="event.stopPropagation();loadMemoryPanel()" class="sb-section-action" title="Refresh" aria-label="Refresh memory list">⟳</button>
       </div>
       <div class="sb-section-body" id="sb-panel-memory">
         <!-- Quick add -->
         <div class="mem-add-bar">
-          <input id="mem-add-input" placeholder="/remember a fact..." onkeydown="if(event.key==='Enter')memQuickAdd()">
-          <button class="mem-add-btn" onclick="memQuickAdd()" title="Remember">+</button>
+          <input id="mem-add-input" placeholder="/remember a fact..." onkeydown="if(event.key==='Enter')memQuickAdd()" aria-label="Add to memory">
+          <button class="mem-add-btn" onclick="memQuickAdd()" title="Remember" aria-label="Add memory">+</button>
         </div>
         <!-- Category filter -->
-        <div class="mem-cat-filters" id="mem-cat-filters">
-          <button class="mem-cat-btn active" onclick="memFilterCat(this,'')" data-cat="">All</button>
-          <button class="mem-cat-btn" onclick="memFilterCat(this,'preference')" data-cat="preference">Pref</button>
-          <button class="mem-cat-btn" onclick="memFilterCat(this,'fact')" data-cat="fact">Fact</button>
-          <button class="mem-cat-btn" onclick="memFilterCat(this,'project')" data-cat="project">Project</button>
-          <button class="mem-cat-btn" onclick="memFilterCat(this,'instruction')" data-cat="instruction">Instr</button>
-          <button class="mem-cat-btn" onclick="memFilterCat(this,'decision')" data-cat="decision">Dec</button>
-          <button class="mem-cat-btn" onclick="memFilterCat(this,'person')" data-cat="person">Person</button>
+        <div class="mem-cat-filters" id="mem-cat-filters" role="tablist" aria-label="Memory category filters">
+          <button class="mem-cat-btn active" onclick="memFilterCat(this,'')" data-cat="" role="tab" aria-selected="true">All</button>
+          <button class="mem-cat-btn" onclick="memFilterCat(this,'preference')" data-cat="preference" role="tab" aria-selected="false">Pref</button>
+          <button class="mem-cat-btn" onclick="memFilterCat(this,'fact')" data-cat="fact" role="tab" aria-selected="false">Fact</button>
+          <button class="mem-cat-btn" onclick="memFilterCat(this,'project')" data-cat="project" role="tab" aria-selected="false">Project</button>
+          <button class="mem-cat-btn" onclick="memFilterCat(this,'instruction')" data-cat="instruction" role="tab" aria-selected="false">Instr</button>
+          <button class="mem-cat-btn" onclick="memFilterCat(this,'decision')" data-cat="decision" role="tab" aria-selected="false">Dec</button>
+          <button class="mem-cat-btn" onclick="memFilterCat(this,'person')" data-cat="person" role="tab" aria-selected="false">Person</button>
         </div>
         <!-- Memory list -->
-        <div id="mem-list">
-          <div class="sb-empty">No memories yet</div>
+        <div id="mem-list" role="feed" aria-label="Memory entries">
+          <div class="sb-empty" role="status">No memories yet</div>
         </div>
       </div>
     </div>
@@ -215,39 +217,39 @@
 
   <!-- RAPR Packages — unified panel (Plugins + MCP + Packages) -->
   <div id="sb-packages-section">
-    <div class="sb-plugins-header" onclick="togglePackagesPanel()">
-      <span class="sb-plugins-arrow" id="sb-packages-arrow">▶</span>
+    <div class="sb-plugins-header" onclick="togglePackagesPanel()" role="button" aria-expanded="false" aria-controls="sb-packages-body">
+      <span class="sb-plugins-arrow" id="sb-packages-arrow" aria-hidden="true">▶</span>
       <span class="sb-plugins-label">RAPR Packages</span>
-      <span id="rp-update-badge" style="display:none"></span>
+      <span id="rp-update-badge" style="display:none" aria-live="polite"></span>
       <div style="display:flex;gap:4px;margin-left:auto" onclick="event.stopPropagation()">
-        <button onclick="rpRefresh()" class="sb-section-action" title="Refresh">⟳</button>
+        <button onclick="rpRefresh()" class="sb-section-action" title="Refresh" aria-label="Refresh packages list">⟳</button>
       </div>
     </div>
     <div class="sb-plugins-body" id="sb-packages-body">
       <!-- Search + type filter -->
       <div class="rp-toolbar">
-        <input id="rp-search" placeholder="Search packages..." oninput="rpSearchDebounce()" autocomplete="off">
-        <div class="rp-type-filters">
-          <button class="rp-type-btn active" data-type="" onclick="rpSetType(this,'')">All</button>
-          <button class="rp-type-btn" data-type="mcp" onclick="rpSetType(this,'mcp')">MCP</button>
-          <button class="rp-type-btn" data-type="skill" onclick="rpSetType(this,'skill')">Skills</button>
-          <button class="rp-type-btn" data-type="plugin" onclick="rpSetType(this,'plugin')">Plugins</button>
+        <input id="rp-search" placeholder="Search packages..." oninput="rpSearchDebounce()" autocomplete="off" aria-label="Search packages">
+        <div class="rp-type-filters" role="tablist" aria-label="Package type filters">
+          <button class="rp-type-btn active" data-type="" onclick="rpSetType(this,'')" role="tab" aria-selected="true">All</button>
+          <button class="rp-type-btn" data-type="mcp" onclick="rpSetType(this,'mcp')" role="tab" aria-selected="false">MCP</button>
+          <button class="rp-type-btn" data-type="skill" onclick="rpSetType(this,'skill')" role="tab" aria-selected="false">Skills</button>
+          <button class="rp-type-btn" data-type="plugin" onclick="rpSetType(this,'plugin')" role="tab" aria-selected="false">Plugins</button>
         </div>
       </div>
       <!-- Installed / Browse tabs -->
-      <div class="rp-tabs">
-        <button class="rp-tab active" onclick="rpSwitchTab(this,'installed')">Installed</button>
-        <button class="rp-tab" onclick="rpSwitchTab(this,'browse')">Browse</button>
+      <div class="rp-tabs" role="tablist" aria-label="Package view tabs">
+        <button class="rp-tab active" onclick="rpSwitchTab(this,'installed')" role="tab" aria-selected="true">Installed</button>
+        <button class="rp-tab" onclick="rpSwitchTab(this,'browse')" role="tab" aria-selected="false">Browse</button>
       </div>
       <!-- Package list -->
-      <div id="rp-list" style="padding:4px 10px;display:flex;flex-direction:column;gap:4px">
-        <div class="sb-empty" style="padding:12px 4px">Loading packages...</div>
+      <div id="rp-list" style="padding:4px 10px;display:flex;flex-direction:column;gap:4px" role="feed" aria-label="Available packages">
+        <div class="sb-empty" style="padding:12px 4px" role="status">Loading packages...</div>
       </div>
       <!-- Upload .raprpkg -->
       <details class="sb-add-form" style="padding:6px 10px">
-        <summary>+ Install from file</summary>
+        <summary role="button">+ Install from file</summary>
         <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px;font-size:11px">
-          <input type="file" id="rp-upload-file" accept=".raprpkg" style="font-size:11px;color:var(--text)">
+          <input type="file" id="rp-upload-file" accept=".raprpkg" style="font-size:11px;color:var(--text)" aria-label="Select package file">
           <button class="sb-add-btn" onclick="rpUploadInstall()">Install</button>
         </div>
       </details>
@@ -276,22 +278,36 @@
 <div id="center-panel">
 
 <header>
-  <div style="display:flex;align-items:center;gap:10px">
-    <button class="panel-toggle" id="toggle-left-panel" onclick="toggleLeftPanel()" title="Toggle left sidebar">☰</button>
-    <div class="logo">&#9875; RAPR <em>AI</em></div>
+  <div class="header-logo-group">
+    <button class="panel-toggle" id="toggle-left-panel" onclick="toggleLeftPanel()" title="Toggle left sidebar" aria-label="Toggle left sidebar">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <div class="logo">RAPR<em>AI</em></div>
+  </div>
+  <div class="header-context" id="header-context" aria-live="polite">
+    <div class="hctx-dot" id="hctx-dot"></div>
+    <span class="hctx-name" id="hctx-name">No session</span>
   </div>
   <div class="header-right">
-    <button class="sb-toggle" id="toggle-left" onclick="toggleLeft()" title="History & Scheduled">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+    <button class="sb-toggle" id="toggle-left" onclick="toggleLeft()" title="History & Scheduled" aria-label="Toggle History and Scheduled">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
     </button>
-    <button class="sb-toggle" id="toggle-right" onclick="toggleRight()" title="Sessions">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+    <button class="sb-toggle" id="toggle-right" onclick="toggleRight()" title="Sessions" aria-label="Toggle Active Sessions">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
     </button>
-    <button class="hdr-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle light/dark theme">🌙</button>
-    <button class="hdr-btn" id="notify-toggle-btn" onclick="toggleNotifications()" title="Toggle notifications">🔔</button>
-    <button class="hdr-btn" onclick="showHelpTour()" title="Help & tour">?</button>
-    <button class="panel-toggle" id="toggle-right-panel" onclick="toggleRightPanel()" title="Toggle sessions panel">▸</button>
-    <div id="conn" title="WebSocket status"></div>
+    <button class="hdr-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle light/dark theme" aria-label="Toggle Theme">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+    </button>
+    <button class="hdr-btn" id="notify-toggle-btn" onclick="toggleNotifications()" title="Toggle notifications" aria-label="Toggle Notifications">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+    </button>
+    <button class="hdr-btn" onclick="showHelpTour()" title="Help & tour" aria-label="Show Help and Tour">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg>
+    </button>
+    <button class="panel-toggle" id="toggle-right-panel" onclick="toggleRightPanel()" title="Toggle sessions panel" aria-label="Toggle Right Panel">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+    </button>
+    <div id="conn" title="WebSocket status" role="status" aria-label="Connection Status"></div>
   </div>
 </header>
 <!-- --- Connection error banner (hidden by default) --- -->
@@ -418,8 +434,8 @@
         <div style="position:relative">
           <textarea id="kt-export-prompt" readonly style="
             width:100%;min-height:160px;max-height:250px;resize:vertical;
-            background:#1a1a2e;border:1px solid rgba(99,102,241,0.25);border-radius:8px;
-            padding:12px 14px;font-size:11px;color:#e0e0f0;font-family:'Courier New',monospace;
+            background:var(--bg-deep);border:1px solid var(--accent-subtle);border-radius:8px;
+            padding:12px 14px;font-size:11px;color:var(--text-main);font-family:'Courier New',monospace;
             line-height:1.5;outline:none;cursor:text" placeholder="Loading prompt..."></textarea>
           <button onclick="ktCopyPrompt()" style="
             position:absolute;right:8px;top:8px;background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.3);
@@ -481,11 +497,11 @@ Example:
 </div>
 
 <!-- --- Settings modal --- -->
-<div id="settings-modal" class="modal-overlay" onclick="if(event.target===this)closeSettings()">
+<div id="settings-modal" class="modal-overlay" onclick="if(event.target===this)closeSettings()" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
   <div class="modal-box">
     <div class="modal-header">
-      <span class="modal-title">⚙ Settings</span>
-      <button class="modal-close" onclick="closeSettings()">✖</button>
+      <span class="modal-title" id="settings-modal-title">⚙ Settings</span>
+      <button class="modal-close" onclick="closeSettings()" aria-label="Close settings modal">✖</button>
     </div>
     <div class="modal-body" style="overflow-y:auto">
 
@@ -1003,69 +1019,73 @@ Example:
     <div class="bubble">Connecting to server...</div>
   </div>
 </div>
-<div id="thinking">
-  <div class="dots"><span></span><span></span><span></span></div>
+<div id="thinking" role="status" aria-live="polite">
+  <div class="dots" aria-hidden="true"><span></span><span></span><span></span></div>
   <span id="thlabel">Thinking...</span>
 </div>
 
-<div class="input-bar">
+<div class="input-bar" role="form" aria-label="Chat input">
   <!-- AI picker chip -->
-  <div class="ai-picker" id="ai-picker" onclick="toggleAiMenu(event)">
-    <div class="dot" id="dot"></div>
+  <div class="ai-picker" id="ai-picker" onclick="toggleAiMenu(event)" role="button" aria-haspopup="true" aria-expanded="false" aria-label="Select AI provider">
+    <div class="dot" id="dot" aria-hidden="true"></div>
     <span id="ai-label">Shell</span>
-    <svg class="chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <svg class="chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="M6 9l6 6 6-6"/>
     </svg>
   </div>
 
   <!-- Sessions + AI dropdown menu — sessions injected dynamically by applyState(); integrations by loadIntegrations() -->
-  <div class="ai-menu" id="ai-menu">
-    <div class="ai-menu-section">Active Sessions</div>
+  <div class="ai-menu" id="ai-menu" role="menu" aria-label="AI Provider and Session Menu">
+    <div class="ai-menu-section" role="presentation">Active Sessions</div>
     <div id="ai-menu-sessions"><!-- filled by applyState() --></div>
-    <div class="ai-menu-divider"></div>
-    <div class="ai-menu-section">New Session</div>
-    <button id="claude-menu-btn" class="ai-menu-item" onclick="cmd('new_session:claude');closeAiMenu()">
-      <span class="menu-dot claude"></span>New: Claude Code</button>
+    <div class="ai-menu-divider" role="presentation"></div>
+    <div class="ai-menu-section" role="presentation">New Session</div>
+    <button id="claude-menu-btn" class="ai-menu-item" onclick="cmd('new_session:claude');closeAiMenu()" role="menuitem">
+      <span class="menu-dot claude" aria-hidden="true"></span>New: Claude Code</button>
     <!-- integration "New: ..." buttons inserted here by loadIntegrations() -->
-    <button class="ai-menu-item" id="shell-mode-btn" onclick="cmd('new_session:');closeAiMenu()">
-      <span class="menu-dot shell"></span>New: Shell</button>
-    <div class="ai-menu-divider"></div>
-    <div class="ai-menu-section">Focused Session</div>
-    <button class="ai-menu-item" onclick="cmd('interrupt');closeAiMenu()">⏸ Cancel Task</button>
-    <button class="ai-menu-item" onclick="if(confirm('Delete this session?'))cmd('delete_session');closeAiMenu()">🗑️ Delete Session</button>
-    <button class="ai-menu-item" onclick="cmd('clear');closeAiMenu()">↺ Clear Chat</button>
+    <button class="ai-menu-item" id="shell-mode-btn" onclick="cmd('new_session:');closeAiMenu()" role="menuitem">
+      <span class="menu-dot shell" aria-hidden="true"></span>New: Shell</button>
+    <div class="ai-menu-divider" role="presentation"></div>
+    <div class="ai-menu-section" role="presentation">Focused Session</div>
+    <button class="ai-menu-item" onclick="cmd('interrupt');closeAiMenu()" role="menuitem">⏸ Cancel Task</button>
+    <button class="ai-menu-item" onclick="if(confirm('Delete this session?'))cmd('delete_session');closeAiMenu()" role="menuitem">🗑️ Delete Session</button>
+    <button class="ai-menu-item" onclick="cmd('clear');closeAiMenu()" role="menuitem">↺ Clear Chat</button>
   </div>
 
-  <textarea id="inp" placeholder="Type a message...  (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
-  <input type="file" id="file-input" style="display:none" onchange="handleFileUpload(this)" multiple>
-  <button id="clip-btn" onclick="document.getElementById('file-input').click()" title="Attach a file">📎</button>
-  <button id="mic-btn" onclick="toggleVoiceRec()" title="Hold to record voice message">🎙️</button>
-  <button id="send" onclick="send()">Send</button>
+  <textarea id="inp" placeholder="Type a message...  (Enter to send, Shift+Enter for newline)" rows="1" aria-label="Message prompt"></textarea>
+  <input type="file" id="file-input" style="display:none" onchange="handleFileUpload(this)" multiple aria-label="File upload">
+  <button id="clip-btn" onclick="document.getElementById('file-input').click()" title="Attach a file" aria-label="Attach file">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+  </button>
+  <button id="mic-btn" onclick="toggleVoiceRec()" title="Hold to record voice message" aria-label="Voice input">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+  </button>
+  <button id="send" onclick="send()" aria-label="Send message">Send</button>
 </div>
 
 <!-- History modal -->
-<div class="modal-overlay" id="hist-modal" onclick="if(event.target===this)closeHistory()">
+<div class="modal-overlay" id="hist-modal" onclick="if(event.target===this)closeHistory()" role="dialog" aria-modal="true" aria-labelledby="hist-modal-title">
   <div class="modal-box" style="width:min(540px,94vw)">
     <div class="modal-header">
-      <span class="modal-title">Session History</span>
-      <button class="modal-close" onclick="closeHistory()">✖</button>
+      <span class="modal-title" id="hist-modal-title">Session History</span>
+      <button class="modal-close" onclick="closeHistory()" aria-label="Close history modal">✖</button>
     </div>
     <div class="hist-search">
-      <input id="hist-search-inp" placeholder="Search sessions..." oninput="filterHistory(this.value)" autocomplete="off">
+      <input id="hist-search-inp" placeholder="Search sessions..." oninput="filterHistory(this.value)" autocomplete="off" aria-label="Search within history">
     </div>
     <div class="modal-body" id="hist-list"></div>
   </div>
 </div>
 
 <!-- Browse directory modal -->
-<div class="modal-overlay" id="browse-modal" onclick="closeBrowse(event)">
+<div class="modal-overlay" id="browse-modal" onclick="closeBrowse(event)" role="dialog" aria-modal="true" aria-labelledby="browse-modal-title">
   <div class="modal-box browse-box">
     <div class="modal-header">
-      <span class="modal-title">Browse Directory</span>
-      <button class="modal-close" onclick="closeBrowseModal()">✖</button>
+      <span class="modal-title" id="browse-modal-title">Browse Directory</span>
+      <button class="modal-close" onclick="closeBrowseModal()" aria-label="Close directory browser">✖</button>
     </div>
-    <div id="browse-crumb" class="browse-crumb"></div>
-    <div class="modal-body" id="browse-list"></div>
+    <div id="browse-crumb" class="browse-crumb" aria-label="Current directory breadcrumb"></div>
+    <div class="modal-body" id="browse-list" role="listbox" aria-label="Directory contents"></div>
     <div class="browse-footer">
       <button class="sess-action-btn" onclick="closeBrowseModal()">Cancel</button>
       <button class="sess-action-btn resume" onclick="selectBrowsePath()">✓ Select This Folder</button>
@@ -1076,13 +1096,13 @@ Example:
 </div><!-- /center-panel -->
 
 <!-- --- Pipeline Approval Modal --- -->
-<div id="pipeline-modal" class="modal-overlay" onclick="if(event.target===this)closePipelineModal()" style="display:none">
+<div id="pipeline-modal" class="modal-overlay" onclick="if(event.target===this)closePipelineModal()" style="display:none" role="dialog" aria-modal="true" aria-labelledby="pipeline-modal-title">
   <div class="modal-box" style="width:min(640px,95vw);max-height:85vh">
     <div class="modal-header">
-      <span class="modal-title">📋 Pipeline Plan</span>
-      <button class="modal-close" onclick="closePipelineModal()">✖</button>
+      <span class="modal-title" id="pipeline-modal-title">📋 Pipeline Plan</span>
+      <button class="modal-close" onclick="closePipelineModal()" aria-label="Close pipeline modal">✖</button>
     </div>
-    <div id="pipeline-modal-prompt" style="padding:10px 18px;font-size:11px;color:var(--dim);border-bottom:1px solid var(--border);max-height:60px;overflow:hidden"></div>
+    <div id="pipeline-modal-prompt" style="padding:10px 18px;font-size:11px;color:var(--dim);border-bottom:1px solid var(--border);max-height:60px;overflow:hidden" aria-live="polite"></div>
     <div class="modal-body" id="pipeline-modal-steps" style="padding:10px 18px"></div>
     <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
       <button class="sess-action-btn" onclick="closePipelineModal()">Cancel</button>
@@ -1092,72 +1112,74 @@ Example:
 </div>
 
 <!-- --- Agent Builder Overlay --- -->
-<div id="agent-builder-overlay" style="display:none;position:fixed;inset:0;z-index:1100;background:var(--bg,#111);flex-direction:column">
-  <div id="agent-toolbar" style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border,#2a2a2a);flex-shrink:0;background:var(--bg2,#161616)">
-    <button onclick="closeAgentBuilder()" style="background:none;border:none;color:var(--dim,#666);font-size:18px;cursor:pointer;padding:0 4px" title="Close">←</button>
-    <input id="agent-name-inp" placeholder="Agent name..." style="flex:1;max-width:220px;background:var(--inp,#1e1e1e);border:1px solid var(--border,#2a2a2a);color:var(--fg,#e0e0e0);padding:5px 8px;border-radius:4px;font-size:13px">
-    <input id="agent-desc-inp" placeholder="Description..." style="flex:2;background:var(--inp,#1e1e1e);border:1px solid var(--border,#2a2a2a);color:var(--fg,#e0e0e0);padding:5px 8px;border-radius:4px;font-size:12px">
-    <button onclick="openGenerateDialog()" style="background:var(--inp,#1e1e1e);border:1px solid var(--border,#2a2a2a);color:var(--acc,#7c9ef8);padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px">✦ Generate</button>
-    <button onclick="openAgentTriggers()" style="background:var(--inp,#1e1e1e);border:1px solid var(--border,#2a2a2a);color:var(--dim,#888);padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px">⚙ Triggers</button>
-    <button onclick="agentAddNode()" style="background:var(--inp,#1e1e1e);border:1px solid var(--border,#2a2a2a);color:var(--dim,#888);padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px">+ Node</button>
-    <button onclick="saveAgent()" style="background:var(--acc,#7c9ef8);border:none;color:#000;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600" id="agent-save-btn">Save</button>
-    <button id="builder-chat-toggle-btn" onclick="toggleBuilderChat()" style="background:var(--inp,#1e1e1e);border:1px solid var(--border,#2a2a2a);color:var(--dim,#888);padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px" title="Chat with AI to refine this workflow">💬 Chat</button>
-    <span id="agent-save-status" style="font-size:11px;color:var(--dim,#666)"></span>
+<div id="agent-builder-wrapper" class="agent-slider-wrapper">
+  <div id="agent-builder-overlay" role="dialog" aria-modal="true" aria-labelledby="agent-builder-title">
+    <div id="agent-toolbar">
+      <button onclick="closeAgentBuilder()" class="agent-tool-btn" title="Close" aria-label="Close agent builder">←</button>
+    <input id="agent-name-inp" placeholder="Agent name..." aria-label="Agent name">
+    <input id="agent-desc-inp" placeholder="Description..." aria-label="Agent description">
+    <button onclick="openGenerateDialog()" class="agent-tool-btn primary">✦ Generate</button>
+    <button onclick="openAgentTriggers()" class="agent-tool-btn">⚙ Triggers</button>
+    <button onclick="agentAddNode()" class="agent-tool-btn">+ Node</button>
+    <button onclick="saveAgent()" class="agent-save-btn" id="agent-save-btn">Save</button>
+    <button id="builder-chat-toggle-btn" onclick="toggleBuilderChat()" class="agent-tool-btn" title="Chat with AI to refine this workflow">💬 Chat</button>
+    <span id="agent-save-status" aria-live="polite"></span>
   </div>
   <!-- Canvas + Chat side-panel -->
-  <div style="flex:1;display:flex;overflow:hidden;min-height:0">
-    <div id="agent-canvas-wrap" style="flex:1;position:relative;overflow:hidden;cursor:grab">
-      <svg id="agent-edges-svg" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1"></svg>
-      <div id="agent-canvas" style="position:absolute;top:0;left:0;width:4000px;height:3000px">
-        <svg id="agent-grid-svg" style="position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none"></svg>
+  <div class="agent-main-area">
+    <div id="agent-canvas-wrap">
+      <svg id="agent-edges-svg" aria-hidden="true"></svg>
+      <div id="agent-canvas">
+        <svg id="agent-grid-svg" aria-hidden="true"></svg>
       </div>
     </div>
     <!-- Builder Chat Panel -->
-    <div id="builder-chat-panel" style="display:none;width:320px;flex-shrink:0;border-left:1px solid var(--border,#2a2a2a);background:var(--bg2,#161616);flex-direction:column;overflow:hidden">
-      <div style="padding:10px 12px;border-bottom:1px solid var(--border,#2a2a2a);font-size:12px;font-weight:600;color:var(--fg,#e0e0e0);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
-        <span>💬 Builder Chat</span>
-        <button onclick="toggleBuilderChat()" style="background:none;border:none;color:var(--dim,#666);cursor:pointer;font-size:14px;padding:0 2px" title="Close chat">✖</button>
+    <div id="builder-chat-panel" aria-label="Agent builder AI chat">
+      <div class="builder-chat-header">
+        <span id="agent-builder-title">💬 Builder Chat</span>
+        <button onclick="toggleBuilderChat()" class="builder-chat-close" aria-label="Close builder chat">✖</button>
       </div>
-      <div id="builder-chat-messages" style="flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px;font-size:12px"></div>
-      <div style="padding:8px 10px;border-top:1px solid var(--border,#2a2a2a);display:flex;flex-direction:column;gap:6px;flex-shrink:0">
-        <textarea id="builder-chat-inp" rows="3" placeholder="Ask me to add, remove, or change nodes — e.g. 'add a node that validates the output before delivery'" style="background:var(--inp,#1e1e1e);border:1px solid var(--border,#2a2a2a);color:var(--fg,#e0e0e0);padding:7px 9px;border-radius:4px;font-size:12px;resize:none;font-family:inherit;width:100%;box-sizing:border-box" onkeydown="if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();sendBuilderChat();}"></textarea>
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <span style="font-size:10px;color:var(--dim,#555)">Ctrl+Enter to send</span>
-          <button onclick="sendBuilderChat()" id="builder-chat-send-btn" style="background:var(--acc,#7c9ef8);border:none;color:#000;padding:5px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600">Send</button>
+      <div id="builder-chat-messages" role="log" aria-live="polite"></div>
+      <div class="builder-chat-footer">
+        <textarea id="builder-chat-inp" rows="3" placeholder="Ask me to add, remove, or change nodes..." onkeydown="if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();sendBuilderChat();}" aria-label="Builder chat input"></textarea>
+        <div class="builder-chat-actions">
+          <span class="builder-chat-hint">Ctrl+Enter to send</span>
+          <button onclick="sendBuilderChat()" id="builder-chat-send-btn" class="builder-chat-send">Send</button>
         </div>
       </div>
     </div>
   </div>
 </div>
+</div>
 
 <!-- --- Agent Node Config Modal --- -->
-<div id="agent-node-modal" class="modal-overlay" onclick="if(event.target===this)closeNodeModal()" style="display:none;z-index:1200">
+<div id="agent-node-modal" class="modal-overlay" onclick="if(event.target===this)closeNodeModal()" style="display:none;z-index:1200" role="dialog" aria-modal="true" aria-labelledby="node-modal-title">
   <div class="modal-box" style="width:min(500px,95vw);max-height:80vh">
     <div class="modal-header">
-      <span class="modal-title">Configure Step</span>
-      <button class="modal-close" onclick="closeNodeModal()">✖</button>
+      <span class="modal-title" id="node-modal-title">Configure Step</span>
+      <button class="modal-close" onclick="closeNodeModal()" aria-label="Close configuration">✖</button>
     </div>
     <div class="modal-body" style="padding:14px 18px;display:flex;flex-direction:column;gap:12px;overflow-y:auto">
       <div>
-        <div style="font-size:11px;color:var(--dim,#888);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Step Name</div>
-        <input id="node-title-inp" placeholder="e.g. Summarise news, Write email draft…" style="width:100%;box-sizing:border-box;background:var(--inp,#1e1e1e);border:1px solid var(--border,#2a2a2a);color:var(--fg,#e0e0e0);padding:7px 10px;border-radius:4px;font-size:13px">
+        <div style="font-size:11px;color:var(--dim);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Step Name</div>
+        <input id="node-title-inp" placeholder="e.g. Summarise news, Write email draft…" style="width:100%;box-sizing:border-box;background:var(--inp);border:1px solid var(--border);color:var(--text-main);padding:7px 10px;border-radius:4px;font-size:13px">
       </div>
       <div>
-        <div style="font-size:11px;color:var(--dim,#888);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">AI Model</div>
-        <select id="node-ai-sel" style="width:100%;box-sizing:border-box;background:var(--inp,#1e1e1e);border:1px solid var(--border,#2a2a2a);color:var(--fg,#e0e0e0);padding:7px 10px;border-radius:4px;font-size:13px">
+        <div style="font-size:11px;color:var(--dim);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">AI Model</div>
+        <select id="node-ai-sel" style="width:100%;box-sizing:border-box;background:var(--inp);border:1px solid var(--border);color:var(--text-main);padding:7px 10px;border-radius:4px;font-size:13px">
           <option value="claude">Claude Code</option>
           <option value="gemini">Gemini</option>
           <option value="ollama">Ollama</option>
         </select>
       </div>
       <div>
-        <div style="font-size:11px;color:var(--dim,#888);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Task Instructions</div>
-        <textarea id="node-task-inp" rows="7" placeholder="What should this step do? Be specific — e.g. 'Search the web for the top 5 AI news today and return a bullet list.'" style="width:100%;box-sizing:border-box;background:var(--inp,#1e1e1e);border:1px solid var(--border,#2a2a2a);color:var(--fg,#e0e0e0);padding:7px 10px;border-radius:4px;font-size:12px;resize:vertical;font-family:inherit;line-height:1.5"></textarea>
-        <div style="font-size:10px;color:var(--dim,#666);margin-top:4px">Tip: outputs from connected parent steps are automatically passed as context to this step.</div>
+        <div style="font-size:11px;color:var(--dim);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Task Instructions</div>
+        <textarea id="node-task-inp" rows="7" placeholder="What should this step do? Be specific — e.g. 'Search the web for the top 5 AI news today and return a bullet list.'" style="width:100%;box-sizing:border-box;background:var(--inp);border:1px solid var(--border);color:var(--text-main);padding:7px 10px;border-radius:4px;font-size:12px;resize:vertical;font-family:inherit;line-height:1.5"></textarea>
+        <div style="font-size:10px;color:var(--dim);margin-top:4px">Tip: outputs from connected parent steps are automatically passed as context to this step.</div>
       </div>
     </div>
-    <div style="padding:10px 18px;border-top:1px solid var(--border,#2a2a2a);display:flex;justify-content:space-between;align-items:center">
-      <button class="sess-action-btn" onclick="deleteAgentNode()" style="color:#e06c75">Remove Step</button>
+    <div style="padding:10px 18px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <button class="sess-action-btn" onclick="deleteAgentNode()" style="color:var(--color-danger)">Remove Step</button>
       <div style="display:flex;gap:8px">
         <button class="sess-action-btn" onclick="closeNodeModal()">Cancel</button>
         <button class="sess-action-btn resume" onclick="saveNodeModal()">Save Step</button>
@@ -1167,32 +1189,32 @@ Example:
 </div>
 
 <!-- --- Agent Triggers Modal --- -->
-<div id="agent-triggers-modal" class="modal-overlay" onclick="if(event.target===this)closeAgentTriggers()" style="display:none;z-index:1200">
+<div id="agent-triggers-modal" class="modal-overlay" onclick="if(event.target===this)closeAgentTriggers()" style="display:none;z-index:1200" role="dialog" aria-modal="true" aria-labelledby="agent-triggers-title">
   <div class="modal-box" style="width:min(480px,95vw)">
     <div class="modal-header">
-      <span class="modal-title">⚙ Triggers — when should this agent run?</span>
-      <button class="modal-close" onclick="closeAgentTriggers()">✖</button>
+      <span class="modal-title" id="agent-triggers-title">⚙ Triggers — when should this agent run?</span>
+      <button class="modal-close" onclick="closeAgentTriggers()" aria-label="Close triggers modal">✖</button>
     </div>
     <div class="modal-body" style="padding:14px 18px;display:flex;flex-direction:column;gap:14px">
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="trig-telegram" style="width:14px;height:14px"> Telegram — trigger via <code>/agent &lt;name&gt;</code>
       </label>
-      <div style="border-top:1px solid var(--border,#2a2a2a);padding-top:12px">
+      <div style="border-top:1px solid var(--border);padding-top:12px">
         <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:8px;cursor:pointer">
           <input type="checkbox" id="trig-schedule-enabled" onchange="toggleScheduleFields()"> Schedule — run on a recurring schedule
         </label>
-        <input id="trig-schedule-expr" placeholder='e.g. "every day at 9am" or "every Monday at 8am"' style="background:var(--inp,#1e1e1e);border:1px solid var(--border,#2a2a2a);color:var(--fg,#e0e0e0);padding:7px 10px;border-radius:4px;font-size:12px;width:100%;box-sizing:border-box" disabled>
-        <div style="font-size:11px;color:var(--dim,#888);margin:8px 0 4px">Static Input (passed to agent on each scheduled run)</div>
-        <textarea id="trig-schedule-input" rows="3" placeholder="e.g. paste resume here for weekly job search..." style="width:100%;background:var(--inp,#1e1e1e);color:var(--fg,#e0e0e0);border:1px solid var(--border,#2a2a2a);border-radius:4px;padding:6px;font-size:11px;resize:vertical" disabled></textarea>
+        <input id="trig-schedule-expr" placeholder='e.g. "every day at 9am" or "every Monday at 8am"' style="background:var(--inp);border:1px solid var(--border);color:var(--fg);padding:7px 10px;border-radius:4px;font-size:12px;width:100%;box-sizing:border-box" disabled aria-label="Schedule expression">
+        <div style="font-size:11px;color:var(--dim);margin:8px 0 4px">Static Input (passed to agent on each scheduled run)</div>
+        <textarea id="trig-schedule-input" rows="3" placeholder="e.g. paste resume here..." style="width:100%;background:var(--inp);color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:11px;resize:vertical" disabled aria-label="Static input data"></textarea>
       </div>
-      <div style="border-top:1px solid var(--border,#2a2a2a);padding-top:12px">
+      <div style="border-top:1px solid var(--border);padding-top:12px">
         <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:8px;cursor:pointer">
           <input type="checkbox" id="trig-webhook-enabled"> Webhook — trigger via HTTP POST
         </label>
-        <div id="trig-webhook-url" style="font-size:11px;color:var(--dim,#888);word-break:break-all;background:var(--inp,#1e1e1e);padding:6px 8px;border-radius:4px;min-height:18px"></div>
+        <div id="trig-webhook-url" style="font-size:11px;color:var(--dim);word-break:break-all;background:var(--inp);padding:6px 8px;border-radius:4px;min-height:18px" aria-label="Webhook URL" role="textbox" aria-readonly="true"></div>
       </div>
     </div>
-    <div style="padding:10px 18px;border-top:1px solid var(--border,#2a2a2a);display:flex;justify-content:flex-end;gap:8px">
+    <div style="padding:10px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
       <button class="sess-action-btn" onclick="closeAgentTriggers()">Cancel</button>
       <button class="sess-action-btn resume" onclick="saveAgentTriggers()">Save Triggers</button>
     </div>
@@ -1200,24 +1222,24 @@ Example:
 </div>
 
 <!-- --- Agent Generate Dialog --- -->
-<div id="agent-generate-modal" class="modal-overlay" onclick="if(event.target===this&&!_agGenRunning)closeGenerateDialog()" style="display:none;z-index:1200">
+<div id="agent-generate-modal" class="modal-overlay" onclick="if(event.target===this&&!_agGenRunning)closeGenerateDialog()" style="display:none;z-index:1200" role="dialog" aria-modal="true" aria-labelledby="agent-gen-title">
   <div class="modal-box" style="width:min(520px,95vw)">
     <div class="modal-header">
-      <span class="modal-title">✦ Generate Agent from Description</span>
-      <button class="modal-close" onclick="closeGenerateDialog()">✖</button>
+      <span class="modal-title" id="agent-gen-title">✦ Generate Agent from Description</span>
+      <button class="modal-close" onclick="closeGenerateDialog()" aria-label="Close generator">✖</button>
     </div>
     <div class="modal-body" style="padding:14px 18px;display:flex;flex-direction:column;gap:10px">
-      <div style="font-size:12px;color:var(--dim,#888)">Describe what you want this agent to do and AI will generate the workflow steps automatically.</div>
-      <textarea id="agent-gen-desc" rows="5" placeholder="e.g. Every morning fetch top 5 tech news, summarise each article, then send a digest to Telegram." style="background:var(--inp,#1e1e1e);border:1px solid var(--border,#2a2a2a);color:var(--fg,#e0e0e0);padding:7px 10px;border-radius:4px;font-size:13px;width:100%;box-sizing:border-box;resize:vertical;font-family:inherit"></textarea>
+      <div style="font-size:12px;color:var(--dim)">Describe what you want this agent to do and AI will generate the workflow steps automatically.</div>
+      <textarea id="agent-gen-desc" rows="5" placeholder="e.g. Every morning fetch top 5 tech news..." style="background:var(--inp);border:1px solid var(--border);color:var(--fg);padding:7px 10px;border-radius:4px;font-size:13px;width:100%;box-sizing:border-box;resize:vertical;font-family:inherit" aria-label="Workflow description"></textarea>
       <!-- Loading state (hidden by default) -->
-      <div id="agent-gen-loading" style="display:none;text-align:center;padding:16px 0">
-        <div id="agent-gen-spinner" style="font-size:22px;animation:ag-spin 1s linear infinite;display:inline-block;margin-bottom:8px">⟳</div>
-        <div style="font-size:13px;color:var(--fg,#e0e0e0);margin-bottom:4px">Agent generation is in progress…</div>
-        <div style="font-size:11px;color:var(--dim,#888)">Complex workflows can take a few minutes.</div>
+      <div id="agent-gen-loading" style="display:none;text-align:center;padding:16px 0" aria-live="assertive">
+        <div id="agent-gen-spinner" style="font-size:22px;animation:ag-spin 1s linear infinite;display:inline-block;margin-bottom:8px" aria-hidden="true">⟳</div>
+        <div style="font-size:13px;color:var(--text-main);margin-bottom:4px">Agent generation is in progress…</div>
+        <div style="font-size:11px;color:var(--text-muted)">Complex workflows can take a few minutes.</div>
       </div>
-      <div id="agent-gen-status" style="font-size:11px;margin-top:2px"></div>
+      <div id="agent-gen-status" style="font-size:11px;margin-top:2px" aria-live="polite"></div>
     </div>
-    <div style="padding:10px 18px;border-top:1px solid var(--border,#2a2a2a);display:flex;justify-content:flex-end;gap:8px">
+    <div style="padding:10px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
       <button class="sess-action-btn" id="agent-gen-cancel-btn" onclick="closeGenerateDialog()">Cancel</button>
       <button class="sess-action-btn resume" id="agent-gen-btn" onclick="runAgentGenerate()">✦ Generate</button>
     </div>
@@ -1225,38 +1247,122 @@ Example:
 </div>
 <style>
 @keyframes ag-spin{to{transform:rotate(360deg)}}
-@keyframes ag-node-pulse{0%,100%{box-shadow:0 0 0 3px rgba(74,158,255,0.2),0 3px 16px rgba(0,0,0,0.6)}50%{box-shadow:0 0 0 6px rgba(74,158,255,0.35),0 3px 20px rgba(74,158,255,0.2)}}
+@keyframes ag-node-pulse{0%,100%{box-shadow:0 0 0 3px rgba(74,158,255,0.2),0 3px 16px var(--shadow-color, rgba(0,0,0,0.4))}50%{box-shadow:0 0 0 6px rgba(74,158,255,0.35),0 3px 20px rgba(74,158,255,0.2)}}
+
+.agent-slider-wrapper {
+  display:flex; position:fixed; inset:0; z-index:1100;
+  background:rgba(0,0,0,0); visibility: hidden; pointer-events: none;
+  transition: visibility 0.4s;
+}
+.agent-slider-wrapper.open {
+  visibility: visible;
+}
+#agent-builder-overlay, #agent-run-overlay {
+  display:flex; position:absolute; top:12px; right:12px; bottom:12px; 
+  width: min(1500px, calc(100% - 64px)); 
+  background:var(--bg-deep); flex-direction:column;
+  transform: translateX(110%);
+  transition: transform 0.5s var(--ease-out);
+  box-shadow: var(--shadow-xl, 0 20px 50px rgba(0,0,0,0.3));
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  overflow: hidden;
+  pointer-events: auto;
+}
+.agent-slider-wrapper.open #agent-builder-overlay,
+.agent-slider-wrapper.open #agent-run-overlay {
+  transform: translateX(0);
+}
+#agent-toolbar {
+  display:flex; align-items:center; gap:16px; padding:16px 20px; 
+  border-bottom:1px solid var(--border-dim); flex-shrink:0; background:var(--bg-surface);
+}
+#agent-toolbar input {
+  background:var(--bg-elevated); color:var(--text-main); border:1px solid var(--border-subtle);
+  border-radius:4px; padding:5px 10px; font-size:12px; height:28px; outline:none;
+}
+#agent-toolbar input:focus { border-color:var(--accent); }
+#agent-name-inp { width:180px; font-weight:600; }
+#agent-desc-inp { flex:1; min-width:100px; }
+.agent-tool-btn {
+  background:var(--bg-elevated); color:var(--text-muted); border:1px solid var(--border-subtle);
+  padding:5px 12px; border-radius:4px; font-size:12px; cursor:pointer; 
+  display:flex; align-items:center; gap:5px; height:30px; transition:all .15s;
+}
+.agent-tool-btn:hover { background:var(--bg-hover); color:var(--text-main); border-color:var(--border-strong); }
+.agent-tool-btn.primary { background:var(--accent-subtle); color:var(--accent); border-color:var(--accent); }
+.agent-tool-btn.primary:hover { background:var(--accent); color:#fff; }
+.agent-save-btn {
+  background:var(--accent); color:#fff; border:none; padding:5px 16px; 
+  border-radius:4px; font-size:12px; font-weight:600; cursor:pointer; height:30px;
+}
+.agent-save-btn:hover { opacity:0.9; }
+#agent-save-status { font-size:11px; color:var(--text-dim); margin-left:8px; }
+
+.agent-main-area { display:flex; flex:1; overflow:hidden; }
+#agent-canvas-wrap { flex:1; position:relative; overflow:hidden; background:var(--bg-deep); cursor:grab; }
+#agent-canvas-wrap:active { cursor:grabbing; }
+#agent-canvas { position:absolute; top:0; left:0; width:5000px; height:4000px; transform-origin:0 0; }
+#agent-edges-svg, #agent-grid-svg { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+#agent-edges-svg { z-index:1; }
+#agent-grid-svg { z-index:0; }
+
+#builder-chat-panel {
+  width:320px; flex-shrink:0; border-left:1px solid var(--border-dim); 
+  background:var(--bg-surface); display:none; flex-direction:column; overflow:hidden;
+}
+#builder-chat-panel.open { display:flex; }
+.builder-chat-header {
+  padding:10px 14px; border-bottom:1px solid var(--border-dim); 
+  display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
+}
+.builder-chat-header span { font-size:12px; font-weight:700; color:var(--text-main); }
+.builder-chat-close { background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:14px; }
+#builder-chat-messages { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:4px; }
+.builder-chat-footer { padding:10px; border-top:1px solid var(--border-dim); flex-shrink:0; }
+#builder-chat-inp {
+  width:100%; background:var(--bg-elevated); color:var(--text-main); border:1px solid var(--border-subtle);
+  border-radius:6px; padding:8px; font-size:12px; resize:none; font-family:inherit; outline:none; box-sizing:border-box;
+}
+.builder-chat-actions { display:flex; align-items:center; justify-content:space-between; margin-top:8px; }
+.builder-chat-hint { font-size:10px; color:var(--text-dim); }
+.builder-chat-send {
+  background:var(--accent); color:#fff; border:none; padding:4px 12px; 
+  border-radius:4px; font-size:11px; font-weight:600; cursor:pointer;
+}
 </style>
 
-<!-- --- Agent Live Run Overlay --- -->
-<div id="agent-run-overlay" style="display:none;position:fixed;inset:0;z-index:1050;background:var(--bg,#111);flex-direction:column">
-  <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border,#2a2a2a);flex-shrink:0;background:var(--bg2,#161616)">
-    <button onclick="closeAgentRunOverlay()" style="background:none;border:none;color:var(--dim,#666);font-size:18px;cursor:pointer;padding:0 4px">←</button>
-    <span id="agent-run-title" style="font-size:13px;font-weight:600;color:var(--fg,#e0e0e0)">Agent Run</span>
-    <span id="agent-run-status-badge" style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--inp,#1e1e1e);color:var(--dim,#888)">running</span>
+<!-- --- Agent Run Overlay --- -->
+<div id="agent-run-wrapper" class="agent-slider-wrapper">
+  <div id="agent-run-overlay" role="dialog" aria-modal="true" aria-labelledby="agent-run-title">
+  <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border-dim);flex-shrink:0;background:var(--bg-surface)">
+    <button onclick="closeAgentRunOverlay()" style="background:none;border:none;color:var(--text-dim);font-size:18px;cursor:pointer;padding:0 4px" aria-label="Close run overlay">←</button>
+    <span id="agent-run-title" style="font-size:13px;font-weight:600;color:var(--text-main)">Agent Run</span>
+    <span id="agent-run-status-badge" style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--bg-elevated);color:var(--text-dim)" aria-live="polite">running</span>
     <div style="flex:1"></div>
-    <span id="agent-run-progress" style="font-size:11px;color:var(--dim,#888)"></span>
-    <button id="agent-run-cancel-btn" onclick="cancelAgentRun()" style="display:none;background:#e06c7522;border:1px solid #e06c75;color:#e06c75;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px">Stop</button>
+    <span id="agent-run-progress" style="font-size:11px;color:var(--text-dim)" aria-live="polite"></span>
+    <button id="agent-run-cancel-btn" onclick="cancelAgentRun()" style="display:none;background:var(--color-danger-subtle);border:1px solid var(--color-danger);color:var(--color-danger);padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px">Stop</button>
   </div>
   <div style="flex:1;position:relative;overflow:hidden">
-    <svg id="agent-run-edges-svg" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1"></svg>
+    <svg id="agent-run-edges-svg" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1" aria-hidden="true"></svg>
     <div id="agent-run-canvas" style="position:absolute;top:0;left:0;width:4000px;height:3000px">
-      <svg id="agent-run-grid-svg" style="position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none"></svg>
+      <svg id="agent-run-grid-svg" style="position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none" aria-hidden="true"></svg>
     </div>
   </div>
+</div>
 </div>
 
 <!-- --- Resize handle: center ↔ right sidebar --- -->
 <div class="resize-handle" id="resize-right" title="Drag to resize"></div>
 
 <!-- --- Right Sidebar: Session Dashboard --- -->
-<div id="right-sidebar">
+<div id="right-sidebar" role="complementary" aria-label="Session dashboard">
   <div class="rs-header">
     <span>Active Sessions</span>
-    <span id="rs-count" style="font-size:10px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0"></span>
+    <span id="rs-count" style="font-size:10px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0" aria-live="polite"></span>
   </div>
-  <div class="rs-list" id="rs-list">
-    <div class="rs-empty">No sessions yet</div>
+  <div class="rs-list" id="rs-list" role="list">
+    <div class="rs-empty" role="status">No sessions yet</div>
   </div>
   <button class="rs-new-btn" onclick="toggleAiMenu(event)">+ New Session</button>
 </div>
@@ -1267,7 +1373,7 @@ Example:
 <script src="/js/memory.js?v=2"></script>
 <script src="/js/custom_ai.js?v=3"></script>
 <script src="/js/backup.js?v=2"></script>
-<script src="/js/agents.js?v=10"></script>
+<script src="/js/agents.js?v=11"></script>
 <script>
 // Register PWA service worker
 if ('serviceWorker' in navigator) {

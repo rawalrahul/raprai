@@ -282,11 +282,11 @@ async function _openVersionsModal(agentId){
     modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center';
     modal.addEventListener('click',e=>{if(e.target===modal) modal.style.display='none';});
     const box=document.createElement('div');
-    box.style.cssText='background:#161616;border:1px solid #333;border-radius:8px;width:480px;max-width:95vw;max-height:70vh;display:flex;flex-direction:column;overflow:hidden';
+    box.style.cssText='background:var(--bg-surface);border:1px solid var(--border-default);border-radius:8px;width:480px;max-width:95vw;max-height:70vh;display:flex;flex-direction:column;overflow:hidden';
     const hdr=document.createElement('div');
-    hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #2a2a2a';
-    const title=document.createElement('span');title.id='ag-ver-title';title.style.cssText='font-size:13px;font-weight:600;color:#e0e0e0';
-    const cls=document.createElement('button');cls.textContent='✕';cls.style.cssText='background:none;border:none;color:#888;cursor:pointer;font-size:14px';cls.onclick=()=>modal.style.display='none';
+    hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border-subtle)';
+    const title=document.createElement('span');title.id='ag-ver-title';title.style.cssText='font-size:13px;font-weight:600;color:var(--text-main)';
+    const cls=document.createElement('button');cls.textContent='✕';cls.style.cssText='background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px';cls.onclick=()=>modal.style.display='none';
     hdr.appendChild(title);hdr.appendChild(cls);
     const list=document.createElement('div');list.id='ag-ver-list';list.style.cssText='padding:8px 14px;overflow-y:auto;flex:1';
     box.appendChild(hdr);box.appendChild(list);modal.appendChild(box);document.body.appendChild(modal);
@@ -296,19 +296,19 @@ async function _openVersionsModal(agentId){
   document.getElementById('ag-ver-title').textContent='Versions — '+agName;
   const list=document.getElementById('ag-ver-list');
   while(list.firstChild) list.removeChild(list.firstChild);
-  const loading=document.createElement('div');loading.style.cssText='color:#666;font-size:11px;padding:8px 0';loading.textContent='Loading…';list.appendChild(loading);
+  const loading=document.createElement('div');loading.style.cssText='color:var(--text-dim);font-size:11px;padding:8px 0';loading.textContent='Loading…';list.appendChild(loading);
   try{
     const data=await fetch('/api/agents/'+agentId+'/versions').then(r=>r.json());
     while(list.firstChild) list.removeChild(list.firstChild);
     const versions=data.versions||[];
-    if(!versions.length){const em=document.createElement('div');em.style.cssText='color:#555;font-size:11px;padding:8px 0';em.textContent='No versions yet.';list.appendChild(em);return;}
+    if(!versions.length){const em=document.createElement('div');em.style.cssText='color:var(--text-dim);font-size:11px;padding:8px 0';em.textContent='No versions yet.';list.appendChild(em);return;}
     versions.forEach((v,idx)=>{
-      const row=document.createElement('div');row.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid #1e1e1e';
-      const label=document.createElement('span');label.style.cssText='font-size:11px;color:#ccc';label.textContent=`v${v.version_num} — ${v.saved_at?new Date(v.saved_at*1000).toLocaleString():'?'}`;
+      const row=document.createElement('div');row.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border-subtle)';
+      const label=document.createElement('span');label.style.cssText='font-size:11px;color:var(--text-muted)';label.textContent=`v${v.version_num} — ${v.saved_at?new Date(v.saved_at*1000).toLocaleString():'?'}`;
       if(idx===0){const cur=document.createElement('span');cur.style.cssText='font-size:9px;color:#4caf50;margin-left:6px';cur.textContent='current';label.appendChild(cur);}
       row.appendChild(label);
       if(idx>0){
-        const btn=document.createElement('button');btn.textContent='Restore';btn.style.cssText='font-size:10px;padding:2px 8px;border-radius:3px;background:#1a1a1a;border:1px solid #c8844a;color:#c8844a;cursor:pointer';
+        const btn=document.createElement('button');btn.textContent='Restore';btn.style.cssText='font-size:10px;padding:2px 8px;border-radius:3px;background:var(--bg-elevated);border:1px solid #c8844a;color:#c8844a;cursor:pointer';
         btn.onclick=async()=>{
           if(!confirm('Restore to v'+v.version_num+'?')) return;
           const res=await fetch('/api/agents/'+agentId+'/versions/'+v.id+'/restore',{method:'POST'}).then(r=>r.json());
@@ -328,37 +328,37 @@ async function _openMonitorDashboard(){
   if(!modal){
     modal=document.createElement('div');modal.id='ag-monitor-modal';modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center';
     modal.addEventListener('click',e=>{if(e.target===modal) modal.style.display='none';});
-    const box=document.createElement('div');box.style.cssText='background:#161616;border:1px solid #333;border-radius:8px;width:800px;max-width:97vw;max-height:80vh;display:flex;flex-direction:column;overflow:hidden';
-    const hdr=document.createElement('div');hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid #2a2a2a';
-    const title=document.createElement('span');title.style.cssText='font-size:14px;font-weight:700;color:#e0e0e0';title.textContent='Agent Monitor';
-    const cls=document.createElement('button');cls.textContent='✕';cls.style.cssText='background:none;border:none;color:#888;cursor:pointer;font-size:14px';cls.onclick=()=>modal.style.display='none';
+    const box=document.createElement('div');box.style.cssText='background:var(--bg-surface);border:1px solid var(--border-default);border-radius:8px;width:800px;max-width:97vw;max-height:80vh;display:flex;flex-direction:column;overflow:hidden';
+    const hdr=document.createElement('div');hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border-subtle)';
+    const title=document.createElement('span');title.style.cssText='font-size:14px;font-weight:700;color:var(--text-main)';title.textContent='Agent Monitor';
+    const cls=document.createElement('button');cls.textContent='✕';cls.style.cssText='background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px';cls.onclick=()=>modal.style.display='none';
     hdr.appendChild(title);hdr.appendChild(cls);
     const body=document.createElement('div');body.id='ag-monitor-body';body.style.cssText='padding:14px 16px;overflow-y:auto;flex:1';
     box.appendChild(hdr);box.appendChild(body);modal.appendChild(box);document.body.appendChild(modal);
   }
   modal.style.display='flex';
   const body=document.getElementById('ag-monitor-body');while(body.firstChild) body.removeChild(body.firstChild);
-  const loading=document.createElement('div');loading.style.cssText='color:#666;font-size:11px';loading.textContent='Loading…';body.appendChild(loading);
+  const loading=document.createElement('div');loading.style.cssText='color:var(--text-dim);font-size:11px';loading.textContent='Loading…';body.appendChild(loading);
   try{
     const data=await fetch('/api/agents/stats').then(r=>r.json());
     while(body.firstChild) body.removeChild(body.firstChild);
     const t=data.totals||{};
     const banner=document.createElement('div');banner.style.cssText='display:flex;gap:20px;margin-bottom:16px;flex-wrap:wrap';
-    const stat=(label,val,color)=>{const d=document.createElement('div');d.style.cssText='text-align:center;min-width:80px';const v=document.createElement('div');v.style.cssText=`font-size:22px;font-weight:700;color:${color||'#e0e0e0'}`;v.textContent=val==null?'—':val;const l=document.createElement('div');l.style.cssText='font-size:10px;color:#666;margin-top:2px';l.textContent=label;d.appendChild(v);d.appendChild(l);return d;};
+    const stat=(label,val,color)=>{const d=document.createElement('div');d.style.cssText='text-align:center;min-width:80px';const v=document.createElement('div');v.style.cssText=`font-size:22px;font-weight:700;color:${color||'var(--text-main)'}`;v.textContent=val==null?'—':val;const l=document.createElement('div');l.style.cssText='font-size:10px;color:var(--text-dim);margin-top:2px';l.textContent=label;d.appendChild(v);d.appendChild(l);return d;};
     banner.appendChild(stat('Total Runs',t.total_runs,'#4a9eff'));banner.appendChild(stat('Successful',t.ok_runs,'#4caf50'));banner.appendChild(stat('Failed',t.fail_runs,'#e06c75'));banner.appendChild(stat('Success Rate',t.success_rate!=null?(t.success_rate*100).toFixed(1)+'%':null,'#f5a623'));
     body.appendChild(banner);
     const table=document.createElement('table');table.style.cssText='width:100%;border-collapse:collapse;font-size:11px';
     const thead=document.createElement('thead');const hr=document.createElement('tr');
-    ['Agent','Runs','OK','Fail','Rate','Avg (s)','Last Run','Status'].forEach(h=>{const th=document.createElement('th');th.style.cssText='text-align:left;padding:5px 8px;color:#888;border-bottom:1px solid #2a2a2a;font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.4px';th.textContent=h;hr.appendChild(th);});
+    ['Agent','Runs','OK','Fail','Rate','Avg (s)','Last Run','Status'].forEach(h=>{const th=document.createElement('th');th.style.cssText='text-align:left;padding:5px 8px;color:var(--text-dim);border-bottom:1px solid var(--border-subtle);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.4px';th.textContent=h;hr.appendChild(th);});
     thead.appendChild(hr);table.appendChild(thead);
     const tbody=document.createElement('tbody');
     (data.agents||[]).forEach((ag,i)=>{
-      const tr=document.createElement('tr');tr.style.background=i%2===0?'#111':'#141414';
-      const cell=(val,color)=>{const td=document.createElement('td');td.style.cssText=`padding:6px 8px;color:${color||'#ccc'};`;td.textContent=val==null?'—':val;return td;};
+      const tr=document.createElement('tr');tr.style.background=i%2===0?'var(--bg-deep)':'var(--bg-surface)';
+      const cell=(val,color)=>{const td=document.createElement('td');td.style.cssText=`padding:6px 8px;color:${color||'var(--text-muted)'};`;td.textContent=val==null?'—':val;return td;};
       const statusColor={'completed':'#4caf50','failed':'#e06c75','running':'#4a9eff'}[ag.last_status]||'#888';
       const rate=ag.success_rate!=null?(ag.success_rate*100).toFixed(0)+'%':null;
       const rateColor=ag.success_rate!=null?(ag.success_rate>=0.9?'#4caf50':ag.success_rate>=0.7?'#f5a623':'#e06c75'):'#888';
-      tr.appendChild(cell(ag.name));tr.appendChild(cell(ag.total_runs,'#ccc'));tr.appendChild(cell(ag.ok_runs,'#4caf50'));tr.appendChild(cell(ag.fail_runs,ag.fail_runs>0?'#e06c75':'#4caf50'));tr.appendChild(cell(rate,rateColor));tr.appendChild(cell(ag.avg_duration,'#ccc'));tr.appendChild(cell(ag.last_run_at?new Date(ag.last_run_at*1000).toLocaleDateString():'never','#888'));tr.appendChild(cell(ag.last_status||'—',statusColor));tbody.appendChild(tr);
+      tr.appendChild(cell(ag.name));tr.appendChild(cell(ag.total_runs,'var(--text-main)'));tr.appendChild(cell(ag.ok_runs,'#4caf50'));tr.appendChild(cell(ag.fail_runs,ag.fail_runs>0?'#e06c75':'#4caf50'));tr.appendChild(cell(rate,rateColor));tr.appendChild(cell(ag.avg_duration,'var(--text-main)'));tr.appendChild(cell(ag.last_run_at?new Date(ag.last_run_at*1000).toLocaleDateString():'never','var(--text-dim)'));tr.appendChild(cell(ag.last_status||'—',statusColor));tbody.appendChild(tr);
     });
     table.appendChild(tbody);body.appendChild(table);
   }catch(e){while(body.firstChild) body.removeChild(body.firstChild);const err=document.createElement('div');err.style.cssText='color:#e06c75;font-size:11px';err.textContent='Error: '+e;body.appendChild(err);}
@@ -369,12 +369,12 @@ function _openNodeInspector(node){
   if(!modal){
     modal=document.createElement('div');modal.id='ag-inspector-modal';modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center';
     modal.addEventListener('click',e=>{if(e.target===modal) modal.style.display='none';});
-    const box=document.createElement('div');box.style.cssText='background:#161616;border:1px solid #333;border-radius:8px;width:680px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;overflow:hidden';
-    const hdr=document.createElement('div');hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #2a2a2a';
-    const title=document.createElement('span');title.id='ag-insp-title';title.style.cssText='font-size:13px;font-weight:600;color:#e0e0e0';
-    const cls=document.createElement('button');cls.textContent='✕';cls.style.cssText='background:none;border:none;color:#888;cursor:pointer;font-size:14px';cls.onclick=()=>modal.style.display='none';
+    const box=document.createElement('div');box.style.cssText='background:var(--bg-surface);border:1px solid var(--border-default);border-radius:8px;width:680px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;overflow:hidden';
+    const hdr=document.createElement('div');hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border-subtle)';
+    const title=document.createElement('span');title.id='ag-insp-title';title.style.cssText='font-size:13px;font-weight:600;color:var(--text-main)';
+    const cls=document.createElement('button');cls.textContent='✕';cls.style.cssText='background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px';cls.onclick=()=>modal.style.display='none';
     hdr.appendChild(title);hdr.appendChild(cls);
-    const body=document.createElement('div');body.id='ag-insp-body';body.style.cssText='padding:12px 14px;overflow-y:auto;flex:1;font-size:11px;color:#ccc;line-height:1.5';
+    const body=document.createElement('div');body.id='ag-insp-body';body.style.cssText='padding:12px 14px;overflow-y:auto;flex:1;font-size:11px;color:var(--text-muted);line-height:1.5';
     box.appendChild(hdr);box.appendChild(body);modal.appendChild(box);document.body.appendChild(modal);
   }
   modal.style.display='flex';
@@ -382,20 +382,20 @@ function _openNodeInspector(node){
   const body=document.getElementById('ag-insp-body');while(body.firstChild) body.removeChild(body.firstChild);
   const section=(label,value,color)=>{
     if(!value&&value!==0) return;
-    const h=document.createElement('div');h.style.cssText='font-size:10px;color:#888;margin-top:10px;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px';h.textContent=label;
-    const v=document.createElement('pre');v.style.cssText=`white-space:pre-wrap;word-break:break-word;background:#0d0d0d;border:1px solid #222;border-radius:4px;padding:8px;font-size:11px;color:${color||'#ccc'};max-height:200px;overflow-y:auto;margin:0`;
+    const h=document.createElement('div');h.style.cssText='font-size:10px;color:var(--text-dim);margin-top:10px;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px';h.textContent=label;
+    const v=document.createElement('pre');v.style.cssText=`white-space:pre-wrap;word-break:break-word;background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:4px;padding:8px;font-size:11px;color:${color||'var(--text-main)'};max-height:200px;overflow-y:auto;margin:0`;
     v.textContent=typeof value==='string'?value:JSON.stringify(value,null,2);
     body.appendChild(h);body.appendChild(v);
   };
   const timingDiv=document.createElement('div');timingDiv.style.cssText='display:flex;gap:16px;flex-wrap:wrap;margin-bottom:6px';
-  const pill=(label,val)=>{const s=document.createElement('span');s.style.cssText='font-size:10px;padding:2px 8px;border-radius:4px;background:#1a1a1a;color:#aaa;border:1px solid #2a2a2a';s.textContent=`${label}: ${val}`;return s;};
+  const pill=(label,val)=>{const s=document.createElement('span');s.style.cssText='font-size:10px;padding:2px 8px;border-radius:4px;background:var(--bg-elevated);color:var(--text-muted);border:1px solid var(--border-dim)';s.textContent=`${label}: ${val}`;return s;};
   timingDiv.appendChild(pill('Type',node.type||'ai'));timingDiv.appendChild(pill('AI',node.ai||'claude'));timingDiv.appendChild(pill('Status',node.status));
   if(node.elapsed_seconds!=null) timingDiv.appendChild(pill('Duration',node.elapsed_seconds.toFixed(2)+'s'));
   if(node.started_at) timingDiv.appendChild(pill('Started',new Date(node.started_at*1000).toLocaleTimeString()));
   body.appendChild(timingDiv);
-  section('Task / Instructions',node.task||'(none)','#c0c0c0');
+  section('Task / Instructions',node.task||'(none)','var(--text-main)');
   if(node.status==='completed') section('Output',node.output||'(empty)','#4caf50');
-  if(node.output_summary) section('Summary',node.output_summary,'#888');
+  if(node.output_summary) section('Summary',node.output_summary,'var(--text-dim)');
   if(node.error) section('Error',node.error,'#e06c75');
 }
 
@@ -404,9 +404,10 @@ function _openNodeInspector(node){
 // ---------------------------------------------------------------------------
 
 function openAgentBuilder(agentId, template){
+  _clearBlockingUiForAgentBuilder();
   _builderAgentId=agentId;
-  const overlay=document.getElementById('agent-builder-overlay');
-  overlay.style.display='flex';
+  const wrap=document.getElementById('agent-builder-wrapper');
+  if(wrap) wrap.classList.add('open');
   const nameInp=document.getElementById('agent-name-inp');
   const descInp=document.getElementById('agent-desc-inp');
   if(template){
@@ -434,6 +435,7 @@ function openAgentBuilder(agentId, template){
   _builderChatSending=false;
   _builderChatDesc=(document.getElementById('agent-desc-inp')||{}).value||'';
   _closeBuilderChat();
+  _fixCanvasBg();
   _renderBuilderCanvas();
   _setupBuilderPan();
   _ensureBuilderManagerNode();
@@ -441,8 +443,20 @@ function openAgentBuilder(agentId, template){
 }
 
 function closeAgentBuilder(){
-  document.getElementById('agent-builder-overlay').style.display='none';
+  const wrap=document.getElementById('agent-builder-wrapper');
+  if(wrap) wrap.classList.remove('open');
   _builderAgentId=null;_builderNodes=[];
+}
+
+function _clearBlockingUiForAgentBuilder(){
+  const onboarding=document.getElementById('onboarding-overlay');
+  if(onboarding) onboarding.classList.remove('show');
+  const sidebarOverlay=document.getElementById('sb-overlay');
+  if(sidebarOverlay) sidebarOverlay.classList.remove('open');
+  const leftSidebar=document.getElementById('left-sidebar');
+  if(leftSidebar) leftSidebar.classList.remove('open');
+  const rightSidebar=document.getElementById('right-sidebar');
+  if(rightSidebar) rightSidebar.classList.remove('open');
 }
 
 function _defaultTrigger(){return{telegram:true,schedule:{enabled:false,expression:'',cron:'',next_run:null,input_data:null},webhook:{enabled:false,token:''}};}
@@ -460,10 +474,10 @@ function _renderBuilderCanvas(){
     const hint=document.createElement('div');
     hint.className='ag-hint';
     hint.style.cssText='position:absolute;left:50%;top:50%;transform:translate(-50%,-60%);text-align:center;pointer-events:none;z-index:5';
-    hint.appendChild(_hintLine('Start building your agent workflow','font-size:15px;font-weight:600;color:#555;margin-bottom:10px'));
-    hint.appendChild(_hintLine('Click  ✦ Generate  to create steps from a description','font-size:12px;color:#666;margin-bottom:6px'));
-    hint.appendChild(_hintLine('— or —','font-size:11px;color:#444;margin-bottom:6px'));
-    hint.appendChild(_hintLine('Click  + Node  in the toolbar to add a step manually','font-size:12px;color:#666'));
+    hint.appendChild(_hintLine('Start building your agent workflow','font-size:15px;font-weight:600;color:var(--text-dim);margin-bottom:10px'));
+    hint.appendChild(_hintLine('Click  ✦ Generate  to create steps from a description','font-size:12px;color:var(--text-muted);margin-bottom:6px'));
+    hint.appendChild(_hintLine('— or —','font-size:11px;color:var(--text-dim);margin-bottom:6px'));
+    hint.appendChild(_hintLine('Click  + Node  in the toolbar to add a step manually','font-size:12px;color:var(--text-muted)'));
     canvas.appendChild(hint);
   }
   _builderNodes.forEach(node=>canvas.appendChild(_makeNodeEl(node,false)));
@@ -486,7 +500,7 @@ function _updateCanvasHint(){
     if(!tip){
       tip=document.createElement('div');
       tip.className='ag-connect-tip';
-      tip.style.cssText='position:absolute;bottom:14px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.75);color:#aaa;font-size:11px;padding:6px 14px;border-radius:20px;pointer-events:none;z-index:20;white-space:nowrap';
+      tip.style.cssText='position:absolute;bottom:14px;left:50%;transform:translateX(-50%);background:var(--bg-elevated);color:var(--text-muted);font-size:11px;padding:6px 14px;border-radius:20px;pointer-events:none;z-index:20;white-space:nowrap;border:1px solid var(--border-default);box-shadow:var(--shadow-md)';
       tip.textContent='Click a node to configure it · Drag from a colored dot to connect nodes';
       wrap.appendChild(tip);
     }
@@ -509,7 +523,7 @@ function _makeNodeEl(node,isRun){
     `left:${node.x}px`,
     `top:${node.y}px`,
     'width:200px',
-    isRunning?'background:#0d1b2a':'background:#1c1c1c',
+    isRunning?'background:var(--bg-active)':'background:var(--bg-surface)',
     `border:${isRunning?'2px':'1.5px'} solid ${sc}`,
     'border-radius:8px',
     'z-index:10',
@@ -533,10 +547,10 @@ function _makeNodeEl(node,isRun){
   titleRow.style.cssText='display:flex;align-items:center;gap:6px;margin-bottom:'+(isRun?'0':'4px');
 
   const aiChip=document.createElement('span');
-  aiChip.style.cssText='font-size:9px;padding:1px 5px;border-radius:4px;background:#2a2a2a;color:#888;flex-shrink:0;text-transform:uppercase;letter-spacing:.4px';
+  aiChip.style.cssText='font-size:9px;padding:1px 5px;border-radius:4px;background:var(--bg-elevated);color:var(--text-muted);flex-shrink:0;text-transform:uppercase;letter-spacing:.4px';
   aiChip.textContent=node.ai||'claude';
   const typeChip=document.createElement('span');
-  typeChip.style.cssText='font-size:9px;padding:1px 5px;border-radius:4px;background:#232f42;color:#7a9eff;flex-shrink:0;text-transform:uppercase;letter-spacing:.4px';
+  typeChip.style.cssText='font-size:9px;padding:1px 5px;border-radius:4px;background:var(--accent-subtle);color:var(--accent);flex-shrink:0;text-transform:uppercase;letter-spacing:.4px';
   typeChip.textContent=node.type||'ai';
 
   if ((node.type || 'ai') === 'manager') {
@@ -547,7 +561,7 @@ function _makeNodeEl(node,isRun){
   }
 
   const titleSpan=document.createElement('span');
-  titleSpan.style.cssText='font-size:12px;font-weight:600;color:#e0e0e0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+  titleSpan.style.cssText='font-size:12px;font-weight:600;color:var(--text-main);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
   if(isRun){
     const icon=_nodeStatusIcon(node.status);
     if(icon){
@@ -571,10 +585,10 @@ function _makeNodeEl(node,isRun){
     // Task preview or "click to configure" hint
     const preview=document.createElement('div');
     if(hasTask){
-      preview.style.cssText='font-size:10px;color:#777;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;margin-top:2px';
+      preview.style.cssText='font-size:10px;color:var(--text-muted);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;margin-top:2px';
       preview.textContent=node.task.slice(0,120);
     }else{
-      preview.style.cssText='font-size:10px;color:#555;font-style:italic;margin-top:2px';
+      preview.style.cssText='font-size:10px;color:var(--text-dim);font-style:italic;margin-top:2px';
       preview.textContent='Click to add instructions…';
     }
     hdr.appendChild(preview);
@@ -582,7 +596,7 @@ function _makeNodeEl(node,isRun){
 
   if(isRun&&node.status==='running'){
     const buf=document.createElement('div');buf.className='ag-stream-buf';
-    buf.style.cssText='font-size:9px;color:#666;margin-top:4px;max-height:36px;overflow:hidden;font-family:monospace;line-height:1.3';
+    buf.style.cssText='font-size:9px;color:var(--text-muted);margin-top:4px;max-height:36px;overflow:hidden;font-family:monospace;line-height:1.3';
     buf.textContent=(node.stream_buffer||'').slice(-200);
     hdr.appendChild(buf);
   }
@@ -611,10 +625,10 @@ function _makeNodeEl(node,isRun){
   if(!isRun){
     // ── Output ports row ──
     const portsWrap=document.createElement('div');
-    portsWrap.style.cssText='border-top:1px solid #252525;padding:5px 10px 6px;display:flex;justify-content:space-between;align-items:center';
+    portsWrap.style.cssText='border-top:1px solid var(--border-dim);padding:5px 10px 6px;display:flex;justify-content:space-between;align-items:center';
 
     const portsLabel=document.createElement('span');
-    portsLabel.style.cssText='font-size:9px;color:#444';
+    portsLabel.style.cssText='font-size:9px;color:var(--text-dim)';
     const isManager=(node.type||'ai')==='manager';
     portsLabel.textContent=isManager?'supervises workflow':'outputs →';
     portsWrap.appendChild(portsLabel);
@@ -667,7 +681,7 @@ function _makeNodeEl(node,isRun){
   return el;
 }
 
-function _nodeStatusColor(st){return{running:'#4a9eff',completed:'#4caf50',failed:'#e06c75',skipped:'#555',pending:'#3a3a3a'}[st]||'#3a3a3a';}
+function _nodeStatusColor(st){return{running:'var(--accent)',completed:'#4caf50',failed:'#e06c75',skipped:'var(--text-dim)',pending:'var(--border-strong)'}[st]||'var(--border-strong)';}
 function _nodeStatusIcon(st){return{running:'⟳',completed:'✓',failed:'✗',skipped:'⊘',pending:''}[st]||'';}
 
 // ---------------------------------------------------------------------------
@@ -699,7 +713,7 @@ function _drawEdges(svgId,nodes,isRun,pan){
         path.setAttribute('d',`M ${x1} ${y1} C ${x1+Math.max(dx*0.5,60)} ${y1}, ${x2-Math.max(dx*0.5,60)} ${y2}, ${x2} ${y2}`);
       }
       path.setAttribute('fill','none');
-      path.setAttribute('stroke',isManager?'#888':c);
+      path.setAttribute('stroke',isManager?'var(--text-muted)':c);
       path.setAttribute('stroke-width',isManager?'1.5':'2');
       path.setAttribute('opacity',isManager?'0.45':'0.8');
       if(isManager) path.setAttribute('stroke-dasharray','6,4');
@@ -725,7 +739,7 @@ function _drawGrid(svgId){
   pat.setAttribute('width','28');pat.setAttribute('height','28');pat.setAttribute('patternUnits','userSpaceOnUse');
   const circ=document.createElementNS(ns,'circle');
   circ.setAttribute('cx','1');circ.setAttribute('cy','1');circ.setAttribute('r','1');
-  circ.setAttribute('fill','#333');
+  circ.setAttribute('fill','var(--border-strong)');
   pat.appendChild(circ);defs.appendChild(pat);svg.appendChild(defs);
   const rect=document.createElementNS(ns,'rect');
   rect.setAttribute('width','100%');rect.setAttribute('height','100%');rect.setAttribute('fill','url(#ag-dot-pat)');
@@ -898,14 +912,14 @@ function _ensureOpenRouterModelInput(){
   wrap.style.cssText='margin-bottom:8px;display:none';
   const label=document.createElement('label');
   label.textContent='OpenRouter Model';
-  label.style.cssText='display:block;font-size:11px;color:#888;margin-bottom:4px';
+  label.style.cssText='display:block;font-size:11px;color:var(--text-dim);margin-bottom:4px';
   const inp=document.createElement('input');
   inp.type='text';
   inp.id='node-or-model-inp';
   inp.placeholder='e.g. anthropic/claude-sonnet-4-5  or  openai/gpt-4o';
-  inp.style.cssText='width:100%;box-sizing:border-box;background:#1a1a1a;color:#ccc;border:1px solid #333;border-radius:4px;padding:5px 8px;font-size:12px';
+  inp.style.cssText='width:100%;box-sizing:border-box;background:var(--bg-deep);color:var(--text-main);border:1px solid var(--border-default);border-radius:4px;padding:5px 8px;font-size:12px';
   const hint=document.createElement('div');
-  hint.style.cssText='font-size:10px;color:#666;margin-top:3px';
+  hint.style.cssText='font-size:10px;color:var(--text-dim);margin-top:3px';
   hint.textContent='Full model list: openrouter.ai/models';
   wrap.appendChild(label);wrap.appendChild(inp);wrap.appendChild(hint);
   ai.parentElement.insertBefore(wrap,ai.nextSibling);
@@ -938,10 +952,10 @@ function _ensureNodeTypeSelect(){
   row.style.cssText='margin-bottom:8px';
   const label=document.createElement('label');
   label.textContent='Node Type';
-  label.style.cssText='display:block;font-size:11px;color:#888;margin-bottom:4px';
+  label.style.cssText='display:block;font-size:11px;color:var(--text-dim);margin-bottom:4px';
   sel=document.createElement('select');
   sel.id='node-type-sel';
-  sel.style.cssText='width:100%;background:#1a1a1a;color:#ccc;border:1px solid #333;border-radius:4px;padding:4px';
+  sel.style.cssText='width:100%;background:var(--bg-deep);color:var(--text-main);border:1px solid var(--border-default);border-radius:4px;padding:4px';
   ['ai','shell','http','file','deliver','input','condition','loop','transform','join','manager'].forEach(t=>{
     const opt=document.createElement('option');
     opt.value=t;opt.textContent=t;
@@ -1143,14 +1157,16 @@ function openAgentRunOverlay(run){
   const t=document.getElementById('agent-run-title');
   if(t) _setText(t,run.agent_name+' — Run '+run.id.slice(0,8));
   _updateRunOverlayStatus(run);
-  document.getElementById('agent-run-overlay').style.display='flex';
+  const wrap=document.getElementById('agent-run-wrapper');
+  if(wrap) wrap.classList.add('open');
   _rPan={x:60,y:60};_renderRunCanvas();_setupRunPan();
   _syncRunInputState(run);
   _startRunPoll(run.id);
 }
 
 function closeAgentRunOverlay(){
-  document.getElementById('agent-run-overlay').style.display='none';
+  const wrap=document.getElementById('agent-run-wrapper');
+  if(wrap) wrap.classList.remove('open');
   _activeRunId=null;_runNodes=[];
   _pendingRunInput=null;
   _hideAgentInputBanner();
@@ -1438,24 +1454,24 @@ function _collectAgentInput(question,titleText,placeholderText){
     overlay.id='agent-input-modal';
     overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
     const box=document.createElement('div');
-    box.style.cssText='width:min(720px,96vw);background:#171717;border:1px solid #333;border-radius:8px;padding:16px;color:#ddd;box-shadow:0 12px 40px rgba(0,0,0,.55)';
+    box.style.cssText='width:min(720px,96vw);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:8px;padding:16px;color:var(--text-main);box-shadow:0 12px 40px rgba(0,0,0,.55)';
     const title=document.createElement('div');
     title.style.cssText='font-size:15px;font-weight:600;margin-bottom:8px';
     title.textContent=titleText||'Agent input required';
     const q=document.createElement('div');
-    q.style.cssText='font-size:12px;color:#aaa;line-height:1.45;margin-bottom:10px;white-space:pre-wrap';
+    q.style.cssText='font-size:12px;color:var(--text-muted);line-height:1.45;margin-bottom:10px;white-space:pre-wrap';
     q.textContent=question;
     const ta=document.createElement('textarea');
-    ta.style.cssText='width:100%;height:180px;resize:vertical;background:#101010;color:#ddd;border:1px solid #333;border-radius:6px;padding:10px;font-family:inherit;font-size:12px;box-sizing:border-box';
+    ta.style.cssText='width:100%;height:180px;resize:vertical;background:var(--bg-deep);color:var(--text-main);border:1px solid var(--border-default);border-radius:6px;padding:10px;font-family:inherit;font-size:12px;box-sizing:border-box';
     ta.placeholder=placeholderText||'Paste resume text, preferences, approval, or any other required input here...';
     const fileRow=document.createElement('div');
     fileRow.style.cssText='display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap';
     const file=document.createElement('input');
     file.type='file';
     file.accept='.pdf,.docx,.txt,.md,.csv,.json';
-    file.style.cssText='font-size:12px;color:#bbb';
+    file.style.cssText='font-size:12px;color:var(--text-muted)';
     const uploadStatus=document.createElement('span');
-    uploadStatus.style.cssText='font-size:11px;color:#888';
+    uploadStatus.style.cssText='font-size:11px;color:var(--text-dim)';
     uploadStatus.textContent='Optional: upload a resume or source file';
     fileRow.appendChild(file);
     fileRow.appendChild(uploadStatus);
@@ -1482,7 +1498,7 @@ function _collectAgentInput(question,titleText,placeholderText){
     actions.style.cssText='display:flex;justify-content:flex-end;gap:8px;margin-top:14px';
     const cancel=document.createElement('button');
     cancel.textContent='Cancel';
-    cancel.style.cssText='padding:7px 12px;border-radius:6px;border:1px solid #444;background:#222;color:#bbb;cursor:pointer';
+    cancel.style.cssText='padding:7px 12px;border-radius:6px;border:1px solid var(--border-default);background:var(--bg-elevated);color:var(--text-muted);cursor:pointer';
     const submit=document.createElement('button');
     submit.textContent='Continue';
     submit.style.cssText='padding:7px 12px;border-radius:6px;border:1px solid #4a8;background:#1d3a2a;color:#9fdaaa;cursor:pointer';
@@ -1508,12 +1524,12 @@ function _collectAgentInput(question,titleText,placeholderText){
 function _fixCanvasBg(){
   ['agent-builder-overlay','agent-run-overlay','agent-canvas-wrap'].forEach(id=>{
     const el=document.getElementById(id);
-    if(el) el.style.background='#111';
+    if(el) el.style.background='var(--bg-deep)';
   });
   const canvas=document.getElementById('agent-canvas');
-  if(canvas) canvas.style.background='#111';
+  if(canvas) canvas.style.background='var(--bg-deep)';
   const runCanvas=document.getElementById('agent-run-canvas');
-  if(runCanvas) runCanvas.style.background='#111';
+  if(runCanvas) runCanvas.style.background='var(--bg-deep)';
 }
 
 // ---------------------------------------------------------------------------
@@ -1554,7 +1570,7 @@ function _addBuilderChatBubble(role, text){
   const wrap=document.createElement('div');
   wrap.style.cssText='display:flex;flex-direction:column;align-items:'+(role==='user'?'flex-end':'flex-start')+';margin-bottom:8px';
   const bubble=document.createElement('div');
-  bubble.style.cssText='max-width:90%;padding:7px 11px;border-radius:12px;font-size:12px;line-height:1.5;word-break:break-word;'+(role==='user'?'background:#2a2a2a;color:#ccc':'background:#1a2a3a;color:#9cc;border:1px solid #2a4a5a');
+  bubble.style.cssText='max-width:90%;padding:7px 11px;border-radius:12px;font-size:12px;line-height:1.5;word-break:break-word;'+(role==='user'?'background:var(--bg-elevated);color:var(--text-main)':'background:var(--accent-subtle);color:var(--accent);border:1px solid var(--accent-border)');
   bubble.textContent=text;
   wrap.appendChild(bubble);
   msgs.appendChild(wrap);
@@ -1569,7 +1585,7 @@ function _addBuilderChatThinking(){
   wrap.id='builder-chat-thinking';
   wrap.style.cssText='display:flex;align-items:flex-start;margin-bottom:8px';
   const bubble=document.createElement('div');
-  bubble.style.cssText='background:#1a2a3a;color:#9cc;border:1px solid #2a4a5a;padding:7px 11px;border-radius:12px;font-size:12px';
+  bubble.style.cssText='background:var(--accent-subtle);color:var(--accent);border:1px solid var(--accent-border);padding:7px 11px;border-radius:12px;font-size:12px';
   bubble.textContent='Thinking…';
   wrap.appendChild(bubble);
   msgs.appendChild(wrap);
@@ -1676,7 +1692,7 @@ function _showManagerGuard(){
 
   const panel=document.createElement('div');
   panel.id='manager-guard-panel';
-  panel.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1c1c1c;border:1.5px solid #f0a500;border-radius:10px;padding:20px 24px;z-index:9999;max-width:400px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.7)';
+  panel.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg-surface);border:1.5px solid #f0a500;border-radius:10px;padding:20px 24px;z-index:9999;max-width:400px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.7)';
 
   const title=document.createElement('div');
   title.style.cssText='font-size:14px;font-weight:700;color:#f0a500;margin-bottom:10px';
@@ -1691,7 +1707,7 @@ function _showManagerGuard(){
   ];
   lines.forEach(txt=>{
     const p=document.createElement('p');
-    p.style.cssText='font-size:12px;color:#aaa;margin:6px 0;line-height:1.5';
+    p.style.cssText='font-size:12px;color:var(--text-muted);margin:6px 0;line-height:1.5';
     p.textContent=txt;
     panel.appendChild(p);
   });
@@ -1700,12 +1716,12 @@ function _showManagerGuard(){
   btnRow.style.cssText='display:flex;gap:10px;margin-top:16px;justify-content:flex-end';
 
   const autoBtn=document.createElement('button');
-  autoBtn.style.cssText='padding:6px 14px;border-radius:6px;background:#1a2a3a;border:1px solid #4a8ac8;color:#9cc;font-size:12px;cursor:pointer';
+  autoBtn.style.cssText='padding:6px 14px;border-radius:6px;background:var(--accent-subtle);border:1px solid var(--accent);color:var(--accent);font-size:12px;cursor:pointer';
   autoBtn.textContent='Set to auto-approve';
   autoBtn.addEventListener('click',()=>{_setManagerAutoApprove();panel.remove();});
 
   const okBtn=document.createElement('button');
-  okBtn.style.cssText='padding:6px 14px;border-radius:6px;background:#2a2a2a;border:1px solid #555;color:#ccc;font-size:12px;cursor:pointer';
+  okBtn.style.cssText='padding:6px 14px;border-radius:6px;background:var(--bg-elevated);border:1px solid var(--border-default);color:var(--text-main);font-size:12px;cursor:pointer';
   okBtn.textContent='Got it';
   okBtn.addEventListener('click',()=>panel.remove());
 
@@ -1736,6 +1752,8 @@ document.addEventListener('keydown',function(e){
     window.loadAgentsPanel=loadAgentsPanel;
     window.openAgentBuilder=openAgentBuilder;
     window.openAgentBuilderWindow=openAgentBuilderWindow;
+    window.closeAgentBuilder=closeAgentBuilder;
+    window.closeAgentRunOverlay=closeAgentRunOverlay;
     window._importAgentFromFile=_importAgentFromFile;
     window._openMonitorDashboard=_openMonitorDashboard;
   }

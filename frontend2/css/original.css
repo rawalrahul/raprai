@@ -56,8 +56,9 @@ html,body{height:100%;background:var(--bg);color:var(--text);
   padding:9px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s}
 .sb-hcard:hover{background:var(--surface2)}
 .sb-hcard.active{
-  background:rgba(245,158,11,.12);
-  box-shadow:inset 2px 0 0 var(--claude)}
+  background:rgba(245,158,11,.10);
+  border-radius:6px;
+  outline:1px solid rgba(245,158,11,.25)}
 .sb-hcard-name{
   font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;margin-bottom:2px}
@@ -820,10 +821,10 @@ header{
 .skill-kw{font-size:10px;background:var(--surface2);border:1px solid var(--border);
   border-radius:4px;padding:1px 6px;color:var(--dim)}
 /* Onboarding Tour */
-#onboarding-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10000;display:none;align-items:center;justify-content:center}
+#onboarding-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10000;display:none;align-items:center;justify-content:center;pointer-events:none}
 #onboarding-overlay.show{display:flex}
 #onboarding-modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:32px 36px;
-  max-width:480px;width:90vw;box-shadow:0 10px 40px rgba(0,0,0,.5);text-align:center}
+  max-width:480px;width:90vw;box-shadow:0 10px 40px rgba(0,0,0,.5);text-align:center;pointer-events:auto}
 #onboarding-modal h2{font-size:24px;font-weight:600;color:var(--text);margin-bottom:14px}
 #onboarding-modal p{font-size:14px;color:var(--muted);margin-bottom:20px;line-height:1.6}
 #onboarding-nav{display:flex;gap:12px;justify-content:center;margin-top:28px}
