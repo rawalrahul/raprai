@@ -87,8 +87,8 @@ _DEFAULT_WINDOWS: dict[str, int] = {
     "codellama":         16_384,
     # Integration CLIs (single-turn, but tracked for UI)
     "gemini":         1_000_000,
-    "codex":            200_000,
-    "openai":           128_000,
+    "codex":          1_000_000,  # GPT-4.1 default (1M)
+    "openai":         1_000_000,  # GPT-4.1 default (1M); override via CONTEXT_WINDOW_OPENAI
 }
 
 # Thresholds (fraction of context window)
