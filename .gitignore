@@ -97,3 +97,26 @@ desktop.ini
 
 # Git worktrees
 .worktrees/
+
+# Graphify generated output
+.graphify_*
+graphify-out/
+graphify-out-helm/
+**/graphify-out/
+
+# Personal / generated data files
+CODEBASE_ANALYSIS.json
+CODEBASE_ANALYSIS.md
+chat_logs_backup/
+cleaned_jobs.json
+combined_raw_jobs.json
+final_job_scoring_results.json
+Final_Job_Scoring_Report_2026.json
+job_scoring_results.json
+job_search_links.json
+job_search_strategy.json
+scored_jobs.json
+selected_news_topic.json
+
+# Test caches
+.pytest_cache/
