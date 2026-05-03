@@ -93,9 +93,74 @@ _primary_skills_dir: Optional[pathlib.Path] = None
 # Key: "docx::ollama", value: bool
 _enabled: dict[str, bool] = {}
 
-# How many lines of skill content to inject — avoids flooding small context windows.
-# Ollama skills can be code-heavy, so we allow a generous limit.
-_MAX_SKILL_LINES = 250
+# ---------------------------------------------------------------------------
+# Skill line-limit logic (Option C: model-aware + user-overridable)
+# ---------------------------------------------------------------------------
+
+# Cloud AIs (Claude, Gemini, Codex, etc.) — effectively no cap.
+_MAX_LINES_CLOUD = 2000
+
+# Ollama with a large model (≥30B) — treat like cloud.
+_MAX_LINES_OLLAMA_LARGE = 2000
+
+# Ollama with an unknown-size model — safe middle ground.
+_MAX_LINES_OLLAMA_UNKNOWN = 600
+
+# Ollama with a small model (<14B) — conservative.
+_MAX_LINES_OLLAMA_SMALL = 250
+
+# Size thresholds extracted from model name (e.g. "llama3:70b" → 70).
+_OLLAMA_LARGE_B  = 30   # ≥ 30B → large
+_OLLAMA_SMALL_B  = 14   # < 14B → small
+
+
+def _ollama_model_size_b() -> Optional[int]:
+    """
+    Parse the active Ollama model name for a parameter-count hint (in billions).
+    Returns None if the model name contains no recognisable size token.
+    Reads OLLAMA_MODEL or DEFAULT_MODEL_OLLAMA env vars (same as ai_runner).
+    """
+    model = (
+        os.environ.get("OLLAMA_MODEL", "")
+        or os.environ.get("DEFAULT_MODEL_OLLAMA", "")
+    ).lower()
+    # Match patterns like "70b", "72b", "3.8b", "0.5b"
+    m = re.search(r"(\d+(?:\.\d+)?)b", model)
+    if m:
+        try:
+            return int(float(m.group(1)))
+        except ValueError:
+            pass
+    return None
+
+
+def _get_max_skill_lines(ai: str) -> int:
+    """
+    Return the effective skill-line cap for the given AI provider.
+
+    Priority:
+      1. MAX_SKILL_LINES env var (user override — always wins)
+      2. Ollama: model-size heuristic (large/unknown/small)
+      3. All other AIs: _MAX_LINES_CLOUD
+    """
+    override = os.environ.get("MAX_SKILL_LINES", "").strip()
+    if override:
+        try:
+            return max(1, int(override))
+        except ValueError:
+            pass
+
+    if ai == "ollama":
+        size = _ollama_model_size_b()
+        if size is None:
+            return _MAX_LINES_OLLAMA_UNKNOWN
+        if size >= _OLLAMA_LARGE_B:
+            return _MAX_LINES_OLLAMA_LARGE
+        if size < _OLLAMA_SMALL_B:
+            return _MAX_LINES_OLLAMA_SMALL
+        return _MAX_LINES_OLLAMA_UNKNOWN  # 14–29B: middle ground
+
+    return _MAX_LINES_CLOUD
 
 
 # ---------------------------------------------------------------------------
@@ -587,7 +652,7 @@ def detect_skill(prompt: str) -> Optional[str]:
 def _build_prefix(skill_name: str, ai: str = "") -> str:
     """
     Build the context-prefix block injected before the user prompt.
-    Takes up to _MAX_SKILL_LINES lines of content, breaking at a clean
+    Takes up to _get_max_skill_lines(ai) lines of content, breaking at a clean
     section boundary (## heading or --- divider) where possible.
 
     For CLI-based AIs (claude, gemini, codex), appends an execution preamble
@@ -601,7 +666,7 @@ def _build_prefix(skill_name: str, ai: str = "") -> str:
     total = len(lines)
 
     # Find a clean break point at or before the line limit
-    cutoff = min(_MAX_SKILL_LINES, total)
+    cutoff = min(_get_max_skill_lines(ai), total)
     for i in range(cutoff - 1, max(0, cutoff - 20), -1):
         ln = lines[i].strip()
         if ln.startswith("##") or ln == "---":
