@@ -1140,6 +1140,8 @@ def generate_skill(prompt: str, ai: str, error_output: str = "",
         env = {**os.environ}
         if gen_ai == "claude":
             env["CLAUDE_AUTO_APPROVE"] = "1"
+        import helm.state as _st
+        env.update(_st.integrations.get(gen_ai, {}).get("process_env", {}))
 
         try:
             result = sp.run(

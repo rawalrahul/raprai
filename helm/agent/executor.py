@@ -94,9 +94,15 @@ def _normalise_condition_output(output: str) -> bool:
     ambiguous output so the workflow fails safe.
     """
     cleaned = output.strip().lower().rstrip(".,;!?")
-    # take only first word in case AI appended explanation
     first_word = cleaned.split()[0] if cleaned.split() else ""
-    return first_word in _TRUTHY or cleaned in _TRUTHY
+    result = first_word in _TRUTHY or cleaned in _TRUTHY
+    if not result and first_word not in _FALSY and cleaned not in _FALSY:
+        logger.warning(
+            "Condition node: ambiguous output %r — defaulting to FALSE branch. "
+            "Ensure task prompt says 'Reply only: true or false'.",
+            output[:80],
+        )
+    return result
 
 
 def _apply_condition_skips(run: dict) -> None:
@@ -423,43 +429,39 @@ async def _announce_final_output_files(run: dict, node: dict) -> None:
         logger.debug("Could not announce final output files: %s", exc)
 
 
+async def _save_node_output_to_dir(run: dict, node: dict, cwd: str, output: str) -> None:
+    """Save every non-manager node's output to the agent's output_dir (or cwd if unset)."""
+    if node.get("type") == "manager":
+        return
+    text = (output or "").strip()
+    if not text:
+        return
+    base_dir = (run.get("output_dir") or "").strip() or cwd
+    stem = _safe_output_stem(run, node)
+    run_suffix = str(run.get("id") or "run")[-8:]
+    path = _unique_output_path(pathlib.Path(base_dir) / f"{stem}_{run_suffix}.txt")
+
+    def _write() -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text + "\n", encoding="utf-8")
+
+    try:
+        await asyncio.to_thread(_write)
+        resolved = str(path.resolve())
+        _add_unique_path(run.setdefault("_generated_files", []), resolved)
+        node_id = node.get("id")
+        if node_id:
+            _add_unique_path(run.setdefault("_generated_files_by_node", {}).setdefault(node_id, []), resolved)
+        _add_unique_path(run.setdefault("_workflow_cwds", []), str(pathlib.Path(base_dir).resolve()))
+        node["node_output_file"] = resolved
+        logger.info("Agent run %s node %s output saved to %s", run.get("id", "")[:8], node.get("id", ""), resolved)
+    except Exception as exc:
+        logger.warning("Could not save node output file %s: %s", path, exc)
+
+
 async def _cleanup_intermediate_generated_files(run: dict) -> list[str]:
-    """Delete workflow-created intermediate files, preserving final outputs."""
-    generated = run.get("_generated_files") or []
-    if not generated:
-        return []
-
-    keep = _final_output_file_paths(run)
-    allowed_roots = [
-        pathlib.Path(cwd).resolve()
-        for cwd in run.get("_workflow_cwds", [])
-        if cwd
-    ]
-    if not allowed_roots:
-        return []
-
-    deleted: list[str] = []
-    for raw_path in generated:
-        norm = _normalise_path(raw_path)
-        if norm in keep:
-            continue
-        path = pathlib.Path(raw_path)
-        try:
-            resolved = path.resolve()
-            if not any(_path_is_under(resolved, root) for root in allowed_roots):
-                continue
-            if not resolved.is_file() or resolved.is_symlink():
-                continue
-            await asyncio.to_thread(resolved.unlink)
-            deleted.append(str(resolved))
-        except FileNotFoundError:
-            continue
-        except Exception as exc:
-            logger.warning("Could not clean intermediate agent file %s: %s", raw_path, exc)
-
-    if deleted:
-        logger.info("Agent run %s cleaned %d intermediate file(s)", run.get("id", "")[:8], len(deleted))
-    return deleted
+    """No-op: file deletion disabled so all output files remain for user verification."""
+    return []
 
 
 async def _cleanup_after_workflow_outputs(run: dict) -> None:
@@ -654,14 +656,15 @@ async def _execute_node(run: dict, node: dict, semaphore: asyncio.Semaphore):
                         await broadcast_run_stream(run["id"], node["id"], chunk)
 
                 child_sess["_pipeline_stream_hook"] = _stream_hook
-                ai_timeout = node.get("timeout", 600)
-                try:
-                    output = await asyncio.wait_for(
-                        process_message(prompt, source="agent", session_id=child_sess["id"]),
-                        timeout=ai_timeout,
-                    )
-                except asyncio.TimeoutError as exc:
-                    raise TimeoutError(f"AI node timed out after {ai_timeout}s") from exc
+                ai_timeout = node.get("timeout", 0)  # 0 = unlimited; set explicitly on node to cap
+                coro = process_message(prompt, source="agent", session_id=child_sess["id"])
+                if ai_timeout and ai_timeout > 0:
+                    try:
+                        output = await asyncio.wait_for(coro, timeout=ai_timeout)
+                    except asyncio.TimeoutError as exc:
+                        raise TimeoutError(f"AI node timed out after {ai_timeout}s") from exc
+                else:
+                    output = await coro
 
             retry_reason = _extract_retry_request(output)
             if retry_reason and node_type == "ai":
@@ -721,6 +724,7 @@ async def _execute_node(run: dict, node: dict, semaphore: asyncio.Semaphore):
                 except Exception as exc:
                     logger.debug("Agent generated-file tracking failed: %s", exc)
 
+            await _save_node_output_to_dir(run, node, cwd, output)
             await _persist_final_text_output(run, node, cwd, output)
             await _announce_final_output_files(run, node)
             await _send_final_node_output_to_telegram(run, node)

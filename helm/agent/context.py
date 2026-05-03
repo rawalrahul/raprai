@@ -54,7 +54,10 @@ def build_node_context(run: dict, node: dict) -> str:
     return "\n\n".join(parts)
 
 
+import logging as _logging
 import re as _re
+
+_ctx_logger = _logging.getLogger(__name__)
 
 # Pre-compiled regex patterns for performance
 _VAR_SUB_PATTERN = _re.compile(r"\{\{var:([^}]+)\}\}")
@@ -77,6 +80,13 @@ def substitute_vars(text: str, run: dict) -> str:
     vars_store = run.get("vars") or {}
     def _replace(m):
         key = m.group(1).strip()
+        if key not in vars_store:
+            _ctx_logger.warning(
+                "substitute_vars: run %s — {{var:%s}} not found in vars (keys: %s)",
+                str(run.get("id", ""))[:8],
+                key,
+                list(vars_store.keys()),
+            )
         return vars_store.get(key, m.group(0))
     return _VAR_SUB_PATTERN.sub(_replace, text)
 

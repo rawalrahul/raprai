@@ -211,6 +211,7 @@ async def _call_planner_ai(planner_ai: str, prompt: str, cwd: str) -> str:
                 run_ai_popen, cmd, cwd, planner_ai, {},
                 INTEGRATION_TIMEOUT or None,
                 stdin_text,
+                integration.get("process_env") or None,
             )
             if not raw or not raw.strip():
                 logger.error("%s planner returned empty output", planner_ai)

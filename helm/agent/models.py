@@ -247,6 +247,7 @@ def make_run(
         "status": "running",         # running | completed | failed | cancelled
         "nodes": nodes_snapshot,
         "input_data": input_data,
+        "output_dir": agent.get("output_dir") or None,
         "vars": {},
         "feedback_retries": {},
         "node_retries": {},
@@ -341,6 +342,7 @@ def run_state_payload(run: dict) -> dict:
         "status": run["status"],
         "nodes": run["nodes"],
         "input_data": run.get("input_data"),
+        "output_dir": run.get("output_dir"),
         "started_at": run["started_at"],
         "completed_at": run.get("completed_at"),
         "progress": run_progress(run),

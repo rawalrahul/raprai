@@ -11,6 +11,7 @@ let _builderTrigger = null;
 let _activeRunId = null;
 let _activeRunAgentId = null;
 let _runNodes = [];
+let _runWindows = {}; // run_id → window reference for runs opened in separate windows
 let _agGenRunning = false;
 let _bPan = {x:60, y:60};
 let _bPanning = false, _bPanStart = {x:0,y:0}, _bPanOrigin = {x:0,y:0};
@@ -115,7 +116,12 @@ function _openAgentRunWindow(run){
     openAgentRunOverlay(run);
     return;
   }
+  _runWindows[run.id]=win;
   _flashStatus('Agent run opened in a separate window','#4caf50');
+}
+
+function _runHasInputNode(run){
+  return !!(run&&Array.isArray(run.nodes)&&run.nodes.some(n=>(n.type||'ai')==='input'));
 }
 
 function _builderManagerTitle(){
@@ -218,7 +224,10 @@ async function runAgentNow(agentId, dryRun=false){
         body:JSON.stringify({input_data:input,dry_run:dryRun})
       }).then(r=>r.json());
     }
-    if(data.run) _openAgentRunWindow(data.run);
+    if(data.run){
+      if(_runHasInputNode(data.run)) openAgentRunOverlay(data.run);
+      else _openAgentRunWindow(data.run);
+    }
     else if(data.error) alert(data.error);
   }catch(err){alert('Failed to start: '+err);}
 }
@@ -1294,11 +1303,26 @@ function handleAgentRunStream(runId,nodeId,chunk){
 // ---------------------------------------------------------------------------
 
 async function handleAgentRunWaitingInput(payload){
+  // If this run is already in a separate browser window, focus that window instead
+  // of opening a second overlay+modal in the main window.
+  const runWin=payload.run_id&&_runWindows[payload.run_id];
+  if(runWin&&!runWin.closed){
+    try{runWin.focus();}catch(e){}
+    if(typeof _flashStatus==='function') _flashStatus('Agent waiting for input — see run window','#f0a500');
+    return;
+  }
   if(payload.run_id&&!_activeRunId){
-    _openAgentRunWindow({id:payload.run_id});
+    try{
+      const data=await fetch('/api/agents/runs/'+payload.run_id).then(r=>r.json());
+      if(data.run) openAgentRunOverlay(data.run);
+      else openAgentRunOverlay({id:payload.run_id,agent_name:'Agent',nodes:[],status:'waiting_input'});
+    }catch(e){
+      openAgentRunOverlay({id:payload.run_id,agent_name:'Agent',nodes:[],status:'waiting_input'});
+    }
   }
   _pendingRunInput=payload;
   _showAgentInputBanner(payload);
+  _openAgentInputFromBanner(payload);
 }
 
 function _isTerminalRunStatus(status){
@@ -1324,11 +1348,14 @@ function _syncRunInputState(run){
     return (t==='input'||t==='manager')&&n.status==='running';
   });
   if(run.status==='waiting_input'||waitingNode){
-    const payload=_pendingRunInput&&_pendingRunInput.run_id===run.id
+    const alreadyPending=_pendingRunInput&&_pendingRunInput.run_id===run.id;
+    const payload=alreadyPending
       ? _pendingRunInput
       : _runInputPayloadFromNode(waitingNode);
     _pendingRunInput=payload;
     _showAgentInputBanner(payload);
+    // Auto-open on first detection only (not on every poll cycle)
+    if(!alreadyPending&&!_agentInputModalOpenFor) _openAgentInputFromBanner(payload);
   }else if(_pendingRunInput&&_pendingRunInput.run_id===run.id){
     _pendingRunInput=null;
     _hideAgentInputBanner();

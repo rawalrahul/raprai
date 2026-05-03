@@ -35,6 +35,9 @@ APPROVAL_KEYWORDS = {
     "yes", "yep", "yeah", "ok", "okay", "approved", "approve",
     "lgtm", "looks good", "good", "great", "perfect", "done",
     "ship it", "correct", "right", "exactly",
+    "all good", "sounds good", "looks great", "that's fine", "thats fine",
+    "fine", "nice", "excellent", "outstanding", "well done", "proceed",
+    "continue", "go ahead", "accepted", "accept", "confirmed", "confirm",
 }
 
 
@@ -315,9 +318,26 @@ async def execute_manager_node(node: dict, run: dict, context: str) -> str:
     # Not approved — find and fix the offending node
     agent = _st.agents.get(run["agent_id"])
     if not agent:
-        return "APPROVED"  # Can't fix without live agent
+        logger.warning("Manager node: agent %s not found in state — auto-approving", run.get("agent_id"))
+        return "APPROVED"
 
     fix = await identify_and_fix_node(run, parsed["feedback"], agent["nodes"])
+    if not fix:
+        logger.warning(
+            "Manager node: AI could not identify a fix for run %s — returning APPROVED to avoid empty rerun loop",
+            run.get("id", "")[:8],
+        )
+        try:
+            from helm.broadcast import push_message
+            await push_message(
+                "system",
+                "Manager could not identify which node to fix. Please be more specific about what went wrong.",
+                source="agent",
+                session_id=run.get("manager_session_id"),
+            )
+        except Exception:
+            pass
+        return "APPROVED"
     if fix:
         # Update live agent definition
         for ag_node in agent["nodes"]:

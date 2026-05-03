@@ -5,6 +5,7 @@ CRUD, run management, webhook trigger, and AI-assisted graph generation.
 """
 
 import asyncio
+import hmac
 import os
 import time
 
@@ -173,6 +174,7 @@ async def create_agent(request: Request):
 
     # Apply trigger overrides from body
     _apply_trigger(ag, body.get("trigger", {}))
+    ag["output_dir"] = (body.get("output_dir") or "").strip() or None
 
     _st.agents[ag["id"]] = ag
     save_agent(ag)
@@ -200,6 +202,8 @@ async def update_agent(agent_id: str, request: Request):
         _ensure_manager_node(ag["nodes"], manager_title=ag["name"])
     if "trigger" in body:
         _apply_trigger(ag, body["trigger"])
+    if "output_dir" in body:
+        ag["output_dir"] = (body["output_dir"] or "").strip() or None
 
     ag["updated_at"] = time.time()
     save_agent(ag)
@@ -239,7 +243,7 @@ async def run_agent(agent_id: str, request: Request):
     dry_run = bool(body.get("dry_run", False))
 
     ag = _st.agents.get(agent_id)
-    if ag and input_data is None and not dry_run and _agent_requires_initial_input(ag):
+    if ag and input_data is None and _agent_requires_initial_input(ag):
         return JSONResponse({
             "needs_input": True,
             "question": _agent_initial_input_question(ag),
@@ -336,7 +340,8 @@ async def webhook_trigger(token: str, request: Request):
 
     for ag in _st.agents.values():
         webhook = ag.get("trigger", {}).get("webhook", {})
-        if webhook.get("enabled") and webhook.get("token") == token:
+        stored_token = webhook.get("token") or ""
+        if webhook.get("enabled") and hmac.compare_digest(stored_token, token):
             # B18: per-agent rate limit — reject triggers fired too quickly
             now = time.time()
             min_interval = webhook.get("min_interval", _WEBHOOK_MIN_INTERVAL)
@@ -880,6 +885,7 @@ def _agent_summary(ag: dict) -> dict:
         "description": ag.get("description", ""),
         "node_count": len(ag.get("nodes", [])),
         "trigger": ag.get("trigger", {}),
+        "output_dir": ag.get("output_dir") or None,
         "last_run_at": ag.get("last_run_at"),
         "run_count": ag.get("run_count", 0),
         "created_at": ag.get("created_at", 0),

@@ -218,6 +218,7 @@ def load_integrations() -> None:
                     "env_vars":      getattr(mod, "ENV_VARS",    []),
                     "setup_hint":    getattr(mod, "SETUP_HINT",  ""),
                     "stdin_prompt":  getattr(mod, "STDIN_PROMPT", False),
+                    "process_env":   getattr(mod, "PROCESS_ENV",  {}),
                 }
                 logger.info("Loaded AI integration: %s (%s)",
                             key, _st.integrations[key]["name"])

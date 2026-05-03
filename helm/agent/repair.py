@@ -65,8 +65,6 @@ def repair_agent_node(description: str, node: dict, index: int = 0) -> None:
         node_type = "input"
         if not node.get("task") or looks_like_fake_input_instruction(node.get("task", "")):
             node["task"] = initial_input_question(description)
-    elif node_type == "input":
-        node_type = "ai"
     elif loop_intent(text):
         node_type = "loop"
         node.setdefault("loop_max", 10)

@@ -431,21 +431,25 @@ if not _is_bundled():
 
 def run_ai_popen(cmd: list[str], cwd: str, name: str, sess: dict,
                  timeout_override: float | None = None,
-                 stdin_text: str | None = None) -> str:
+                 stdin_text: str | None = None,
+                 extra_env: dict | None = None) -> str:
     """Run an AI CLI subprocess, storing the Popen handle in sess['proc'] so it
     can be killed externally by stop_session / interrupt handlers.
 
     timeout_override: explicit seconds; None → use CLAUDE_TIMEOUT (0 = unlimited).
     stdin_text: if provided, the prompt is piped via stdin instead of appearing
     on the command line — this avoids Windows cmd.exe 8 KB arg-length limits.
+    extra_env: additional env vars merged into os.environ for this subprocess only.
     Integration AIs (Gemini, Codex, …) pass INTEGRATION_TIMEOUT to prevent an
     infinite hang when an invalid --model causes the CLI to enter an interactive
     picker with no terminal attached.
     """
+    import os as _os
     if timeout_override is not None:
         _timeout: float | None = timeout_override if timeout_override > 0 else None
     else:
         _timeout = CLAUDE_TIMEOUT if CLAUDE_TIMEOUT > 0 else None
+    _env = {**_os.environ, **extra_env} if extra_env else None
     try:
         proc = subprocess.Popen(
             cmd,
@@ -456,6 +460,7 @@ def run_ai_popen(cmd: list[str], cwd: str, name: str, sess: dict,
             encoding="utf-8",
             errors="replace",
             cwd=cwd,
+            env=_env,
             **hidden_kwargs(),
         )
         sess["proc"] = proc  # store so stop/interrupt can kill it
@@ -1093,6 +1098,7 @@ async def _self_heal_with_skill(ai: str, sess: dict, text: str, safe_text: str,
         retry_output = await asyncio.to_thread(
             run_ai_popen, cmd, cwd, ai, sess, INTEGRATION_TIMEOUT,
             stdin_text=enriched_text if use_stdin else None,
+            extra_env=integration.get("process_env") or None,
         )
         after = await asyncio.to_thread(snapshot_dir, cwd)
         await push_thinking(False, session_id=sid)
@@ -1351,6 +1357,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
                 out = await asyncio.to_thread(
                     run_ai_popen, cmd, cwd, ai, sess, INTEGRATION_TIMEOUT,
                     stdin_text=prompt if use_stdin else None,
+                    extra_env=integration.get("process_env") or None,
                 )
                 cli_tokens = _extract_tokens_from_cli_output(out)
                 if cli_tokens:
@@ -1373,6 +1380,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
             output = await asyncio.to_thread(
                 run_ai_popen, cmd, cwd, ai, sess, INTEGRATION_TIMEOUT,
                 stdin_text=enriched_text if use_stdin else None,
+                extra_env=integration.get("process_env") or None,
             )
             after  = await asyncio.to_thread(snapshot_dir, cwd)
 
