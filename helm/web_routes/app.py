@@ -355,6 +355,12 @@ _SETTINGS_KEYS = [
     "BUDGET_WARN_GEMINI_USD",
     "BUDGET_WARN_OPENAI_USD",
     "BUDGET_WARN_CODEX_USD",
+    # Context windows (tokens) — override per-AI defaults in context_manager.py
+    "CONTEXT_WINDOW_CLAUDE",
+    "CONTEXT_WINDOW_OPENAI",
+    "CONTEXT_WINDOW_CODEX",
+    "CONTEXT_WINDOW_GEMINI",
+    "CONTEXT_WINDOW_OLLAMA",
 ]
 
 

@@ -116,6 +116,10 @@ async def get_settings():
         # Prefer the live os.environ value (reflects any in-process overrides),
         # falling back to the raw .env file value.
         data[key] = os.environ.get(key, saved.get(key, ""))
+    # Return all CONTEXT_WINDOW_* overrides (dynamic — any AI key)
+    for k, v in {**saved, **os.environ}.items():
+        if k.startswith("CONTEXT_WINDOW_") and v:
+            data[k] = v
     # Also surface whether a PIN is currently set
     data["pin_is_set"] = _auth.pin_is_set()
     return JSONResponse(data)
@@ -128,7 +132,7 @@ async def save_settings(request: Request):
     saved = []
     skipped = []
     for key, value in body.items():
-        if key not in _SETTINGS_KEYS:
+        if key not in _SETTINGS_KEYS and not key.startswith("CONTEXT_WINDOW_"):
             skipped.append(key)
             continue
         update_env(key, str(value).strip())

@@ -760,6 +760,16 @@ Example:
         </div>
       </div>
 
+      <!-- AI Context Windows — dynamically populated from /integrations -->
+      <div class="settings-section">
+        <div class="settings-section-title">AI Context Windows
+          <small style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:9px;margin-left:6px">tokens — leave blank to use model default</small>
+        </div>
+        <div id="ctx-window-inputs">
+          <div style="font-size:12px;color:var(--muted);padding:4px 0">Loading…</div>
+        </div>
+      </div>
+
       <!-- AI Integrations -->
       <div class="settings-section" style="padding-bottom:14px">
         <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between">
@@ -1368,7 +1378,7 @@ Example:
 </div>
 
 </div><!-- /app -->
-<script src="/js/complete.js?v=6"></script>
+<script src="/js/complete.js?v=7"></script>
 <script src="/js/packages.js?v=2"></script>
 <script src="/js/memory.js?v=2"></script>
 <script src="/js/custom_ai.js?v=3"></script>

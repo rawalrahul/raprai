@@ -1822,6 +1822,14 @@ openSchedules = function(){
 function openSettings(){
   const m = document.getElementById('settings-modal');
   m.style.display = 'flex';
+  // Render context window inputs immediately — no fetch needed
+  const ctxContainer = document.getElementById('ctx-window-inputs');
+  if(ctxContainer && !ctxContainer.querySelector('input')){
+    while(ctxContainer.firstChild) ctxContainer.removeChild(ctxContainer.firstChild);
+    for(const key of Object.keys(_CTX_DEFAULTS)){
+      _appendCtxRow(ctxContainer, key, _CTX_LABELS[key]||key, _CTX_EMOJI[key]||'🤖', null);
+    }
+  }
   loadSettings();
   loadIntegrationStatus();
   loadCustomAIs();
@@ -1885,6 +1893,62 @@ function saveProviderApiKeys(){
   return Promise.all(saves);
 }
 
+// Known context window defaults per AI key (tokens)
+const _CTX_DEFAULTS = {
+  claude: 1000000, gemini: 1000000, codex: 1000000, openai: 1000000,
+  openclaw: 1000000, opencode: 1000000,
+  ollama: 128000, openrouter: 128000, groq: 131072, local_ai: 128000
+};
+
+// Display names/emojis for known AIs (used when integrations haven't loaded yet)
+const _CTX_LABELS = {
+  claude:'Claude Code', gemini:'Gemini', codex:'Codex', openai:'OpenAI / GPT',
+  openclaw:'OpenClaw', opencode:'OpenCode',
+  ollama:'Ollama (local)', openrouter:'OpenRouter', groq:'Groq', local_ai:'Local AI'
+};
+const _CTX_EMOJI = {
+  claude:'🤖', gemini:'✨', codex:'💻', openai:'🧠', openclaw:'🦞', opencode:'🖥️',
+  ollama:'🦙', openrouter:'🔀', groq:'⚡', local_ai:'🏠'
+};
+
+function _fmtTokens(n){
+  if(n >= 1000000) return (n/1000000).toFixed(n%1000000===0?0:1)+'M';
+  if(n >= 1000) return Math.round(n/1000)+'K';
+  return String(n);
+}
+
+function _appendCtxRow(container, aiKey, label, emoji, settingsData){
+  const def = _CTX_DEFAULTS[aiKey] || 128000;
+  const safeKey = aiKey.replace(/[^a-zA-Z0-9_]/g,'').toUpperCase();
+  const envKey = 'CONTEXT_WINDOW_' + safeKey;
+  if(document.getElementById('st-'+envKey)) return; // already rendered
+
+  const row = document.createElement('div');
+  row.className = 'settings-row';
+
+  const lbl = document.createElement('label');
+  lbl.textContent = (emoji||'🤖') + ' ' + label;
+  const small = document.createElement('small');
+  small.textContent = 'Default: ' + _fmtTokens(def);
+  lbl.appendChild(small);
+
+  const inp = document.createElement('input');
+  inp.className = 'settings-input';
+  inp.id = 'st-' + envKey;
+  inp.type = 'number';
+  inp.min = '1000';
+  inp.step = '1000';
+  inp.placeholder = String(def);
+  inp.style.width = '120px';
+
+  row.appendChild(lbl);
+  row.appendChild(inp);
+  container.appendChild(row);
+
+  const savedVal = settingsData && settingsData[envKey];
+  if(savedVal) inp.value = savedVal;
+}
+
 function loadSettings(){
   fetch('/settings').then(r=>r.json()).then(d=>{
     const keys = ['OUTPUT_IDLE_TIMEOUT','OUTPUT_MAX_WAIT','OUTPUT_NO_RESPONSE',
@@ -1913,7 +1977,17 @@ function loadSettings(){
     const pinStatus = document.getElementById('st-pin-status');
     if(pinStatus) pinStatus.textContent = d.pin_is_set ? 'PIN is set' : 'No PIN configured';
 
-    // Dynamically populate AI dropdowns (heartbeat + pipeline planner)
+    // Fill in any saved context-window overrides (rows already rendered by openSettings)
+    const container = document.getElementById('ctx-window-inputs');
+    if(container){
+      for(const [k, v] of Object.entries(d)){
+        if(!k.startsWith('CONTEXT_WINDOW_') || !v) continue;
+        const inp = document.getElementById('st-'+k);
+        if(inp) inp.value = v;
+      }
+    }
+
+    // AI dropdowns (heartbeat + pipeline) — async, needs /integrations
     _populateAiDropdowns(d);
     loadProviderApiKeyStatus();
   }).catch(()=>{});
@@ -1930,6 +2004,7 @@ function _populateAiDropdowns(settingsData){
         seen.add(int.key);
       }
     }
+
     // Populate any <select> that should show all AIs
     const dropdownIds = ['st-HEARTBEAT_AI','st-PIPELINE_PLANNER_AI'];
     for(const id of dropdownIds){
@@ -1940,13 +2015,22 @@ function _populateAiDropdowns(settingsData){
       for(const ai of allAis){
         const opt = document.createElement('option');
         opt.value = ai.key;
-        opt.textContent = `${ai.emoji} ${ai.name}`;
+        opt.textContent = ai.emoji + ' ' + ai.name;
         sel.appendChild(opt);
       }
-      // Restore saved value
       const savedKey = id.replace('st-','');
       const saved = settingsData[savedKey] || curVal;
       if(saved) sel.value = saved;
+    }
+
+    // Append any extra AIs from integrations not already rendered in ctx-window-inputs
+    const container = document.getElementById('ctx-window-inputs');
+    if(container){
+      for(const ai of allAis){
+        if(!_CTX_DEFAULTS[ai.key]){
+          _appendCtxRow(container, ai.key, ai.name, ai.emoji, settingsData);
+        }
+      }
     }
   });
 }
@@ -1970,6 +2054,10 @@ function saveSettings(){
     const multiplier = (hbUnit && hbUnit.value === 'minutes') ? 60 : 3600;
     body['HEARTBEAT_INTERVAL'] = String(parseFloat(hbVal.value) * multiplier);
   }
+  // Collect all dynamically-rendered CONTEXT_WINDOW_* inputs
+  document.querySelectorAll('[id^="st-CONTEXT_WINDOW_"]').forEach(el=>{
+    if(el.value.trim()) body[el.id.replace('st-','')] = el.value.trim();
+  });
   fetch('/settings',{method:'POST',headers:{'Content-Type':'application/json','x-csrf-token':_csrfToken()},body:JSON.stringify(body)})
     .then(r=>r.json())
     .then(()=>saveProviderApiKeys())
