@@ -68,8 +68,8 @@ def load_summaries_from_db(history_id: str) -> list[str]:
 # Override any of these via env vars, e.g. CONTEXT_WINDOW_CLAUDE=200000
 
 _DEFAULT_WINDOWS: dict[str, int] = {
-    # Claude Code models
-    "claude":           200_000,
+    # Claude Code models (Claude 4.x confirmed 1M context)
+    "claude":         1_000_000,
     # Ollama models — conservative defaults; user can override
     "ollama":           128_000,
     "qwen2.5":          128_000,
