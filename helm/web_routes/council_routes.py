@@ -62,7 +62,7 @@ async def start_council(req: StartCouncilRequest):
 
     asyncio.create_task(run_council(council_id))
 
-    return JSONResponse({"council_id": council_id})
+    return JSONResponse({"council_id": council_id, "council": council})
 
 
 @router.delete("/api/council/{council_id}/stop")
@@ -82,6 +82,12 @@ async def inject_message(council_id: str, req: InjectRequest):
     msg = make_council_message("user", req.message)
     council["messages"].append(msg)
     return JSONResponse({"ok": True})
+
+
+@router.get("/api/sessions")
+async def list_sessions():
+    from helm.session_mgr import sessions_state_payload
+    return JSONResponse({"sessions": sessions_state_payload()})
 
 
 @router.get("/api/council/list")

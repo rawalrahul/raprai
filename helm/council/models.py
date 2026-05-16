@@ -20,6 +20,10 @@ def make_council(id: str, topic: str, cwd: str, moderator_ai: str,
         "created_at": ts(),
         "completed_at": None,
         "consensus_summary": None,
+        "scores": {p["ai"]: 0 for p in participants},
+        "round_results": [],
+        "overall_winner": None,
+        "context_summary": "",
     }
 
 

@@ -24,14 +24,22 @@ def _find_participant(council: dict, ai_name: str) -> dict | None:
 
 async def run_council(council_id: str):
     """Main council loop. Launched as asyncio.create_task()."""
-    council = _st.councils.get(council_id)
-    if not council:
+    try:
+        council = _st.councils.get(council_id)
+        if not council:
+            logger.error("council %s not found in state", council_id)
+            return
+
+        council["status"] = "running"
+        await broadcast_council("council_created", {"council": council})
+    except Exception as exc:
+        logger.error("council startup error for %s: %s", council_id, exc, exc_info=True)
         return
 
-    council["status"] = "running"
-    await broadcast_council("council_created", {"council": council})
-
     try:
+        n_participants = len(council["participants"])
+        total_turns = 0  # each participant speaking once = 1 turn
+
         while council["rounds"] < council["max_rounds"]:
             if council["status"] == "stopped":
                 await broadcast_council("council_stopped", {"council_id": council_id})
@@ -46,6 +54,9 @@ async def run_council(council_id: str):
                 await broadcast_council("council_stopped", {"council_id": council_id})
                 return
 
+            if decision.get("prompt"):
+                mod_msg = make_council_message("moderator", decision.get("prompt", ""))
+                council["messages"].append(mod_msg)
             await broadcast_council("council_moderator", {
                 "council_id": council_id,
                 "next_participant": decision.get("next"),
@@ -68,16 +79,22 @@ async def run_council(council_id: str):
             ai_name = decision.get("next")
             participant = _find_participant(council, ai_name)
             if not participant:
-                # fallback: pick first participant
-                participant = council["participants"][0]
+                participant = council["participants"][total_turns % n_participants]
+
+            # Build context: rolling summary + last round verbatim (bounds prompt size)
+            n_p = len(council["participants"])
+            recent_msgs = [m for m in council["messages"]
+                           if m["role"] in ("participant", "moderator")][-max(n_p * 2, 6):]
+            recent_transcript = build_transcript(recent_msgs)
 
             chunks = []
             async for chunk in _runner.stream_council_response(
                 session_id=participant["session_id"],
                 topic=council["topic"],
-                transcript=build_transcript(council["messages"]),
+                transcript=recent_transcript,
                 moderator_prompt=decision.get("prompt", "Share your thoughts."),
                 participant_name=participant["name"],
+                context_summary=council.get("context_summary", ""),
             ):
                 chunks.append(chunk)
                 await broadcast_council("council_stream", {
@@ -89,16 +106,87 @@ async def run_council(council_id: str):
             full_response = "".join(chunks)
             msg = make_council_message("participant", full_response, participant)
             council["messages"].append(msg)
-            council["rounds"] += 1
+            total_turns += 1
+
             await broadcast_council("council_message", {
                 "council_id": council_id,
                 "message": msg,
             })
 
-        # Exhausted max rounds
+            # Round completes when every participant has spoken once
+            if total_turns % n_participants == 0:
+                round_num = council["rounds"] + 1
+                round_msgs = [m for m in council["messages"]
+                              if m["role"] == "participant"][-n_participants:]
+
+                try:
+                    judgment = await _moderator.judge_round(council, round_msgs)
+                except Exception as exc:
+                    logger.warning("council judge error round %d: %s", round_num, exc)
+                    judgment = {"winner": council["participants"][0]["ai"], "reasoning": "Judging failed."}
+
+                winner_ai = judgment.get("winner", "")
+                reasoning = judgment.get("reasoning", "")
+                winner_p = _find_participant(council, winner_ai) or council["participants"][0]
+
+                if winner_ai in council["scores"]:
+                    council["scores"][winner_ai] += 1
+
+                result = {
+                    "round": round_num,
+                    "winner_ai": winner_p["ai"],
+                    "winner_name": winner_p["name"],
+                    "reasoning": reasoning,
+                }
+                council["round_results"].append(result)
+                verdict_text = f"Round {round_num} winner: {winner_p['name']} — {reasoning}"
+                council["messages"].append(make_council_message("system", verdict_text))
+
+                council["rounds"] += 1
+
+                # Update rolling summary so future prompts stay bounded
+                try:
+                    council["context_summary"] = await _moderator.update_context_summary(
+                        council, round_msgs
+                    )
+                except Exception as exc:
+                    logger.warning("council summary update error round %d: %s", round_num, exc)
+
+                await broadcast_council("council_round_result", {
+                    "council_id": council_id,
+                    "result": result,
+                    "scores": council["scores"],
+                })
+
+        # Exhausted max rounds — declare overall winner
         if council["status"] == "running":
             council["status"] = "stopped"
-            await broadcast_council("council_stopped", {"council_id": council_id})
+            try:
+                final = await _moderator.declare_overall_winner(council)
+                winner_ai = final.get("winner", "")
+                verdict = final.get("verdict", "")
+                winner_p = _find_participant(council, winner_ai) or council["participants"][0]
+                council["overall_winner"] = {
+                    "ai": winner_p["ai"],
+                    "name": winner_p["name"],
+                    "score": council["scores"].get(winner_p["ai"], 0),
+                    "total_rounds": council["rounds"],
+                    "verdict": verdict,
+                }
+                council["messages"].append(
+                    make_council_message("system", f"FINAL VERDICT: {winner_p['name']} wins. {verdict}")
+                )
+            except Exception as exc:
+                logger.warning("council overall winner error: %s", exc)
+                if council["scores"]:
+                    winner_ai = max(council["scores"], key=lambda k: council["scores"][k])
+                    winner_p = _find_participant(council, winner_ai) or council["participants"][0]
+                    council["overall_winner"] = {
+                        "ai": winner_p["ai"], "name": winner_p["name"],
+                        "score": council["scores"].get(winner_ai, 0),
+                        "total_rounds": council["rounds"], "verdict": "",
+                    }
+            await broadcast_council("council_stopped", {"council_id": council_id, "council": council})
 
     except asyncio.CancelledError:
         council["status"] = "stopped"

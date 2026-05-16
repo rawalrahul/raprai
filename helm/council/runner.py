@@ -1,6 +1,7 @@
 """helm/council/runner.py — Low-level AI runner for council: no session history save."""
 
 import asyncio
+import os
 import re
 import subprocess
 from typing import AsyncGenerator
@@ -10,34 +11,50 @@ from helm.config import logger
 from helm.subprocess_utils import hidden_kwargs
 
 _ANSI_ESC_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+import json as _json
 
 
-def _build_cmd_for_session(sess: dict, prompt: str) -> tuple[list, str | None]:
-    """Build (cmd, stdin_text) for the session's AI with the given prompt."""
+def _extract_text(raw: str) -> str:
+    """Extract plain text from Claude CLI JSON envelope if present, else return raw."""
+    try:
+        obj = _json.loads(raw)
+        if isinstance(obj, dict) and "result" in obj:
+            return str(obj["result"])
+    except Exception:
+        pass
+    return raw
+
+
+def _build_cmd_for_session(sess: dict, prompt: str) -> tuple[list, str | None, dict]:
+    """Build (cmd, stdin_text, extra_env) for the session's AI with the given prompt."""
     ai = sess.get("ai")
-    cwd = sess.get("cwd", ".")
     model = sess.get("model")
 
     if ai == "claude":
         from helm.ai_runner.claude import build_claude_cmd
-        cmd = build_claude_cmd(prompt, cwd=cwd, model=model)
-        return cmd, None
+        cmd = build_claude_cmd(prompt, has_history=False, model=model)
+        return cmd, None, {}
 
     if ai and ai in _st.integrations:
         info = _st.integrations[ai]
         build_fn = info.get("build_command")
+        extra_env = info.get("process_env") or {}
         if build_fn:
             if info.get("stdin_prompt", False):
                 base_cmd = build_fn("", model=model)
-                return base_cmd, prompt
+                return base_cmd, prompt, extra_env
             cmd = build_fn(prompt, model=model)
-            return cmd, None
+            return cmd, None, extra_env
 
     raise ValueError(f"Cannot build command for AI: {ai!r}")
 
 
-def _run_subprocess_blocking(cmd: list, cwd: str, stdin_text: str | None) -> str:
+def _run_subprocess_blocking(cmd: list, cwd: str, stdin_text: str | None,
+                             extra_env: dict | None = None) -> str:
     """Blocking subprocess run. Returns stdout as string."""
+    env = None
+    if extra_env:
+        env = {**os.environ, **extra_env}
     dummy = {"proc": None}
     try:
         proc = subprocess.Popen(
@@ -49,6 +66,7 @@ def _run_subprocess_blocking(cmd: list, cwd: str, stdin_text: str | None) -> str
             encoding="utf-8",
             errors="replace",
             cwd=cwd,
+            env=env,
             **hidden_kwargs(),
         )
         dummy["proc"] = proc
@@ -62,7 +80,7 @@ def _run_subprocess_blocking(cmd: list, cwd: str, stdin_text: str | None) -> str
             dummy["proc"] = None
 
         stdout = _ANSI_ESC_RE.sub('', stdout).strip()
-        return stdout or "(no output)"
+        return _extract_text(stdout) or "(no output)"
     except FileNotFoundError:
         return f"(error: '{cmd[0]}' not found in PATH)"
     except Exception as exc:
@@ -75,14 +93,14 @@ async def run_moderator(session_id: str, prompt: str) -> str:
     if not sess:
         return ""
     try:
-        cmd, stdin_text = _build_cmd_for_session(sess, prompt)
+        cmd, stdin_text, extra_env = _build_cmd_for_session(sess, prompt)
     except Exception as exc:
         logger.warning("council runner: cannot build cmd for %s: %s", session_id, exc)
         return ""
     cwd = sess.get("cwd", ".")
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
-        None, lambda: _run_subprocess_blocking(cmd, cwd, stdin_text)
+        None, lambda: _run_subprocess_blocking(cmd, cwd, stdin_text, extra_env)
     )
 
 
@@ -92,23 +110,28 @@ async def stream_council_response(
     transcript: str,
     moderator_prompt: str,
     participant_name: str,
+    context_summary: str = "",
 ) -> AsyncGenerator[str, None]:
     """Async generator yielding response chunks from participant AI. No history save."""
     sess = _st.sessions.get(session_id)
     if not sess:
         return
 
+    summary_block = (
+        f"Debate summary (prior rounds):\n{context_summary}\n\n"
+        if context_summary else ""
+    )
     full_prompt = (
         f"You are {participant_name} in an AI council debate.\n\n"
-        f"Topic: {topic}\n"
-        f"Your role: Provide {participant_name}'s perspective.\n\n"
-        f"Council conversation so far:\n{transcript}\n\n"
+        f"Topic: {topic}\n\n"
+        f"{summary_block}"
+        f"Most recent exchanges:\n{transcript}\n\n"
         f"The moderator asks you: {moderator_prompt}\n\n"
         f"Respond as {participant_name}. Be direct. Engage with what others have said."
     )
 
     try:
-        cmd, stdin_text = _build_cmd_for_session(sess, full_prompt)
+        cmd, stdin_text, extra_env = _build_cmd_for_session(sess, full_prompt)
     except Exception as exc:
         logger.warning("council runner: cannot build cmd for %s: %s", session_id, exc)
         yield f"(error: {exc})"
@@ -116,40 +139,15 @@ async def stream_council_response(
 
     cwd = sess.get("cwd", ".")
 
+    # Use the same blocking executor path as run_moderator — asyncio.create_subprocess_exec
+    # has inconsistent stdout buffering on Windows for some CLIs (e.g. Gemini gives blank output).
+    loop = asyncio.get_event_loop()
     try:
-        stdin_flag = asyncio.subprocess.PIPE if stdin_text else None
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            stdin=stdin_flag,
-            cwd=cwd,
+        result = await loop.run_in_executor(
+            None, lambda: _run_subprocess_blocking(cmd, cwd, stdin_text, extra_env)
         )
-
-        if stdin_text:
-            proc.stdin.write(stdin_text.encode("utf-8"))
-            await proc.stdin.drain()
-            proc.stdin.close()
-
-        buffer = ""
-        while True:
-            try:
-                raw = await asyncio.wait_for(proc.stdout.read(256), timeout=300)
-            except asyncio.TimeoutError:
-                break
-            if not raw:
-                break
-            text = _ANSI_ESC_RE.sub('', raw.decode("utf-8", errors="replace"))
-            buffer += text
-            while "\n" in buffer:
-                line, buffer = buffer.split("\n", 1)
-                if line.strip():
-                    yield line + "\n"
-
-        if buffer.strip():
-            yield buffer
-
-        await proc.wait()
+        if result:
+            yield result
     except Exception as exc:
         logger.warning("council stream error: %s", exc)
         yield f"(error: {exc})"
