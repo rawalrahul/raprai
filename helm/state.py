@@ -120,3 +120,10 @@ approval_queue: dict[str, dict] = {}     # approval_id -> request dict
 agents: dict[str, dict] = {}            # agent_id -> Agent, loaded at startup
 agent_runs: dict[str, dict] = {}        # run_id -> AgentRun, active runs only
                                          # completed runs evicted to DB on finish
+
+# ---------------------------------------------------------------------------
+# Council state (AI-to-AI debate sessions)
+# ---------------------------------------------------------------------------
+
+councils: dict[str, dict] = {}          # council_id -> CouncilSession (active)
+council_history: list = []              # last 10 completed CouncilSessions
