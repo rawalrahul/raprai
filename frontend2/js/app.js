@@ -1530,6 +1530,14 @@ function initWebSocket() {
     hideApproval();
   });
 
+  // Council events
+  WS.on('council_created',   (d) => { if (typeof councilOnCreated   === 'function') councilOnCreated(d);   });
+  WS.on('council_moderator', (d) => { if (typeof councilOnModerator === 'function') councilOnModerator(d); });
+  WS.on('council_stream',    (d) => { if (typeof councilOnStream    === 'function') councilOnStream(d);    });
+  WS.on('council_message',   (d) => { if (typeof councilOnMessage   === 'function') councilOnMessage(d);   });
+  WS.on('council_completed', (d) => { if (typeof councilOnCompleted === 'function') councilOnCompleted(d); });
+  WS.on('council_stopped',   (d) => { if (typeof councilOnStopped   === 'function') councilOnStopped(d);   });
+
   WS.on('error', (err) => {
     console.error('[RAPR AI] WebSocket error:', err);
     Toast.error('Error: ' + (err.message || 'Unknown'));

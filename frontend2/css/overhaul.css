@@ -1480,3 +1480,176 @@ header {
 
 /* header: ensure gap between logo, context strip, and buttons */
 header { gap: 12px !important; }
+
+/* ── AI Council ──────────────────────────────────────────────── */
+#council-wrapper { z-index: 900; }
+#council-wrapper.open { transform: translateX(0) !important; }
+
+#council-section { font-size: 13px; color: var(--text-main, #eee); }
+
+.council-empty {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; height: 100%; padding: 40px 20px;
+  text-align: center; color: var(--text-muted, #aaa);
+}
+
+.council-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.council-header-left { display: flex; align-items: center; gap: 8px; }
+.council-title { font-size: 14px; font-weight: 700; color: var(--text-main, #eee); }
+.council-status {
+  font-size: 10px; padding: 2px 7px; border-radius: 10px;
+  background: var(--bg-elevated, #2a2a3a); color: var(--text-muted, #aaa);
+}
+.council-status.running { color: #10b981; }
+.council-status.completed { color: #6366f1; }
+.council-status.stopped { color: #6b7280; }
+
+.council-topic {
+  font-size: 12px; color: var(--text-muted, #aaa);
+  margin-bottom: 10px; font-style: italic;
+}
+
+.council-participants-row {
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 12px; flex-wrap: wrap;
+}
+.council-participant-dot {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; cursor: default;
+}
+.council-round-badge {
+  font-size: 10px; color: var(--text-muted, #aaa);
+  background: var(--bg-elevated, #2a2a3a);
+  padding: 2px 8px; border-radius: 8px; margin-left: auto;
+}
+
+.council-messages {
+  display: flex; flex-direction: column; gap: 10px;
+  max-height: 50vh; overflow-y: auto;
+  padding-right: 4px; margin-bottom: 12px;
+}
+.council-messages::-webkit-scrollbar { width: 4px; }
+.council-messages::-webkit-scrollbar-thumb { background: var(--border-dim, #333); border-radius: 2px; }
+
+.council-msg-moderator {
+  background: var(--bg-elevated, #2a2a3a);
+  border-left: 3px solid #6366f1;
+  padding: 8px 12px; border-radius: 4px;
+}
+.council-msg-moderator-label {
+  font-size: 10px; font-weight: 700; color: #6366f1;
+  text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;
+}
+.council-msg-moderator-body { font-size: 12px; color: var(--text-main, #eee); }
+
+.council-msg-participant {
+  background: var(--bg-surface, #1e1e2e);
+  border: 1px solid var(--border-dim, #333);
+  padding: 10px 12px; border-radius: 6px;
+}
+.council-msg-participant.streaming {
+  border-color: var(--accent, #6366f1);
+  box-shadow: 0 0 0 1px var(--accent, #6366f1) inset;
+}
+.council-msg-participant-header {
+  font-size: 11px; font-weight: 700; margin-bottom: 6px;
+  display: flex; align-items: center; gap: 6px;
+}
+.council-msg-ai-badge {
+  font-size: 9px; padding: 1px 5px; border-radius: 8px;
+  color: #fff; opacity: 0.85;
+}
+.council-msg-participant-body { font-size: 12px; color: var(--text-main, #eee); line-height: 1.5; }
+
+.council-msg-user {
+  font-size: 12px; color: var(--text-muted, #aaa);
+  padding: 4px 0; border-top: 1px dashed var(--border-dim, #333);
+}
+.council-msg-user-label { font-weight: 700; color: var(--accent, #6366f1); }
+.council-msg-system {
+  font-size: 11px; color: var(--text-dim, #666);
+  text-align: center; font-style: italic; padding: 4px 0;
+}
+
+.council-consensus-box {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border: 1px solid #6366f1; border-radius: 8px;
+  padding: 16px; margin-bottom: 12px;
+}
+.council-consensus-title {
+  font-size: 12px; font-weight: 700; color: #6366f1;
+  text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;
+}
+.council-consensus-body { font-size: 12px; color: var(--text-main, #eee); line-height: 1.6; }
+
+.council-stopped-banner {
+  font-size: 12px; color: var(--text-muted, #aaa);
+  padding: 8px 12px; background: var(--bg-elevated, #2a2a3a);
+  border-radius: 4px; margin-bottom: 8px;
+  display: flex; align-items: center; gap: 8px;
+}
+
+.council-inject-bar {
+  display: flex; gap: 8px; align-items: center; margin-top: 8px;
+  padding-top: 10px; border-top: 1px solid var(--border-dim, #333);
+}
+.council-inject-input {
+  flex: 1; background: var(--bg-elevated, #2a2a3a); color: var(--text-main, #eee);
+  border: 1px solid var(--border-dim, #333); border-radius: 6px;
+  padding: 7px 10px; font-size: 12px; outline: none; font-family: inherit;
+}
+.council-inject-input:focus { border-color: var(--accent, #6366f1); }
+
+.council-btn-primary {
+  background: var(--accent, #6366f1); color: #fff; border: none;
+  padding: 7px 14px; border-radius: 6px; font-size: 12px;
+  font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.council-btn-primary:hover { opacity: 0.88; }
+.council-btn-secondary {
+  background: var(--bg-elevated, #2a2a3a); color: var(--text-muted, #aaa);
+  border: 1px solid var(--border-dim, #333); padding: 6px 12px;
+  border-radius: 6px; font-size: 12px; cursor: pointer;
+}
+.council-btn-secondary:hover { border-color: var(--border-strong, #555); color: var(--text-main, #eee); }
+.council-btn-stop {
+  background: #dc2626; color: #fff; border: none;
+  padding: 6px 12px; border-radius: 6px; font-size: 12px;
+  font-weight: 600; cursor: pointer;
+}
+.council-btn-stop:hover { background: #b91c1c; }
+
+.council-modal-label {
+  display: block; font-size: 11px; font-weight: 600;
+  color: var(--text-muted, #aaa); margin-bottom: 5px;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.council-modal-textarea {
+  width: 100%; background: var(--bg-elevated, #2a2a3a); color: var(--text-main, #eee);
+  border: 1px solid var(--border-dim, #333); border-radius: 6px;
+  padding: 8px 10px; font-size: 12px; font-family: inherit;
+  resize: vertical; outline: none; box-sizing: border-box;
+}
+.council-modal-textarea:focus { border-color: var(--accent, #6366f1); }
+.council-modal-select {
+  width: 100%; background: var(--bg-elevated, #2a2a3a); color: var(--text-main, #eee);
+  border: 1px solid var(--border-dim, #333); border-radius: 6px;
+  padding: 7px 10px; font-size: 12px; outline: none;
+}
+.council-modal-sessions {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 140px; overflow-y: auto;
+  background: var(--bg-elevated, #2a2a3a); border-radius: 6px;
+  padding: 8px; border: 1px solid var(--border-dim, #333);
+}
+.council-modal-session-label {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; cursor: pointer; color: var(--text-main, #eee);
+}
+.council-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+}

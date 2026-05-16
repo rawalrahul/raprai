@@ -301,6 +301,7 @@
     <button class="hdr-btn" id="notify-toggle-btn" onclick="toggleNotifications()" title="Toggle notifications" aria-label="Toggle Notifications">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
     </button>
+    <button class="hdr-btn" id="council-nav-btn" onclick="openCouncilSection()" title="AI Council" aria-label="Open AI Council">🏛️</button>
     <button class="hdr-btn" onclick="showHelpTour()" title="Help & tour" aria-label="Show Help and Tour">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg>
     </button>
@@ -1378,12 +1379,25 @@ Example:
 </div>
 
 </div><!-- /app -->
+
+<!-- --- AI Council Overlay --- -->
+<div id="council-wrapper" class="agent-slider-wrapper" aria-label="AI Council">
+  <div id="council-overlay" style="display:flex;flex-direction:column;height:100%;background:var(--bg-surface,#1e1e2e);overflow:hidden">
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border-dim,#333);flex-shrink:0;background:var(--bg-surface,#1e1e2e)">
+      <button onclick="closeCouncilSection()" style="background:none;border:none;color:var(--text-dim,#888);font-size:18px;cursor:pointer;padding:0 4px" aria-label="Close council">&#8592;</button>
+      <span style="font-size:13px;font-weight:700;color:var(--text-main,#eee)">🏛️ AI Council</span>
+    </div>
+    <div id="council-section" style="flex:1;overflow-y:auto;padding:16px"></div>
+  </div>
+</div>
+
 <script src="/js/complete.js?v=7"></script>
 <script src="/js/packages.js?v=2"></script>
 <script src="/js/memory.js?v=2"></script>
 <script src="/js/custom_ai.js?v=3"></script>
 <script src="/js/backup.js?v=2"></script>
 <script src="/js/agents.js?v=12"></script>
+<script src="/js/council.js?v=1"></script>
 <script>
 // Register PWA service worker
 if ('serviceWorker' in navigator) {
