@@ -5,6 +5,7 @@ Covers: build_claude_cmd, parse_claude_json_output, and related utilities.
 """
 
 import json
+import os
 import re
 
 
@@ -28,7 +29,8 @@ def build_claude_cmd(prompt: str, has_history: bool,
     if has_history:
         cmd.append("--continue")
     if auto_approve:
-        cmd.append("--dangerously-skip-permissions")
+        # Override via CLAUDE_SKIP_PERMS_FLAG if Anthropic renames this flag.
+        cmd.append(os.environ.get("CLAUDE_SKIP_PERMS_FLAG", "--dangerously-skip-permissions"))
     if mcp_config:
         cmd.extend(["--mcp-config", mcp_config])
     cmd.extend(["--output-format", "json", "-p", prompt])

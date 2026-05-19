@@ -32,7 +32,7 @@ RAPR AI runs on Windows and communicates with NemoClaw through this chain:
 RAPR AI (Windows Python)
   → wsl.exe -e bash -lc "..."       # Enter WSL from Windows
     → ssh (via openshell ssh-proxy)  # SSH into the sandbox
-      → openclaw agent --agent main --message "..." --local
+      → openclaw agent --agent main --message "..."
         → Nemotron 3 Super 120B (NVIDIA Cloud API)
       ← Response text
     ← SSH stdout
@@ -43,7 +43,7 @@ RAPR AI (Windows Python)
 Key design decisions:
 - **STDIN_PROMPT = True**: The prompt is piped via stdin (not command-line) to avoid Windows' 32KB CreateProcess limit
 - **SSH via openshell proxy**: `openshell sandbox connect` doesn't support non-interactive command execution, so we use SSH with `openshell ssh-proxy` as the ProxyCommand
-- **--agent main --local**: Uses the embedded agent locally (no gateway routing needed for single-shot commands)
+- **No `--local` inside the sandbox**: NemoClaw requires the gateway's managed inference route so secret scanning, network policy, and inference auth stay active
 
 ## File Locations
 
@@ -67,7 +67,7 @@ Key design decisions:
 From **inside the sandbox** (after `nemoclaw mynemo connect`):
 ```bash
 openclaw tui                                          # Interactive chat
-openclaw agent --agent main --message "hello" --local # One-shot command
+openclaw agent --agent main --message "hello"         # One-shot command through managed inference
 ```
 
 From **Ubuntu host** (non-interactive, used by RAPR AI):
@@ -77,7 +77,7 @@ ssh -o StrictHostKeyChecking=no \
     -o LogLevel=ERROR \
     -o "ProxyCommand=$HOME/.local/bin/openshell ssh-proxy --gateway-name nemoclaw --name mynemo" \
     sandbox@openshell-mynemo \
-    'openclaw agent --agent main --message "hello" --local'
+    'openclaw agent --agent main --message "hello"'
 ```
 
 ## Troubleshooting

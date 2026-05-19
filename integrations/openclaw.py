@@ -58,19 +58,19 @@ def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
       - openclaw must be installed on the host PATH.
     """
     agent = _agent()
-    return [
-        "openclaw", "agent",
-        "--agent", agent,
-        "--local",
-        "--message", prompt,
-        *_model_args(model),
-    ]
+    # OPENCLAW_LOCAL_FLAG: set to "" to drop --local if openclaw removes it.
+    local_flag = os.environ.get("OPENCLAW_LOCAL_FLAG", "--local").strip()
+    cmd = ["openclaw", "agent", "--agent", agent]
+    if local_flag:
+        cmd.append(local_flag)
+    cmd += ["--message", prompt, *_model_args(model)]
+    return cmd
 
 
 # ── Metadata ─────────────────────────────────────────────────────────────────
 
 # No RAPR AI env vars needed — openclaw stores its own credentials.
-ENV_VARS: list[str] = []
+ENV_VARS: list[str] = ["OPENCLAW_AGENT", "OPENCLAW_MODEL", "OPENCLAW_LOCAL_FLAG"]
 
 SETUP_HINT: str = (
     "Install openclaw: npm install -g @openclaw/cli  |  "

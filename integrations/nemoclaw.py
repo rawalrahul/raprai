@@ -82,10 +82,14 @@ def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
     # The WSL script:
     # 1. Reads the prompt from stdin (piped by run_ai_popen)
     # 2. SSHs into the sandbox using openshell's ssh-proxy
-    # 3. Runs openclaw agent with --agent main --local
+    # 3. Runs openclaw agent with --agent main through the managed gateway route
     # 4. Returns the response through stdout
     gateway_name = os.environ.get("OPENSHELL_GATEWAY", "nemoclaw")
     openshell_bin = "$HOME/.local/bin/openshell"
+
+    # OPENCLAW_AGENT_CMD lets users patch the inner command without a recompile
+    # if openclaw changes its flag syntax (e.g. --local removed, subcommand renamed).
+    inner_cmd = os.environ.get("OPENCLAW_AGENT_CMD", "openclaw agent --agent main")
 
     # Capture stderr separately so Node.js warnings (UNDICI-EHPA etc.)
     # don't pollute stdout.  On failure (rc!=0) the stderr is appended
@@ -100,8 +104,8 @@ def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
         f'-o "ProxyCommand={openshell_bin} ssh-proxy '
         f'--gateway-name {gateway_name} --name {sandbox}" '
         f'sandbox@openshell-{sandbox} '
-        f'"openclaw agent --agent main '
-        f'--message \\"\\$(echo $B64 | base64 -d)\\" --local" '
+        f'"{inner_cmd} '
+        f'--message \\"\\$(echo $B64 | base64 -d)\\"" '
         f'2>"$_NC_ERR" ) ; _NC_RC=$? ; '
         f'echo "$_NC_OUT" ; '
         f'[ $_NC_RC -ne 0 ] && cat "$_NC_ERR" ; '
@@ -122,7 +126,7 @@ STDIN_PROMPT = True
 
 # ── Metadata ─────────────────────────────────────────────────────────────────
 
-ENV_VARS: list[str] = ["NEMOCLAW_SANDBOX", "OPENSHELL_GATEWAY"]
+ENV_VARS: list[str] = ["NEMOCLAW_SANDBOX", "OPENSHELL_GATEWAY", "OPENCLAW_AGENT_CMD"]
 
 SETUP_HINT: str = (
     "NemoClaw requires WSL2 + Docker Desktop + OpenShell.  |  "

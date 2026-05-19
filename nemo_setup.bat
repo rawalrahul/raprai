@@ -120,7 +120,7 @@ echo     2. nemoclaw mynemo connect
 echo     3. openclaw tui
 echo.
 echo   To run a one-shot command from Ubuntu host:
-echo     openclaw agent --agent main --message "hello" --local
+echo     openclaw agent --agent main --message "hello"
 echo.
 echo   RAPR AI will detect NemoClaw automatically on next restart.
 echo  ============================================================

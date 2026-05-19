@@ -101,3 +101,43 @@ def test_openclaw_uses_direct_host_cli(monkeypatch):
     assert "bash" not in cmd
     assert "--message" in cmd
     assert cmd[cmd.index("--message") + 1] == "hello"
+
+
+def test_nemoclaw_uses_gateway_route_without_local(monkeypatch):
+    import integrations.nemoclaw as nemoclaw
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("NEMOCLAW_SANDBOX", "mynemo")
+    monkeypatch.setenv("OPENSHELL_GATEWAY", "nemoclaw")
+
+    cmd = nemoclaw.build_command("hello")
+    script = cmd[-1]
+
+    assert cmd[:3] == ["wsl.exe", "-e", "bash"]
+    assert "openshell" in script
+    assert "openclaw agent --agent main" in script
+    assert "--message" in script
+    assert "--local" not in script
+
+
+def test_council_runner_uses_nemoclaw_gateway_route(monkeypatch):
+    import helm.state as state
+    import integrations.nemoclaw as nemoclaw
+    from helm.council.runner import _build_cmd_for_session
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("NEMOCLAW_SANDBOX", "mynemo")
+    monkeypatch.setenv("OPENSHELL_GATEWAY", "nemoclaw")
+    monkeypatch.setitem(state.integrations, "nemoclaw", {
+        "build_command": nemoclaw.build_command,
+        "stdin_prompt": True,
+    })
+
+    cmd, stdin_text, extra_env = _build_cmd_for_session(
+        {"ai": "nemoclaw", "model": None},
+        "council hello",
+    )
+
+    assert stdin_text == "council hello"
+    assert extra_env == {}
+    assert "--local" not in cmd[-1]
