@@ -601,20 +601,7 @@ function rpInstallWithSetup(pkgId, btn){
     if(d.task_id){
       _pollInstallProgress(d.task_id, pkgId, btn, progressEl);
     } else if(d.ok !== false && !d.detail){
-      if(btn){ btn.textContent = '✓ Installed'; btn.classList.add('rp-done'); }
-
-      // Check if this package needs setup
-      fetch('/packages/setup/' + pkgId)
-        .then(r => r.json())
-        .then(setupData => {
-          if(setupData.ok && setupData.setup && setupData.setup.type !== 'none'){
-            // Show setup wizard after a short delay
-            setTimeout(() => _rpRenderSetupModal(pkgId, setupData.setup), 500);
-          }
-        })
-        .catch(() => {});
-
-      setTimeout(()=> loadPackageCatalog(), 500);
+      _onInstallComplete(pkgId, btn, progressEl);
     } else {
       alert('Install failed: ' + (d.detail || d.error || 'Unknown error'));
       if(btn){ btn.disabled = false; btn.textContent = 'Install'; }
@@ -639,6 +626,7 @@ function _pollInstallProgress(taskId, pkgId, btn, progressEl){
           const label = progressEl.querySelector('.rp-progress-label');
           if(fill) fill.style.width = (task.progress || 0) + '%';
           if(label) label.textContent = task.current_step || 'Installing...';
+          _renderInstallSteps(progressEl, task.steps || []);
         }
         if(btn) btn.textContent = (task.progress || 0) + '%';
 
@@ -664,17 +652,23 @@ function _pollInstallProgress(taskId, pkgId, btn, progressEl){
 function _onInstallComplete(pkgId, btn, progressEl, task){
   if(btn){ btn.textContent = '✓ Installed'; btn.classList.add('rp-done'); }
 
+  const failed = task && task.steps ? task.steps.filter(s => s.status === 'failed') : [];
+  const manual = task && task.steps ? task.steps.filter(s => s.status === 'manual') : [];
+
   if(progressEl){
     const fill = progressEl.querySelector('.rp-progress-fill');
     const label = progressEl.querySelector('.rp-progress-label');
     if(fill) fill.style.width = '100%';
-    if(label) label.textContent = 'Installation complete!';
-    setTimeout(() => progressEl.remove(), 3000);
+    if(label) label.textContent = manual.length
+      ? 'Installed - manual setup remains'
+      : failed.length
+        ? 'Installed - dependency warnings'
+        : 'Installation complete!';
+    if(task && task.steps) _renderInstallSteps(progressEl, task.steps);
+    if(!manual.length && !failed.length) setTimeout(() => progressEl.remove(), 3000);
   }
 
   if(task && task.steps){
-    const failed = task.steps.filter(s => s.status === 'failed');
-    const manual = task.steps.filter(s => s.status === 'manual');
     if(failed.length){
       const msgs = failed.map(s => s.label + ': ' + (s.detail||'failed')).join('\n');
       alert('Package installed but some dependencies could not be auto-installed:\n\n' + msgs + '\n\nYou may need to install these manually.');
@@ -694,6 +688,29 @@ function _onInstallComplete(pkgId, btn, progressEl, task){
     .catch(() => {});
 
   setTimeout(()=>{ loadPackageCatalog(); loadInstalledPackages(); }, 500);
+}
+
+function _renderInstallSteps(progressEl, steps){
+  if(!progressEl) return;
+  let stepsEl = progressEl.querySelector('.rp-progress-steps');
+  if(!steps || !steps.length){
+    if(stepsEl) stepsEl.remove();
+    return;
+  }
+  if(!stepsEl){
+    stepsEl = document.createElement('div');
+    stepsEl.className = 'rp-progress-steps';
+    progressEl.appendChild(stepsEl);
+  }
+  stepsEl.innerHTML = steps.map(step => {
+    const status = step.status || 'pending';
+    const detail = step.detail ? `<div class="rp-progress-step-detail">${escHtml(step.detail)}</div>` : '';
+    return `<div class="rp-progress-step rp-progress-step-${escHtml(status)}">
+      <span class="rp-progress-step-status">${escHtml(status)}</span>
+      <span class="rp-progress-step-label">${escHtml(step.label || 'Install step')}</span>
+      ${detail}
+    </div>`;
+  }).join('');
 }
 
 function rpInstall(pkgId, btn){

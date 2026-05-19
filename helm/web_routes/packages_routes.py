@@ -74,6 +74,29 @@ def _command_for_platform(cmd_info: dict) -> tuple[str, str]:
     return command, shell_name
 
 
+def _check_command_for_platform(cmd_info: dict, fallback_shell: str) -> tuple[str, str]:
+    """Pick the right check command and shell for this OS."""
+    current = _current_platform()
+    shell_name = cmd_info.get("check_shell") or fallback_shell
+    shell_name = str(shell_name).lower()
+
+    command = cmd_info.get("check_cmd", "")
+    if current == "windows":
+        command = (
+            cmd_info.get("powershell_check_cmd")
+            or cmd_info.get("windows_check_cmd")
+            or command
+        )
+        if cmd_info.get("powershell_check_cmd"):
+            shell_name = "powershell"
+    elif current == "macos":
+        command = cmd_info.get("macos_check_cmd") or command
+    elif current == "linux":
+        command = cmd_info.get("linux_check_cmd") or command
+
+    return command, shell_name
+
+
 def _run_catalog_command(command: str, shell_name: str, timeout: int, cwd: str | None = None):
     """Run a catalog command with Windows-aware shell handling."""
     cwd = os.path.expandvars(os.path.expanduser(cwd)) if cwd else None
@@ -132,9 +155,7 @@ def _run_install_background(task_id: str, package_id: str, url: str, force: bool
             for i, cmd_info in enumerate(install_cmds):
                 cmd, shell_name = _command_for_platform(cmd_info)
                 label = cmd_info.get("label", f"Running: {cmd[:40]}...")
-                check_cmd = cmd_info.get("check_cmd", "")
-                if _current_platform() == "windows":
-                    check_cmd = cmd_info.get("windows_check_cmd") or check_cmd
+                check_cmd, check_shell_name = _check_command_for_platform(cmd_info, shell_name)
                 timeout_seconds = int(cmd_info.get("timeout_seconds", 300))
                 check_timeout_seconds = int(cmd_info.get("check_timeout_seconds", 15))
                 cwd = cmd_info.get("cwd") or cmd_info.get("working_dir")
@@ -156,7 +177,7 @@ def _run_install_background(task_id: str, package_id: str, url: str, force: bool
                     task["current_step"] = f"Checking: {label}..."
                     try:
                         check_result = _run_catalog_command(
-                            check_cmd, shell_name, check_timeout_seconds, cwd
+                            check_cmd, check_shell_name, check_timeout_seconds, cwd
                         )
                         if check_result.returncode == 0:
                             task["current_step"] = f"Already installed: {label}"
