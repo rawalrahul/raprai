@@ -583,13 +583,24 @@ function rpStartOAuth(pkgId){
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function rpInstallWithSetup(pkgId, btn){
-  if(btn){ btn.disabled = true; btn.textContent = 'Installing...'; }
+  if(btn){ btn.disabled = true; btn.textContent = 'Starting...'; }
+
+  const card = btn ? btn.closest('.rp-card') : null;
+  let progressEl = null;
+  if(card){
+    progressEl = document.createElement('div');
+    progressEl.className = 'rp-install-progress';
+    progressEl.innerHTML = '<div class="rp-progress-bar"><div class="rp-progress-fill" style="width:0%"></div></div><div class="rp-progress-label">Starting install...</div>';
+    card.appendChild(progressEl);
+  }
   fetch('/packages/install', {
     method: 'POST',
     headers: _rpHeaders(),
     body: JSON.stringify({package_id: pkgId, force: false})
   }).then(r=>r.json()).then(d=>{
-    if(d.ok !== false && !d.detail){
+    if(d.task_id){
+      _pollInstallProgress(d.task_id, pkgId, btn, progressEl);
+    } else if(d.ok !== false && !d.detail){
       if(btn){ btn.textContent = '✓ Installed'; btn.classList.add('rp-done'); }
 
       // Check if this package needs setup
@@ -607,14 +618,83 @@ function rpInstallWithSetup(pkgId, btn){
     } else {
       alert('Install failed: ' + (d.detail || d.error || 'Unknown error'));
       if(btn){ btn.disabled = false; btn.textContent = 'Install'; }
+      if(progressEl) progressEl.remove();
     }
   }).catch(e=>{
     alert('Install failed: ' + e.message);
     if(btn){ btn.disabled = false; btn.textContent = 'Install'; }
+    if(progressEl) progressEl.remove();
   });
 }
 
 // ─── Install / Uninstall (legacy) ────────────────────────────────────────────
+
+function _pollInstallProgress(taskId, pkgId, btn, progressEl){
+  const poll = () => {
+    fetch('/packages/install/status/' + taskId)
+      .then(r => r.json())
+      .then(task => {
+        if(progressEl){
+          const fill = progressEl.querySelector('.rp-progress-fill');
+          const label = progressEl.querySelector('.rp-progress-label');
+          if(fill) fill.style.width = (task.progress || 0) + '%';
+          if(label) label.textContent = task.current_step || 'Installing...';
+        }
+        if(btn) btn.textContent = (task.progress || 0) + '%';
+
+        if(task.status === 'done'){
+          _onInstallComplete(pkgId, btn, progressEl, task);
+        } else if(task.status === 'failed'){
+          if(btn){ btn.disabled = false; btn.textContent = 'Install'; }
+          const failedSteps = (task.steps||[]).filter(s => s.status === 'failed');
+          const errMsg = task.error || (failedSteps.length ? failedSteps[0].detail : 'Unknown error');
+          alert('Install failed: ' + errMsg);
+          if(progressEl) progressEl.remove();
+        } else {
+          setTimeout(poll, 1000);
+        }
+      })
+      .catch(() => {
+        setTimeout(poll, 2000);
+      });
+  };
+  setTimeout(poll, 500);
+}
+
+function _onInstallComplete(pkgId, btn, progressEl, task){
+  if(btn){ btn.textContent = '✓ Installed'; btn.classList.add('rp-done'); }
+
+  if(progressEl){
+    const fill = progressEl.querySelector('.rp-progress-fill');
+    const label = progressEl.querySelector('.rp-progress-label');
+    if(fill) fill.style.width = '100%';
+    if(label) label.textContent = 'Installation complete!';
+    setTimeout(() => progressEl.remove(), 3000);
+  }
+
+  if(task && task.steps){
+    const failed = task.steps.filter(s => s.status === 'failed');
+    const manual = task.steps.filter(s => s.status === 'manual');
+    if(failed.length){
+      const msgs = failed.map(s => s.label + ': ' + (s.detail||'failed')).join('\n');
+      alert('Package installed but some dependencies could not be auto-installed:\n\n' + msgs + '\n\nYou may need to install these manually.');
+    } else if(manual.length){
+      const msgs = manual.map(s => s.label + ': ' + (s.detail||'manual setup required')).join('\n\n');
+      alert('Package installed. Manual setup remains:\n\n' + msgs);
+    }
+  }
+
+  fetch('/packages/setup/' + pkgId)
+    .then(r => r.json())
+    .then(setupData => {
+      if(setupData.ok && setupData.setup && setupData.setup.type !== 'none'){
+        setTimeout(() => _rpRenderSetupModal(pkgId, setupData.setup), 500);
+      }
+    })
+    .catch(() => {});
+
+  setTimeout(()=>{ loadPackageCatalog(); loadInstalledPackages(); }, 500);
+}
 
 function rpInstall(pkgId, btn){
   rpInstallWithSetup(pkgId, btn);

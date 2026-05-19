@@ -15,6 +15,7 @@ Endpoints:
 import asyncio
 import os
 import pathlib
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -34,6 +35,74 @@ from helm.config import logger
 # ---------------------------------------------------------------------------
 
 _install_tasks: dict[str, dict] = {}  # task_id → {status, progress, steps, current_step, ...}
+
+def _current_platform() -> str:
+    """Return the normalized platform name used by marketplace command metadata."""
+    system = platform.system().lower()
+    if system.startswith("win"):
+        return "windows"
+    if system == "darwin":
+        return "macos"
+    if system == "linux":
+        return "linux"
+    return system or "unknown"
+
+
+def _command_for_platform(cmd_info: dict) -> tuple[str, str]:
+    """Pick the right command and shell for this OS."""
+    current = _current_platform()
+    platforms = cmd_info.get("platforms") or cmd_info.get("platform")
+    if isinstance(platforms, str):
+        platforms = [platforms]
+    if platforms and current not in [str(p).lower() for p in platforms]:
+        return "", ""
+
+    shell_name = cmd_info.get("shell")
+    if not shell_name:
+        shell_name = "powershell" if current == "windows" else "default"
+    shell_name = str(shell_name).lower()
+
+    command = cmd_info.get("cmd", "")
+    if current == "windows":
+        command = cmd_info.get("powershell_cmd") or cmd_info.get("windows_cmd") or command
+        if cmd_info.get("powershell_cmd"):
+            shell_name = "powershell"
+    elif current == "macos":
+        command = cmd_info.get("macos_cmd") or command
+    elif current == "linux":
+        command = cmd_info.get("linux_cmd") or command
+    return command, shell_name
+
+
+def _run_catalog_command(command: str, shell_name: str, timeout: int, cwd: str | None = None):
+    """Run a catalog command with Windows-aware shell handling."""
+    cwd = os.path.expandvars(os.path.expanduser(cwd)) if cwd else None
+    if shell_name in ("powershell", "pwsh"):
+        exe = "pwsh" if shell_name == "pwsh" else "powershell"
+        return subprocess.run(
+            [exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=cwd,
+        )
+    if shell_name in ("cmd", "cmd.exe"):
+        return subprocess.run(
+            ["cmd", "/c", command],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=cwd,
+        )
+    return subprocess.run(
+        command,
+        shell=True,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        cwd=cwd,
+    )
+
 
 def _run_install_background(task_id: str, package_id: str, url: str, force: bool):
     """Run the full install in a background thread with progress tracking."""
@@ -61,19 +130,33 @@ def _run_install_background(task_id: str, package_id: str, url: str, force: bool
         if install_cmds:
             total_cmds = len(install_cmds)
             for i, cmd_info in enumerate(install_cmds):
-                cmd = cmd_info.get("cmd", "")
+                cmd, shell_name = _command_for_platform(cmd_info)
                 label = cmd_info.get("label", f"Running: {cmd[:40]}...")
                 check_cmd = cmd_info.get("check_cmd", "")
+                if _current_platform() == "windows":
+                    check_cmd = cmd_info.get("windows_check_cmd") or check_cmd
+                timeout_seconds = int(cmd_info.get("timeout_seconds", 300))
+                check_timeout_seconds = int(cmd_info.get("check_timeout_seconds", 15))
+                cwd = cmd_info.get("cwd") or cmd_info.get("working_dir")
+
+                if cmd_info.get("manual") or cmd_info.get("run") is False or cmd_info.get("long_running"):
+                    detail = cmd_info.get("instructions") or cmd_info.get("detail") or cmd or "Manual setup required."
+                    task["steps"].append({"label": label, "status": "manual", "detail": detail})
+                    task["current_step"] = f"Manual step: {label}"
+                    task["progress"] = 40 + int(50 * (i + 1) / total_cmds)
+                    continue
 
                 if not cmd:
+                    task["steps"].append({"label": label, "status": "skipped", "detail": "No command for this platform"})
+                    task["progress"] = 40 + int(50 * (i + 1) / total_cmds)
                     continue
 
                 # Check if already installed
                 if check_cmd:
                     task["current_step"] = f"Checking: {label}..."
                     try:
-                        check_result = subprocess.run(
-                            check_cmd, shell=True, capture_output=True, timeout=15
+                        check_result = _run_catalog_command(
+                            check_cmd, shell_name, check_timeout_seconds, cwd
                         )
                         if check_result.returncode == 0:
                             task["current_step"] = f"Already installed: {label}"
@@ -89,9 +172,7 @@ def _run_install_background(task_id: str, package_id: str, url: str, force: bool
                 task["steps"].append({"label": label, "status": "running"})
 
                 try:
-                    proc = subprocess.run(
-                        cmd, shell=True, capture_output=True, text=True, timeout=300
-                    )
+                    proc = _run_catalog_command(cmd, shell_name, timeout_seconds, cwd)
                     if proc.returncode == 0:
                         task["steps"][-1]["status"] = "done"
                     else:
@@ -101,7 +182,7 @@ def _run_install_background(task_id: str, package_id: str, url: str, force: bool
                         logger.warning("Install command failed for %s: %s → %s", package_id, cmd, error_msg)
                 except subprocess.TimeoutExpired:
                     task["steps"][-1]["status"] = "failed"
-                    task["steps"][-1]["detail"] = "Timed out after 5 minutes"
+                    task["steps"][-1]["detail"] = f"Timed out after {timeout_seconds} seconds"
                 except Exception as e:
                     task["steps"][-1]["status"] = "failed"
                     task["steps"][-1]["detail"] = str(e)

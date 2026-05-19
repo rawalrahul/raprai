@@ -113,6 +113,12 @@ def _normalize_catalog_entry(entry: dict) -> dict:
     if "type" in entry and "category" not in entry:
         entry["category"] = entry["type"]
 
+    # package_url -> download_url (website uses package_url; app installs from download_url)
+    if "package_url" in entry and "download_url" not in entry:
+        entry["download_url"] = entry["package_url"]
+    if "download_url" in entry and "package_url" not in entry:
+        entry["package_url"] = entry["download_url"]
+
     return entry
 
 
