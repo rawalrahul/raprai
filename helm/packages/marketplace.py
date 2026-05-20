@@ -246,10 +246,15 @@ def search_catalog(
         scored.sort(key=lambda x: x[0], reverse=True)
         results = [pkg for _, pkg in scored]
 
-    # Mark installed packages
+    # Mark installed packages — only if install path actually exists on disk
     try:
+        import pathlib
         from helm.packages.installer import list_installed
-        installed_ids = {p["id"] for p in list_installed()}
+        installed_ids = set()
+        for p in list_installed():
+            install_path = p.get("install_path", "")
+            if not install_path or pathlib.Path(install_path).exists():
+                installed_ids.add(p["id"])
         for pkg in results:
             pkg_id = pkg.get("id") or pkg.get("slug") or ""
             pkg["installed"] = pkg_id in installed_ids

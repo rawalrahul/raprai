@@ -600,16 +600,30 @@ function rpInstallWithSetup(pkgId, btn){
   }).then(r=>r.json()).then(d=>{
     if(d.task_id){
       _pollInstallProgress(d.task_id, pkgId, btn, progressEl);
+    } else if(d.requires_manual_setup){
+      if(btn){ btn.disabled = false; btn.classList.remove('rp-installing'); btn.textContent = 'Install'; }
+      if(progressEl) progressEl.remove();
+      const card = btn ? btn.closest('.rp-card') : null;
+      const manualSteps = [];
+      if(d.setup && d.setup.install_steps){
+        d.setup.install_steps.forEach(s => manualSteps.push({label: s.label || String(s), detail: s.cmd || s.detail || ''}));
+      }
+      if(!manualSteps.length){
+        manualSteps.push({label: d.detail || 'Manual installation required'});
+      }
+      _showInstallResultPanel(card, [], manualSteps);
     } else if(d.ok !== false && !d.detail){
       _onInstallComplete(pkgId, btn, progressEl);
     } else {
-      alert('Install failed: ' + (d.detail || d.error || 'Unknown error'));
-      if(btn){ btn.disabled = false; btn.textContent = 'Install'; }
+      if(btn){ btn.disabled = false; btn.classList.remove('rp-installing'); btn.textContent = 'Install'; }
+      const card = btn ? btn.closest('.rp-card') : null;
+      _showInstallResultPanel(card, [{label: 'Installation failed', detail: d.detail || d.error || 'Unknown error'}], []);
       if(progressEl) progressEl.remove();
     }
   }).catch(e=>{
-    alert('Install failed: ' + e.message);
-    if(btn){ btn.disabled = false; btn.textContent = 'Install'; }
+    if(btn){ btn.disabled = false; btn.classList.remove('rp-installing'); btn.textContent = 'Install'; }
+    const card = btn ? btn.closest('.rp-card') : null;
+    _showInstallResultPanel(card, [{label: 'Install failed', detail: e.message}], []);
     if(progressEl) progressEl.remove();
   });
 }
@@ -871,9 +885,14 @@ function _verifyAndShowInstalled(pkgId, btn){
       const found = (data.packages || []).some(p => p.id === pkgId);
       if(btn){
         btn.classList.remove('rp-installing');
-        btn.textContent = found ? '✓ Installed' : '✓ Installed';
-        btn.classList.add('rp-done');
-        btn.disabled = true;
+        if(found){
+          btn.textContent = '✓ Installed';
+          btn.classList.add('rp-done');
+          btn.disabled = true;
+        } else {
+          btn.textContent = 'Install';
+          btn.disabled = false;
+        }
       }
     })
     .catch(() => {

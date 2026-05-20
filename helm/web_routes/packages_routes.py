@@ -132,21 +132,29 @@ def _run_catalog_command(command: str, shell_name: str, timeout: int, cwd: str |
     )
 
 
-def _run_install_background(task_id: str, package_id: str, url: str, force: bool):
-    """Run the full install in a background thread with progress tracking."""
+def _run_install_background(task_id: str, package_id: str, url: str | None, force: bool):
+    """Run the full install in a background thread with progress tracking.
+
+    url=None means command-only install (no .raprpkg file to download).
+    """
     task = _install_tasks[task_id]
 
     try:
-        # Step 1: Download and install the package files
-        task["current_step"] = "Downloading package..."
-        task["progress"] = 10
+        if url:
+            # Step 1: Download and install the package files
+            task["current_step"] = "Downloading package..."
+            task["progress"] = 10
 
-        from helm.packages.installer import install_package as _install
-        result = _install(url, force=force)
+            from helm.packages.installer import install_package as _install
+            result = _install(url, force=force)
 
-        task["progress"] = 40
-        task["current_step"] = "Package files installed"
-        task["install_result"] = result
+            task["progress"] = 40
+            task["current_step"] = "Package files installed"
+            task["install_result"] = result
+        else:
+            # No package file — jump straight to install_commands
+            task["progress"] = 10
+            task["current_step"] = "Running install commands..."
 
         # Step 2: Run install_commands from catalog (for CLI skills)
         from helm.packages.marketplace import get_catalog_entry
@@ -438,17 +446,39 @@ async def install_history(limit: int = 50):
 async def install_package(req: InstallRequest):
     """Install a package from catalog ID, URL, or uploaded file.
 
-    Returns a task_id for tracking background install progress.
+    Returns a task_id for tracking background install progress, or
+    requires_manual_setup=True with setup info when no auto-install is possible.
     """
     if req.package_id:
-        from helm.packages.marketplace import get_download_url
+        from helm.packages.marketplace import get_download_url, get_catalog_entry
         url = get_download_url(req.package_id)
-        if not url:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Package '{req.package_id}' not found in catalog"
-            )
         package_id = req.package_id
+
+        if not url:
+            # No downloadable file — check what we can do
+            entry = get_catalog_entry(package_id)
+            if not entry:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Package '{package_id}' not found in catalog"
+                )
+
+            install_cmds = entry.get("install_commands") or []
+            if not install_cmds:
+                # Nothing to auto-run — return setup info for the frontend to show
+                setup = entry.get("setup") or {}
+                return JSONResponse({
+                    "ok": False,
+                    "requires_manual_setup": True,
+                    "package_id": package_id,
+                    "setup": setup,
+                    "detail": entry.get("install_instructions") or (
+                        f"'{package_id}' requires manual installation. "
+                        "Check the package page for instructions."
+                    ),
+                })
+            # Has install_commands but no .raprpkg — run commands only (url=None)
+
     elif req.url:
         url = req.url
         package_id = req.url.split("/")[-1].replace(".raprpkg", "")
