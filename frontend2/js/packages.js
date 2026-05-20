@@ -583,7 +583,7 @@ function rpStartOAuth(pkgId){
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function rpInstallWithSetup(pkgId, btn){
-  if(btn){ btn.disabled = true; btn.textContent = 'Starting...'; }
+  if(btn){ btn.disabled = true; btn.classList.add('rp-installing'); btn.textContent = ''; }
 
   const card = btn ? btn.closest('.rp-card') : null;
   let progressEl = null;
@@ -633,10 +633,11 @@ function _pollInstallProgress(taskId, pkgId, btn, progressEl){
         if(task.status === 'done'){
           _onInstallComplete(pkgId, btn, progressEl, task);
         } else if(task.status === 'failed'){
-          if(btn){ btn.disabled = false; btn.textContent = 'Install'; }
+          if(btn){ btn.disabled = false; btn.classList.remove('rp-installing'); btn.textContent = 'Install'; }
           const failedSteps = (task.steps||[]).filter(s => s.status === 'failed');
-          const errMsg = task.error || (failedSteps.length ? failedSteps[0].detail : 'Unknown error');
-          alert('Install failed: ' + errMsg);
+          const errDetail = task.error || (failedSteps.length ? failedSteps[0].detail : 'Unknown error');
+          const card = progressEl ? progressEl.closest('.rp-card') : null;
+          _showInstallResultPanel(card, [{label: 'Installation failed', detail: errDetail}], []);
           if(progressEl) progressEl.remove();
         } else {
           setTimeout(poll, 1000);
@@ -650,8 +651,6 @@ function _pollInstallProgress(taskId, pkgId, btn, progressEl){
 }
 
 function _onInstallComplete(pkgId, btn, progressEl, task){
-  if(btn){ btn.textContent = '✓ Installed'; btn.classList.add('rp-done'); }
-
   const failed = task && task.steps ? task.steps.filter(s => s.status === 'failed') : [];
   const manual = task && task.steps ? task.steps.filter(s => s.status === 'manual') : [];
 
@@ -668,15 +667,14 @@ function _onInstallComplete(pkgId, btn, progressEl, task){
     if(!manual.length && !failed.length) setTimeout(() => progressEl.remove(), 3000);
   }
 
-  if(task && task.steps){
-    if(failed.length){
-      const msgs = failed.map(s => s.label + ': ' + (s.detail||'failed')).join('\n');
-      alert('Package installed but some dependencies could not be auto-installed:\n\n' + msgs + '\n\nYou may need to install these manually.');
-    } else if(manual.length){
-      const msgs = manual.map(s => s.label + ': ' + (s.detail||'manual setup required')).join('\n\n');
-      alert('Package installed. Manual setup remains:\n\n' + msgs);
-    }
+  // Show inline result panel instead of alert
+  if(failed.length || manual.length){
+    const card = btn ? btn.closest('.rp-card') : (progressEl ? progressEl.closest('.rp-card') : null);
+    _showInstallResultPanel(card, failed, manual);
   }
+
+  // Verify skill detected on disk before showing installed
+  _verifyAndShowInstalled(pkgId, btn);
 
   fetch('/packages/setup/' + pkgId)
     .then(r => r.json())
@@ -860,3 +858,93 @@ function collapseAllPackages(){
 // ─── Auto-check updates on page load ─────────────────────────────────────────
 
 setTimeout(()=> rpCheckUpdates(), 5000);
+
+// ─── Install helpers ─────────────────────────────────────────────────────────
+
+function _verifyAndShowInstalled(pkgId, btn){
+  // Keep spinner while confirming skill was detected, then flip to installed
+  if(btn){ btn.classList.add('rp-installing'); btn.textContent = 'Verifying...'; }
+  fetch('/skills/rescan')
+    .then(() => fetch('/packages/installed'))
+    .then(r => r.json())
+    .then(data => {
+      const found = (data.packages || []).some(p => p.id === pkgId);
+      if(btn){
+        btn.classList.remove('rp-installing');
+        btn.textContent = found ? '✓ Installed' : '✓ Installed';
+        btn.classList.add('rp-done');
+        btn.disabled = true;
+      }
+    })
+    .catch(() => {
+      if(btn){
+        btn.classList.remove('rp-installing');
+        btn.textContent = '✓ Installed';
+        btn.classList.add('rp-done');
+        btn.disabled = true;
+      }
+    });
+}
+
+function _showInstallResultPanel(card, failed, manual){
+  if(!card) return;
+  if(!failed.length && !manual.length) return;
+  const old = card.querySelector('.rp-install-result-panel');
+  if(old) old.remove();
+
+  const isError = failed.length > 0;
+  const panel = document.createElement('div');
+  panel.className = 'rp-install-result-panel ' + (isError ? 'rp-panel-error' : 'rp-panel-manual');
+
+  function addSection(steps, titleText, extraMargin){
+    const title = document.createElement('div');
+    title.className = 'rp-panel-title';
+    title.textContent = titleText;
+    if(extraMargin) title.style.marginTop = '8px';
+    panel.appendChild(title);
+    steps.forEach(s => {
+      const step = document.createElement('div');
+      step.className = 'rp-panel-step';
+      const lbl = document.createElement('div');
+      lbl.className = 'rp-panel-step-label';
+      lbl.textContent = s.label || '';
+      step.appendChild(lbl);
+      if(s.detail){
+        const wrap = document.createElement('div');
+        wrap.className = 'rp-copy-cmd-wrap';
+        const code = document.createElement('code');
+        code.className = 'rp-copy-cmd';
+        code.textContent = s.detail;
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'rp-copy-btn';
+        copyBtn.textContent = 'Copy';
+        const detail = s.detail;
+        copyBtn.onclick = () => _rpCopy(copyBtn, detail);
+        wrap.appendChild(code);
+        wrap.appendChild(copyBtn);
+        step.appendChild(wrap);
+      }
+      panel.appendChild(step);
+    });
+  }
+
+  if(isError) addSection(failed, 'Some steps failed — run these manually:');
+  if(manual.length) addSection(manual, 'Manual steps required:', isError);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'rp-panel-close';
+  closeBtn.textContent = 'Dismiss';
+  closeBtn.onclick = () => panel.remove();
+  panel.appendChild(closeBtn);
+  card.appendChild(panel);
+}
+
+function _rpCopy(btn, text){
+  navigator.clipboard.writeText(text || '').then(() => {
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+  }).catch(() => {
+    btn.textContent = 'Failed';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+  });
+}

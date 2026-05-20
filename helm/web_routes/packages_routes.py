@@ -100,6 +100,8 @@ def _check_command_for_platform(cmd_info: dict, fallback_shell: str) -> tuple[st
 def _run_catalog_command(command: str, shell_name: str, timeout: int, cwd: str | None = None):
     """Run a catalog command with Windows-aware shell handling."""
     cwd = os.path.expandvars(os.path.expanduser(cwd)) if cwd else None
+    # Prevent console window flash on Windows
+    no_window = {"creationflags": subprocess.CREATE_NO_WINDOW} if platform.system().lower().startswith("win") else {}
     if shell_name in ("powershell", "pwsh"):
         exe = "pwsh" if shell_name == "pwsh" else "powershell"
         return subprocess.run(
@@ -108,6 +110,7 @@ def _run_catalog_command(command: str, shell_name: str, timeout: int, cwd: str |
             text=True,
             timeout=timeout,
             cwd=cwd,
+            **no_window,
         )
     if shell_name in ("cmd", "cmd.exe"):
         return subprocess.run(
@@ -116,6 +119,7 @@ def _run_catalog_command(command: str, shell_name: str, timeout: int, cwd: str |
             text=True,
             timeout=timeout,
             cwd=cwd,
+            **no_window,
         )
     return subprocess.run(
         command,
@@ -124,6 +128,7 @@ def _run_catalog_command(command: str, shell_name: str, timeout: int, cwd: str |
         text=True,
         timeout=timeout,
         cwd=cwd,
+        **no_window,
     )
 
 

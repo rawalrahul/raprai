@@ -1043,10 +1043,16 @@ header{
 /* Install / uninstall buttons */
 .rp-install-btn{
   background:var(--claude);color:#000;border:none;border-radius:4px;
-  padding:3px 10px;font-size:10px;font-weight:600;cursor:pointer;transition:opacity .12s;font-family:inherit}
+  padding:3px 10px;font-size:10px;font-weight:600;cursor:pointer;transition:opacity .12s;font-family:inherit;
+  display:inline-flex;align-items:center;gap:5px;min-width:58px;justify-content:center}
 .rp-install-btn:hover{opacity:.85}
 .rp-install-btn:disabled{opacity:.5;cursor:default}
 .rp-install-btn.rp-done{background:#22c55e;color:#fff;cursor:default}
+@keyframes rp-spin{to{transform:rotate(360deg)}}
+.rp-install-btn.rp-installing::before{
+  content:'';display:inline-block;width:9px;height:9px;flex-shrink:0;
+  border:2px solid rgba(0,0,0,.25);border-top-color:#000;
+  border-radius:50%;animation:rp-spin .65s linear infinite}
 .rp-install-progress{margin-top:6px;padding:6px 0}
 .rp-progress-bar{height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-bottom:4px}
 .rp-progress-fill{height:100%;background:var(--claude);border-radius:2px;transition:width .3s ease}
@@ -1066,6 +1072,31 @@ header{
 .rp-progress-step-detail{
   grid-column:2;color:var(--text);background:var(--surface2);border:1px solid var(--border);
   border-radius:4px;padding:4px 6px;white-space:pre-wrap;overflow-wrap:anywhere}
+.rp-install-result-panel{
+  margin-top:8px;border-radius:6px;padding:10px 12px;font-size:11px;line-height:1.5}
+.rp-panel-error{background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.28)}
+.rp-panel-manual{background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.28)}
+.rp-panel-title{font-weight:600;margin-bottom:8px}
+.rp-panel-error .rp-panel-title{color:#ef4444}
+.rp-panel-manual .rp-panel-title{color:#f59e0b}
+.rp-panel-step{margin-bottom:8px}
+.rp-panel-step:last-of-type{margin-bottom:0}
+.rp-panel-step-label{color:var(--muted);font-size:10px;margin-bottom:3px}
+.rp-copy-cmd-wrap{display:flex;align-items:stretch;border:1px solid var(--border);border-radius:4px;overflow:hidden}
+.rp-copy-cmd{
+  flex:1;background:var(--surface2);padding:5px 8px;
+  font-family:var(--font-mono,monospace);font-size:10px;
+  white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text);display:block}
+.rp-copy-btn{
+  background:var(--surface2);border:none;border-left:1px solid var(--border);
+  padding:0 10px;font-size:10px;color:var(--muted);cursor:pointer;
+  flex-shrink:0;font-family:inherit;transition:background .12s,color .12s}
+.rp-copy-btn:hover{background:var(--border);color:var(--text)}
+.rp-panel-close{
+  margin-top:8px;background:none;border:1px solid var(--border);border-radius:4px;
+  padding:2px 10px;font-size:10px;color:var(--muted);cursor:pointer;
+  font-family:inherit;transition:border-color .12s,color .12s}
+.rp-panel-close:hover{border-color:var(--dim);color:var(--text)}
 .rp-uninstall-btn{
   background:none;color:#ef4444;border:1px solid #ef4444;border-radius:4px;
   padding:2px 8px;font-size:10px;cursor:pointer;transition:all .12s;font-family:inherit}
