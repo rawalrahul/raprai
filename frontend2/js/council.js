@@ -263,6 +263,11 @@ function renderCouncilPanel() {
   if (council.consensus_summary) {
     const box = _el('div', 'council-consensus-box');
     box.appendChild(_el('div', 'council-consensus-title', 'Consensus Reached'));
+    if (council.early_consensus) {
+      const note = _el('div', 'council-early-consensus-note',
+        `Concluded after ${council.rounds} of ${council.max_rounds} rounds — participants reached consensus early.`);
+      box.appendChild(note);
+    }
     box.appendChild(_el('div', 'council-consensus-body', council.consensus_summary));
 
     const btnRow = _el('div'); btnRow.style.cssText = 'display:flex;gap:8px;margin-top:12px';

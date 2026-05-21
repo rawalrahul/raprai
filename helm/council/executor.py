@@ -68,11 +68,24 @@ async def run_council(council_id: str):
                 council["status"] = "completed"
                 council["consensus_summary"] = decision.get("summary", "")
                 council["completed_at"] = ts()
+                rounds_done = council["rounds"]
+                max_rounds = council["max_rounds"]
+                early = rounds_done < max_rounds
+                notice = (
+                    f"Consensus reached after {rounds_done} of {max_rounds} rounds — debate concluded early.\n\n"
+                    if early else ""
+                )
+                council["early_consensus"] = early
                 council["messages"].append(
-                    make_council_message("system", decision.get("summary", ""))
+                    make_council_message("system", notice + decision.get("summary", ""))
                 )
                 _archive_council(council)
-                await broadcast_council("council_completed", {"council": council})
+                await broadcast_council("council_completed", {
+                    "council": council,
+                    "early_consensus": early,
+                    "rounds_done": rounds_done,
+                    "max_rounds": max_rounds,
+                })
                 return
 
             # Step 2: Participant streams response

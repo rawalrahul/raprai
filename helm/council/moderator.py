@@ -146,10 +146,15 @@ async def get_next_turn(council: dict) -> dict:
 
     summary_block = f"Debate summary so far:\n{context_summary}\n\n" if context_summary else ""
 
+    current_round = council["rounds"]
+    max_rounds = council["max_rounds"]
+    rounds_left = max_rounds - current_round
+
     prompt = f"""You are the moderator of an AI council debate.
 
 Topic: {council['topic']}
 Participants: {participants_str}
+Round: {current_round} of {max_rounds} (rounds remaining: {rounds_left})
 
 {summary_block}Most recent exchanges:
 {recent_transcript}
@@ -157,12 +162,12 @@ Participants: {participants_str}
 Your job:
 1. Pick which participant should speak next.
 2. Give them a focused question or angle to address (1-2 sentences).
-3. Decide if consensus has been reached (participants broadly agree, all key angles covered).
+3. Decide if consensus has been reached — ONLY set consensus=true if ALL {max_rounds} rounds have completed (rounds remaining is 0). Do NOT declare consensus early.
 
 Reply ONLY in this JSON format:
 {{"next": "<ai_name>", "prompt": "<question for them>", "consensus": false, "summary": null}}
 
-If consensus reached:
+If ALL rounds are done AND consensus reached:
 {{"next": null, "prompt": null, "consensus": true, "summary": "<2-3 paragraph synthesis>"}}"""
 
     response = await _runner.run_moderator(council["moderator_session_id"], prompt)
