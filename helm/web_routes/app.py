@@ -26,7 +26,7 @@ import helm.auth as _auth
 
 app = FastAPI(title="RAPR AI")
 
-# Serve logo.png (and any other static assets placed alongside web_app.py)
+# Serve app assets placed alongside web_app.py
 from helm.paths import PROJECT_ROOT
 _static_dir = PROJECT_ROOT
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")

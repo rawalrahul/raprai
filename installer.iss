@@ -21,7 +21,7 @@
 #define MyAppPublisher "RAPR AI"
 #define MyAppURL "https://raprai.com"
 #define MyAppExeName "web_app.exe"
-#define MyAppIcon "logo.png"
+#define MyAppIcon "rapr-logo.png"
 
 [Setup]
 ; Unique AppId — DO NOT change this between versions (used for upgrades)
@@ -39,7 +39,7 @@ AllowNoIcons=yes
 ; Output location and filename for the generated installer .exe
 OutputDir=installer_output
 OutputBaseFilename=RAPR_AI_Setup_{#MyAppVersion}
-; App icon (built by build.bat from logo.png → logo.ico)
+; App icon (built by build.bat from rapr-logo.png → logo.ico)
 SetupIconFile=logo.ico
 Compression=lzma2/ultra64
 SolidCompression=yes

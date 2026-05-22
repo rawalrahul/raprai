@@ -17,7 +17,7 @@ _SETUP_HTML = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>RAPR AI — Setup</title>
-<link rel="icon" href="/static/logo.png" type="image/png">
+<link rel="icon" href="/static/rapr-logo.png" type="image/png">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -126,7 +126,7 @@ select option{background:var(--surface);color:var(--text)}
 
   <div class="card-header">
     <div class="logo-row">
-      <img src="/static/logo.png" alt="RAPR AI">
+      <img src="/static/rapr-logo.png" alt="RAPR AI">
       <span class="app-name">RAPR AI</span>
       <span class="tag">— First-run Setup</span>
     </div>
@@ -793,7 +793,7 @@ _ACTIVATE_HTML = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>RAPR AI — Activate</title>
-<link rel="icon" href="/static/logo.png" type="image/png">
+<link rel="icon" href="/static/rapr-logo.png" type="image/png">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -845,7 +845,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);
 <div class="card">
   <div class="card-header">
     <div class="logo-row">
-      <img src="/static/logo.png" alt="RAPR AI">
+      <img src="/static/rapr-logo.png" alt="RAPR AI">
       <span class="app-name">RAPR AI</span>
     </div>
   </div>

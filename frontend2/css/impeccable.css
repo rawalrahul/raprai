@@ -146,6 +146,28 @@ header {
   text-shadow: 0 0 15px var(--accent-glow) !important;
 }
 
+#chat-logo-bg .chat-logo-mark {
+  opacity: 0.32 !important;
+  filter: none !important;
+}
+
+#chat-logo-bg .chat-logo-mark-light {
+  display: none;
+}
+
+[data-theme="light"] #chat-logo-bg .chat-logo-mark-dark {
+  display: none;
+}
+
+[data-theme="light"] #chat-logo-bg .chat-logo-mark-light {
+  display: block;
+  opacity: 0.16 !important;
+}
+
+#messages.has-messages #chat-logo-bg .chat-logo-mark {
+  opacity: 0.025 !important;
+}
+
 .header-context {
   background: var(--bg-deep) !important;
   border: 1px solid var(--border-dim) !important;

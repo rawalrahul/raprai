@@ -187,7 +187,7 @@ async function sendNotification(msg){
   if(Notification.permission === 'granted'){
     const title = (_sessions.find(s => s.id === msg.session_id)?.name) || msg.ai || 'RAPR AI';
     const body = (msg.content || '').substring(0, 100);
-    new Notification(title, {body: body, icon: '/static/logo.png'});
+    new Notification(title, {body: body, icon: '/static/rapr-logo.png'});
     try {
       _notificationAudio.currentTime = 0;
       _notificationAudio.play().catch(() => {});

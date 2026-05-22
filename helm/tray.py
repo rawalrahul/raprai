@@ -63,11 +63,11 @@ _shutdown_event = None
 
 
 def _load_icon():
-    """Load the tray icon from logo.png."""
+    """Load the tray icon from the current RAPR logo asset."""
     try:
         from PIL import Image
         from helm.paths import PROJECT_ROOT
-        logo_path = PROJECT_ROOT / "logo.png"
+        logo_path = PROJECT_ROOT / "rapr-logo.png"
         if logo_path.exists():
             img = Image.open(str(logo_path))
             # Resize to standard tray icon size

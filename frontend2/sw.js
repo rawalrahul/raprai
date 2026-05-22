@@ -23,7 +23,9 @@ self.addEventListener('install', (event) => {
         '/js/complete.js',
         '/js/custom_ai.js',
         '/js/agents.js',
-        '/static/logo.png',
+        '/static/rapr-logo.png',
+        '/static/logo-watermark-dark.png',
+        '/static/logo-watermark-light.png',
       ]).catch(() => {
         // Non-critical — app works without cache
       });

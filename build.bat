@@ -28,9 +28,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\gen_cert.ps1"
 echo  Certificate ready.
 echo.
 
-:: ── Generate .ico from logo.png (needed by Inno Setup + shortcuts) ──────
-echo  Generating logo.ico from logo.png...
-python -c "from PIL import Image; img=Image.open('logo.png'); img.save('logo.ico', format='ICO', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+:: ── Generate .ico from rapr-logo.png (needed by Inno Setup + shortcuts) ──────
+echo  Generating logo.ico from rapr-logo.png...
+python -c "from PIL import Image; img=Image.open('rapr-logo.png'); img.save('logo.ico', format='ICO', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
 if errorlevel 1 (
     echo  WARNING: Could not generate logo.ico — Pillow may not be installed.
     echo  Run: pip install Pillow
@@ -45,7 +45,9 @@ echo.
 
 python -m nuitka --standalone --enable-plugin=tk-inter ^
     --include-data-dir=helm/frontend=helm/frontend ^
-    --include-data-files=logo.png=logo.png ^
+    --include-data-files=rapr-logo.png=rapr-logo.png ^
+    --include-data-files=logo-watermark-dark.png=logo-watermark-dark.png ^
+    --include-data-files=logo-watermark-light.png=logo-watermark-light.png ^
     --windows-icon-from-ico=logo.ico ^
     --windows-console-mode=disable ^
     --include-package=pptx ^
