@@ -1562,7 +1562,7 @@ function sendDesktopNotification(msg) {
 
     new Notification(title, {
       body: truncate(content, 100),
-      icon: '/static/icon.png',
+      icon: '/static/logo.png',
       tag: msg.session_id || 'rapr'
     });
   } else if (Notification.permission !== 'denied') {
