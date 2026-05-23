@@ -1077,42 +1077,151 @@ header {
   opacity: 0.65;
 }
 
-/* Attach + mic buttons */
+/* Attach + mic buttons — bumped for visibility (ISSUE-002/003).
+   Sized to match send button height so the action row reads as one toolbar. */
 #clip-btn,
 #mic-btn {
   flex-shrink: 0;
-  width: 38px !important;
-  height: 38px !important;
-  border-radius: 9px !important;
-  background: var(--surface) !important;
-  border: 1px solid var(--border) !important;
-  color: var(--muted) !important;
+  width: 44px !important;
+  height: 44px !important;
+  border-radius: 11px !important;
+  background: var(--surface2) !important;
+  border: 1px solid var(--border-strong) !important;
+  color: var(--text-main) !important;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 15px !important;
-  transition: all 0.12s ease;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, transform 0.12s ease;
+}
+
+#clip-btn svg,
+#mic-btn svg {
+  width: 22px !important;
+  height: 22px !important;
+  stroke-width: 2.2 !important;
 }
 
 #clip-btn:hover,
 #mic-btn:hover {
-  background: var(--surface2) !important;
-  border-color: var(--border-strong) !important;
-  color: var(--dim) !important;
+  background: var(--accent-subtle) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  transform: translateY(-1px);
 }
 
-/* Send button */
+#clip-btn:focus-visible,
+#mic-btn:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+}
+
+#clip-btn.uploading {
+  opacity: 0.55 !important;
+  cursor: wait;
+}
+
+/* Recording state needs higher specificity than the base !important rule above. */
+#mic-btn.recording {
+  background: #e53e3e !important;
+  border-color: #e53e3e !important;
+  color: #fff !important;
+  box-shadow: 0 0 0 4px rgba(229, 62, 62, 0.30) !important;
+  animation: mic-pulse 1.2s infinite;
+}
+
+#mic-btn.transcribing {
+  background: var(--surface2) !important;
+  opacity: 0.85 !important;
+  cursor: wait;
+  position: relative;
+}
+
+#mic-btn.transcribing svg {
+  opacity: 0.35;
+}
+
+#mic-btn.transcribing::after {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: mic-spin 0.8s linear infinite;
+}
+
+@keyframes mic-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Agent Builder mic buttons — same visual language as #mic-btn in the main toolbar.
+   Neutral surface, not accent-filled, so they read as utility not primary action. */
+.agent-mic-btn.agent-mic-btn {
+  background: var(--surface2) !important;
+  border: 1px solid var(--border-strong) !important;
+  color: var(--text-main) !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, transform 0.12s ease;
+}
+
+.agent-mic-btn.agent-mic-btn:hover {
+  background: var(--accent-subtle) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  transform: translateY(-1px);
+}
+
+.agent-mic-btn.agent-mic-btn svg {
+  width: 26px !important;
+  height: 26px !important;
+}
+
+.agent-mic-btn.agent-mic-btn:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+}
+
+.agent-mic-btn.agent-mic-btn.recording {
+  background: #e53e3e !important;
+  border-color: #e53e3e !important;
+  color: #fff !important;
+  box-shadow: 0 0 0 4px rgba(229, 62, 62, 0.30) !important;
+  animation: mic-pulse 1.2s infinite;
+}
+
+.agent-mic-btn.agent-mic-btn[disabled] {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+/* Reserve right padding so the corner mic button never sits on top of typed text. */
+#agent-gen-desc[data-mic-attached="1"],
+#builder-chat-inp[data-mic-attached="1"],
+#node-task-inp[data-mic-attached="1"] {
+  padding-right: 60px !important;
+}
+
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(229, 62, 62, 0.30); }
+  50%      { box-shadow: 0 0 0 8px rgba(229, 62, 62, 0.10); }
+}
+
+/* Send button — matches clip/mic height so action row reads as one toolbar */
 #send {
   flex-shrink: 0;
-  height: 38px !important;
-  padding: 0 18px !important;
-  border-radius: 9px !important;
+  height: 44px !important;
+  padding: 0 22px !important;
+  border-radius: 11px !important;
   background: var(--accent) !important;
   color: oklch(99% 0.002 35) !important;
   border: none !important;
   font-family: 'Inter', sans-serif !important;
-  font-size: 13px !important;
+  font-size: 14px !important;
   font-weight: 600 !important;
   cursor: pointer;
   letter-spacing: -0.01em;
