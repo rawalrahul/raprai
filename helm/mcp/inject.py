@@ -25,16 +25,29 @@ def inject_mcp_context(prompt: str, code_exec: bool = False) -> str:
                    False for text-generating AIs (Claude) — shows <tool_call> tags.
     """
     from .manager import get_manager
+    from helm.builtin_tools import (
+        BUILTIN_TOOL_DOCS,
+        get_computer_use_tool_descriptions,
+        is_computer_use_enabled,
+    )
 
     mgr = get_manager()
-    if not mgr or not mgr.has_running_servers():
+    mcp_running = bool(mgr and mgr.has_running_servers())
+    computer_on = is_computer_use_enabled()
+
+    # Bypass the no-MCP short-circuit when computer use is active,
+    # so desktop control tools still reach the prompt.
+    if not mcp_running and not computer_on:
         return prompt
 
-    tool_docs = mgr.get_text_tool_descriptions()
-    if not tool_docs.strip():
+    tool_docs = mgr.get_text_tool_descriptions() if mcp_running else ""
+    if mcp_running and not tool_docs.strip() and not computer_on:
         return prompt
 
-    logger.info("inject_mcp_context: injecting MCP context (code_exec=%s)", code_exec)
+    logger.info(
+        "inject_mcp_context: injecting (code_exec=%s, mcp=%s, computer=%s)",
+        code_exec, mcp_running, computer_on,
+    )
 
     port = os.environ.get("WEB_PORT", "8000")
 
@@ -64,16 +77,43 @@ def inject_mcp_context(prompt: str, code_exec: bool = False) -> str:
             '<tool_call>{{"name":"TOOL","arguments":{{}}}}</tool_call>\n'
         )
 
-    # Include built-in document tools
-    from helm.builtin_tools import BUILTIN_TOOL_DOCS
+    computer_docs = ""
+    if computer_on:
+        computer_docs = (
+            "Desktop control tools — drive the user's real screen, keyboard, and mouse.\n"
+            "Treat these as a peer of scripting, not a last resort.\n"
+            "Prefer these when scripts cannot reach the task. Broad classes:\n"
+            "  - Any web app the user is already signed into — act inside "
+            "their real browser session, no API keys, no OAuth dance, no "
+            "bot detection (works the same for social, email, banking, "
+            "SaaS dashboards, internal tools, gov portals, etc.).\n"
+            "  - Native desktop apps without a public scripting API.\n"
+            "  - Anti-bot or captcha-walled flows.\n"
+            "  - Cross-app orchestration (drag/drop between windows, OS "
+            "dialogs, file pickers, print dialogs, clipboard hand-offs).\n"
+            "  - Anything the user is watching live (demos, screencasts, "
+            "AFK automation, accessibility, supervised hand-off).\n"
+            "  - Visual verification of results that a script can't see.\n"
+            "Tactics:\n"
+            "  - Prefer computer_click_control / computer_type_in_control "
+            "(pywinauto, semantic, no vision needed) over pixel coordinates "
+            "for native Windows apps.\n"
+            "  - Take a computer_screenshot before clicking by pixel so you "
+            "actually see where things are.\n"
+            "  - Use computer_get_windows / computer_focus_window before "
+            "typing — keystrokes go to the focused window.\n"
+            "Tools:\n"
+            f"{get_computer_use_tool_descriptions()}"
+        )
 
     block = (
         f"[MCP TOOLS] Use these to access external services. "
         f"Do NOT pip install any packages — use these tools only.\n"
         f"{call_method}\n"
-        f"Available:\n{tool_docs}\n"
-        f"Built-in document tools (same calling method):\n{BUILTIN_TOOL_DOCS}\n"
-        f"[/MCP TOOLS]\n\n"
+        + (f"Available:\n{tool_docs}\n" if tool_docs.strip() else "")
+        + f"Built-in document tools (same calling method):\n{BUILTIN_TOOL_DOCS}\n"
+        + (computer_docs if computer_docs else "")
+        + "[/MCP TOOLS]\n\n"
     )
 
     return block + prompt

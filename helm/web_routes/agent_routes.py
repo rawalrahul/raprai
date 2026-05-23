@@ -842,6 +842,9 @@ def _initial_input_question(description: str) -> str:
     return _repair_initial_input_question(description)
 
 
+_AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".ogg", ".oga", ".opus", ".webm", ".flac", ".aac", ".amr"}
+
+
 def _extract_agent_input_file_text(path: str, filename: str) -> str:
     """Best-effort text extraction for files uploaded into agent input nodes."""
     ext = os.path.splitext(filename.lower())[1]
@@ -863,6 +866,17 @@ def _extract_agent_input_file_text(path: str, filename: str) -> str:
             doc = Document(path)
             text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
             return text[:50000] or "(empty DOCX)"
+        if ext in _AUDIO_EXTS:
+            # Transcribe audio via the same Whisper pipeline used by /transcribe.
+            try:
+                from helm.web_routes.voice_routes import _transcribe
+            except Exception as exc:
+                return f"(audio uploaded, but transcription module is unavailable: {exc})"
+            try:
+                transcript = (_transcribe(path) or "").strip()
+            except Exception as exc:
+                return f"(audio uploaded, but transcription failed: {exc})"
+            return transcript[:50000] or "(audio transcribed but no speech detected)"
         return "(file uploaded; automatic text extraction is not available for this file type. Use the saved path above.)"
     except Exception as exc:
         return f"(file uploaded, but text extraction failed: {exc})"

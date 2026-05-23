@@ -984,6 +984,19 @@ async def tg_voice(update, context):
             parse_mode="Markdown",
         )
 
+        # Route to a waiting Agent Builder input node before falling through to AI.
+        # Mirrors tg_text behavior so voice messages can satisfy human-in-the-loop steps.
+        try:
+            from helm.agent.nodes.input_node import resume_run_for_session
+            if fs and resume_run_for_session(fs.get("id"), transcript):
+                await update.message.reply_text(
+                    "Input received. Continuing the agent workflow...",
+                    reply_markup=session_controls_keyboard(),
+                )
+                return
+        except Exception as exc:
+            logger.warning("Could not resume agent input from Telegram voice: %s", exc)
+
         # Forward transcript to the active AI — same flow as tg_text
         async def _tg_voice_fire(
             _text: str = transcript,

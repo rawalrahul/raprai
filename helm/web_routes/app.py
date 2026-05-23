@@ -361,6 +361,12 @@ _SETTINGS_KEYS = [
     "CONTEXT_WINDOW_CODEX",
     "CONTEXT_WINDOW_GEMINI",
     "CONTEXT_WINDOW_OLLAMA",
+    # Computer Use (desktop control via pyautogui / mss / pygetwindow)
+    "COMPUTER_USE",
+    # Computer Use Tier 2 — native API runners (Claude / Gemini / OpenAI)
+    "COMPUTER_USE_TIER2",
+    # OmniParser — vision element detection (heavy ML deps, opt-in)
+    "OMNIPARSER_ENABLED",
 ]
 
 

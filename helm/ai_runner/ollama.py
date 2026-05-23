@@ -423,6 +423,21 @@ def _build_ollama_tools() -> list[dict]:
                       len(mcp_tools),
                       len([s for s in mgr._clients.values() if s.is_running()]))
 
+    # Add Computer Use tools when enabled — schemas already in OpenAI format
+    # (Ollama uses the same shape for function calling).
+    from helm.builtin_tools import is_computer_use_enabled, COMPUTER_USE_TOOLS
+    if is_computer_use_enabled():
+        for t in COMPUTER_USE_TOOLS:
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t["desc"],
+                    "parameters": t["schema"],
+                },
+            })
+        logger.debug("Ollama tools: added %d computer_use tools", len(COMPUTER_USE_TOOLS))
+
     return tools
 
 
@@ -575,6 +590,11 @@ async def _execute_ollama_tool(name: str, args: dict, cwd: str) -> str:
             size  = fpath.stat().st_size if fpath.exists() else 0
             return f"✓ Created {filename} ({size:,} bytes) with {len(sections)} sections. Saved to: {fpath}"
 
+        # Route Computer Use tools through the shared builtin dispatcher.
+        from helm.builtin_tools import is_builtin_tool, execute_builtin_tool
+        if is_builtin_tool(name):
+            return await execute_builtin_tool(name, args, cwd)
+
         # Route MCP server tools (e.g. google_workspace_gmail_users_messages_list)
         mgr = _get_mcp_manager()
         if mgr and mgr.is_mcp_tool(name):
@@ -711,6 +731,32 @@ def _ollama_system_prompt(cwd: str, skill_content: str = "", user_prompt: str = 
         "(dir, type, copy, move, del, powershell) — NOT Linux commands "
         "(ls, cat, cp, mv, rm). For PowerShell, prefix with 'powershell -Command'.\n"
     )
+
+    # Computer Use capability hint — peer of scripting, not a fallback.
+    try:
+        from helm.builtin_tools import is_computer_use_enabled
+        if is_computer_use_enabled():
+            base += (
+                "\nDESKTOP CONTROL is available via computer_* tools (mouse, "
+                "keyboard, screenshots, window manipulation, app launch, "
+                "semantic pywinauto control). Treat them as a peer of "
+                "scripting. Prefer them when scripts cannot reach the task. Broad classes:\n"
+                "  - Any web app the user is already signed into — act in "
+                "their real browser session, no API keys, no OAuth dance, "
+                "no bot detection (social, email, banking, SaaS, internal "
+                "tools, gov portals, etc.).\n"
+                "  - Native desktop apps without a public scripting API.\n"
+                "  - Anti-bot / captcha-walled web flows.\n"
+                "  - Cross-app orchestration (drag/drop, OS dialogs, file "
+                "pickers, print dialogs, clipboard hand-offs).\n"
+                "  - Visual verification a script cannot do.\n"
+                "Prefer computer_click_control / computer_type_in_control "
+                "(semantic, no vision needed) over pixel coordinates for "
+                "native Windows apps. Take computer_screenshot before "
+                "clicking by pixel.\n"
+            )
+    except Exception:
+        pass
 
     if skill_content:
         base += (

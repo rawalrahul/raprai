@@ -668,6 +668,38 @@ Example:
         </div>
       </div>
 
+      <!-- Computer Use -->
+      <div class="settings-section">
+        <div class="settings-section-title">Computer Use</div>
+        <div class="settings-row">
+          <label>Enabled
+            <small>Allow AI to control mouse, keyboard, windows, and launch apps on this machine. Off by default. Affects the real screen — use with caution.</small>
+          </label>
+          <select class="settings-input" id="st-COMPUTER_USE" style="width:auto">
+            <option value="false">Off</option>
+            <option value="true">On</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <label>Fast desktop control (native API)
+            <small>Use direct provider API (Claude / Gemini / OpenAI) with vision and screenshots after every action. ~5x faster than CLI path. Requires the matching API key.</small>
+          </label>
+          <select class="settings-input" id="st-COMPUTER_USE_TIER2" style="width:auto">
+            <option value="false">Off</option>
+            <option value="true">On</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <label>OmniParser (vision element detection)
+            <small>Microsoft OmniParser v2 — YOLO icon detector + Florence caption. Gives the AI labeled bounding boxes so it can click by semantic label. Requires torch + transformers + ultralytics (~2GB). Weights download on first use.</small>
+          </label>
+          <select class="settings-input" id="st-OMNIPARSER_ENABLED" style="width:auto">
+            <option value="false">Off</option>
+            <option value="true">On</option>
+          </select>
+        </div>
+      </div>
+
       <!-- Budget Guardrails -->
       <div class="settings-section">
         <div class="settings-section-title">Budget Guardrails</div>
@@ -1073,7 +1105,7 @@ Example:
   <button id="clip-btn" onclick="document.getElementById('file-input').click()" title="Attach a file" aria-label="Attach file">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
   </button>
-  <button id="mic-btn" onclick="toggleVoiceRec()" title="Hold to record voice message" aria-label="Voice input">
+  <button id="mic-btn" onclick="toggleVoiceRec()" title="Click to record voice message" aria-label="Voice input">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
   </button>
   <button id="send" onclick="send()" aria-label="Send message">Send</button>

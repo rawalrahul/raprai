@@ -753,13 +753,39 @@ function send(){
 // --- File Upload ------------------------------------------------------------------------------------------------
 let _uploadedFiles = [];
 
+function _isAudioFile(file){
+  const t = (file.type || '').toLowerCase();
+  if(t.startsWith('audio/')) return true;
+  const name = (file.name || '').toLowerCase();
+  return /\.(mp3|wav|m4a|ogg|oga|opus|webm|flac|aac|amr)$/.test(name);
+}
+
 async function handleFileUpload(inputEl){
   const files = inputEl.files;
   if(!files || files.length === 0) return;
   const btn = document.getElementById('clip-btn');
   btn.classList.add('uploading');
   const names = [];
+  const transcripts = [];
   for(const file of files){
+    if(_isAudioFile(file)){
+      // Audio uploads bypass /upload and go straight through Whisper,
+      // so they can resolve a waiting Agent Builder input node as text.
+      const form = new FormData();
+      form.append('file', file, file.name || 'recording.webm');
+      try {
+        const resp = await fetch('/transcribe', {method:'POST', headers:{'x-csrf-token':_csrfToken()}, body:form});
+        const data = await resp.json();
+        if(data.error){
+          alert('Transcription failed: ' + data.error);
+        } else if(data.text){
+          transcripts.push(data.text);
+        }
+      } catch(err) {
+        console.error('Audio transcription failed:', err);
+      }
+      continue;
+    }
     const form = new FormData();
     form.append('file', file);
     try {
@@ -772,11 +798,16 @@ async function handleFileUpload(inputEl){
   }
   btn.classList.remove('uploading');
   inputEl.value = '';
+  const inp = document.getElementById('inp');
   if(names.length > 0){
     _uploadedFiles = _uploadedFiles.concat(names);
-    const inp = document.getElementById('inp');
     const tag = names.map(n => `[📎 ${n}]`).join(' ');
     inp.value = (inp.value ? inp.value + ' ' : '') + tag + ' ';
+  }
+  if(transcripts.length > 0){
+    inp.value = (inp.value ? inp.value + ' ' : '') + transcripts.join(' ') + ' ';
+  }
+  if(names.length > 0 || transcripts.length > 0){
     inp.focus();
     inp.dispatchEvent(new Event('input'));
   }
@@ -836,8 +867,9 @@ function getSupportedMime(){
 async function transcribeAndInsert(blob){
   const btn = document.getElementById('mic-btn');
   const inp = document.getElementById('inp');
+  // Indicate transcribing via CSS class only — do not destroy the SVG with
+  // textContent/innerHTML, otherwise the mic icon never restores.
   btn.classList.add('transcribing');
-  btn.textContent = '⏳';
   try {
     const form = new FormData();
     form.append('file', blob, 'recording.webm');
@@ -866,7 +898,6 @@ async function transcribeAndInsert(blob){
     console.error('Transcription request failed:', err);
     alert('Could not reach transcription server.');
   } finally {
-    btn.textContent = '🎙️';
     btn.classList.remove('transcribing');
   }
 }
@@ -1956,7 +1987,8 @@ function loadSettings(){
                   'HEARTBEAT_ENABLED','HEARTBEAT_AI',
                   'AI_MAX_RETRIES','AI_AUTO_SWITCH',
                   'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD',
-                  'LOCAL_AI_URL','LOCAL_AI_MODEL'];
+                  'LOCAL_AI_URL','LOCAL_AI_MODEL',
+                  'COMPUTER_USE','COMPUTER_USE_TIER2','OMNIPARSER_ENABLED'];
     keys.forEach(k=>{
       const el = document.getElementById('st-'+k);
       if(el && d[k] !== undefined && d[k] !== '') el.value = d[k];
@@ -2041,7 +2073,8 @@ function saveSettings(){
                 'HEARTBEAT_ENABLED','HEARTBEAT_AI',
                 'AI_MAX_RETRIES','AI_AUTO_SWITCH',
                 'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD',
-                'LOCAL_AI_URL','LOCAL_AI_MODEL'];
+                'LOCAL_AI_URL','LOCAL_AI_MODEL',
+                'COMPUTER_USE','COMPUTER_USE_TIER2','OMNIPARSER_ENABLED'];
   const body = {};
   keys.forEach(k=>{
     const el = document.getElementById('st-'+k);

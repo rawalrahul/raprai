@@ -28,6 +28,42 @@ pdfminer.six>=20231228
 reportlab>=4.0
 
 # ─────────────────────────────────────────────────────────
+# Computer Use (desktop control — opt-in via COMPUTER_USE=true)
+# ─────────────────────────────────────────────────────────
+pyautogui>=0.9.54
+mss>=9.0.1
+pygetwindow>=0.0.9
+pyperclip>=1.8.2
+pywin32>=306; sys_platform == "win32"
+
+# ─────────────────────────────────────────────────────────
+# Computer Use — Tier 2 native API runners (opt-in via COMPUTER_USE_TIER2=true)
+# ─────────────────────────────────────────────────────────
+anthropic>=0.40.0
+google-genai>=0.3.0
+openai>=1.50.0
+
+# ─────────────────────────────────────────────────────────
+# Computer Use — Tier 3 semantic Win32 control (pywinauto)
+# Lightweight Windows-only accessibility-tree automation.
+# Always available when COMPUTER_USE=true on Windows.
+# ─────────────────────────────────────────────────────────
+pywinauto>=0.6.8; sys_platform == "win32"
+comtypes>=1.2.0; sys_platform == "win32"
+
+# ─────────────────────────────────────────────────────────
+# Computer Use — OmniParser (opt-in via OMNIPARSER_ENABLED=true)
+# Heavy: pulls torch (~2GB) + transformers + ultralytics + weights.
+# Uncomment to install; otherwise tool returns a helpful error.
+# ─────────────────────────────────────────────────────────
+# torch>=2.0
+# torchvision>=0.15
+# ultralytics>=8.0
+# transformers>=4.40
+# huggingface_hub>=0.20
+# einops>=0.7
+
+# ─────────────────────────────────────────────────────────
 # Optional — Voice transcription (installed on-demand)
 # Uncomment to pre-install; otherwise auto-installed on first use.
 # WARNING: openai-whisper pulls in PyTorch (~2GB) — do NOT

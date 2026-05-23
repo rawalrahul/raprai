@@ -1124,6 +1124,40 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
 
     Raises no exceptions — errors are returned as string output.
     """
+    # ── Tier 2 native computer-use runners ─────────────────────────────────
+    # When COMPUTER_USE=true AND COMPUTER_USE_TIER2=true AND the selected
+    # AI has its API key, bypass the CLI path entirely and use the
+    # provider's direct API with vision + function calling. Screenshots
+    # are attached inline after every action, so latency drops to ~1-3s
+    # per turn vs 5-15s for the CLI path. Falls through to Tier 1 on error.
+    try:
+        from helm.computer_runners import should_use_tier2
+        if should_use_tier2(ai):
+            from helm.computer_runners.base import primary_display_size
+            display_w, display_h = primary_display_size()
+            await push_thinking(True, ai, session_id=sid)
+            try:
+                if ai == "claude":
+                    from helm.computer_runners import claude_native
+                    return await claude_native.run(
+                        safe_text, cwd, sid, display_w, display_h,
+                        model=sess.get("model"),
+                    )
+                if ai == "gemini":
+                    from helm.computer_runners import gemini_native
+                    return await gemini_native.run(
+                        safe_text, cwd, sid, model=sess.get("model"),
+                    )
+                if ai in ("codex", "openai"):
+                    from helm.computer_runners import openai_native
+                    return await openai_native.run(
+                        safe_text, cwd, sid, model=sess.get("model"),
+                    )
+            finally:
+                await push_thinking(False, ai, session_id=sid)
+    except Exception:
+        logger.exception("Tier 2 computer runner failed; falling back to Tier 1")
+
     if ai == "claude":
         await push_thinking(True, "claude", session_id=sid)
         has_history = len(sess["claude_msgs"]) > 0
@@ -1161,26 +1195,33 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         # If it handles everything natively, agent loop exits immediately.
         #
         from helm.mcp import get_manager as _get_mcp_mgr
+        from helm.builtin_tools import is_computer_use_enabled as _is_cu
         _mcp_mgr = _get_mcp_mgr()
         _has_mcp = _mcp_mgr and _mcp_mgr.has_running_servers()
+        _computer_on = _is_cu()
+        _needs_tools = bool(_has_mcp or _computer_on)
         _mcp_config_path = None
         _needs_agent_loop = False
 
-        if _has_mcp:
+        if _needs_tools:
             # Give Claude ALL tools — let it decide what to use.
             # Native MCP (--mcp-config) for subprocess servers,
             # agent loop (tool descriptions in prompt) as a safety net.
             # If Claude handles everything natively, the agent loop wrapper
             # sees no <tool_call> tags and exits immediately — zero overhead.
-            _mcp_config_path = _mcp_mgr.export_claude_mcp_config(cwd)
-            if _mcp_config_path:
-                logger.info("Claude: native MCP via --mcp-config (%d subprocess servers)",
-                            len(_mcp_mgr._get_subprocess_servers()))
+            if _has_mcp:
+                _mcp_config_path = _mcp_mgr.export_claude_mcp_config(cwd)
+                if _mcp_config_path:
+                    logger.info("Claude: native MCP via --mcp-config (%d subprocess servers)",
+                                len(_mcp_mgr._get_subprocess_servers()))
 
-            # Always inject tool descriptions so Claude CAN use agent loop
-            # if native tools can't reach something (WS servers, edge cases).
+            # Inject tool descriptions (covers MCP tools + computer_use tools).
+            # inject_mcp_context decides what to include based on flags.
             enriched_text = inject_mcp_context(enriched_text, code_exec=False)
-            logger.info("Claude: all tool layers active (CLI skill + native MCP + agent loop)")
+            logger.info(
+                "Claude: tool layers active (mcp=%s, computer_use=%s)",
+                _has_mcp, _computer_on,
+            )
 
         # Build command — with native MCP if subprocess servers exist
         cmd = build_claude_cmd(
@@ -1190,7 +1231,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
             mcp_config=_mcp_config_path,
         )
 
-        if _has_mcp:
+        if _needs_tools:
             # Agent loop wrapper: watches for <tool_call> XML in output.
             # If Claude uses native MCP for everything, wrapper exits on
             # first iteration (no tool calls found) — no interference.
@@ -1337,18 +1378,21 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         _NATIVE_MCP_AIS = {"gemini", "codex"}
 
         from helm.mcp import get_manager as _get_mcp_mgr2
+        from helm.builtin_tools import is_computer_use_enabled as _is_cu2
         _mcp_mgr2 = _get_mcp_mgr2()
         _has_mcp2 = _mcp_mgr2 and _mcp_mgr2.has_running_servers()
+        _computer_on2 = _is_cu2()
+        _needs_tools2 = bool(_has_mcp2 or _computer_on2)
 
-        if _has_mcp2:
-            # Always inject tool descriptions — gives AI the option to
-            # use agent loop for tools not covered by native config
+        if _needs_tools2:
+            # Inject tool descriptions (MCP + computer_use). inject_mcp_context
+            # itself decides what to include based on the flags.
             enriched_text = inject_mcp_context(enriched_text, code_exec=use_stdin)
             _cli_has_native_mcp = ai in _NATIVE_MCP_AIS
-            if _cli_has_native_mcp:
-                logger.info("%s: all tool layers active (CLI skill + native MCP + agent loop)", ai)
-            else:
-                logger.info("%s: all tool layers active (CLI skill + agent loop; no native MCP)", ai)
+            logger.info(
+                "%s: tool layers active (mcp=%s, computer_use=%s, native_mcp=%s)",
+                ai, _has_mcp2, _computer_on2, _cli_has_native_mcp,
+            )
 
             from .agent_loop import run_with_tools
 
