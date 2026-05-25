@@ -22,6 +22,7 @@ Telegram App (your phone)        ←── Bot API  ────┘             
 - **File auto-send** — any AI-generated file (PDF, image, video, code) sent to Telegram as a proper attachment the moment it's created
 - **Chat history** — every session auto-saved; browse, view, resume with context, rename, or delete from web UI or Telegram
 - **Shared AI memory** — knowledge learned in one AI session is available to all others via persistent memory store
+- **Computer use** — AI controls your desktop: mouse, keyboard, windows, and apps via 13 built-in tools. Tier 1 works with any AI (Claude, Gemini, Codex, Ollama) via tool injection. Tier 2 uses native vision APIs so Claude, Gemini, and Codex see the screen after every action and respond in real time
 - **RAPR Packages** — browse, search, and one-click install MCP servers, skills, and plugins
 - **Cloud backup** — automatic database backups to OneDrive, Google Drive, Dropbox, or a local folder with scheduling and job history
 - **Custom AI management** — add or remove AI integrations from the Settings UI without editing files or restarting
