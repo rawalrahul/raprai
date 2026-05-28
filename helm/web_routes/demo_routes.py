@@ -22,6 +22,10 @@ async def demos_list():
         return {"ok": False, "error": str(e)}
 
 
+_ALLOWED_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
+_MAX_VIDEO_BYTES = 500 * 1024 * 1024  # 500 MB
+
+
 @router.post("/upload")
 async def demos_upload(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     try:
@@ -29,9 +33,17 @@ async def demos_upload(background_tasks: BackgroundTasks, file: UploadFile = Fil
         meta = demo_storage.create_demo(filename)
         demo_id = meta["demo_id"]
 
-        ext = Path(filename).suffix.lstrip(".") or "mp4"
+        suffix = Path(filename).suffix.lower()
+        if suffix not in _ALLOWED_EXTS:
+            demo_storage.delete_demo(demo_id)
+            return {"ok": False, "error": f"Unsupported file type: {suffix or '(none)'}"}
+        ext = suffix.lstrip(".") or "mp4"
         video_path = demo_storage.RAW_DIR / demo_id / f"video.{ext}"
-        video_path.write_bytes(await file.read())
+        content = await file.read(_MAX_VIDEO_BYTES + 1)
+        if len(content) > _MAX_VIDEO_BYTES:
+            demo_storage.delete_demo(demo_id)
+            return {"ok": False, "error": "File exceeds 500 MB limit"}
+        video_path.write_bytes(content)
 
         duration = _get_duration(video_path)
         demo_storage.update_meta(demo_id, {"duration_s": duration})
@@ -52,7 +64,7 @@ async def demos_get(demo_id: str):
 
 
 @router.post("/{demo_id}/run")
-async def demos_run(demo_id: str):
+async def demos_run(demo_id: str, background_tasks: BackgroundTasks):
     try:
         demo = demo_storage.get_demo(demo_id)
         if not demo:
@@ -65,10 +77,9 @@ async def demos_run(demo_id: str):
         sess = focused_session()
         if not sess:
             return {"ok": False, "error": "No active session to run demo in"}
-        import asyncio
         from helm.ai_runner.core import process_message
-        asyncio.create_task(
-            process_message(sess, f"Execute this playbook step by step:\n\n{playbook_text}", {})
+        background_tasks.add_task(
+            process_message, sess, f"Execute this playbook step by step:\n\n{playbook_text}", {}
         )
         return {"ok": True}
     except HTTPException:
