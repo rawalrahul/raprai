@@ -70,4 +70,4 @@ comtypes>=1.2.0; sys_platform == "win32"
 # include in PyInstaller builds.
 # ─────────────────────────────────────────────────────────
 # openai-whisper>=20231117
-# static-ffmpeg>=2.5
+static-ffmpeg>=2.5
