@@ -8,6 +8,12 @@ from helm.config import logger
 from helm.demos import storage
 from helm.demos.playbook import save_playbook
 
+try:
+    import static_ffmpeg as _static_ffmpeg
+    _static_ffmpeg.add_paths()
+except Exception:
+    pass
+
 _PROMPT = """Watch this screen recording carefully. List every action the user takes as a numbered step.
 
 For each step include:
@@ -109,7 +115,8 @@ def _analyze_gemini(demo_id: str, video_path: Path) -> list:
         expires_at = datetime.fromisoformat(expires_at_str)
         if datetime.now(timezone.utc) < expires_at:
             try:
-                file_obj = client.files.get(name=gemini_file_name)
+                cached = client.files.get(name=gemini_file_name)
+                file_obj = cached if cached.state.name == "ACTIVE" else None
             except Exception:
                 file_obj = None
 
@@ -143,8 +150,6 @@ def _analyze_gemini(demo_id: str, video_path: Path) -> list:
 
 def _extract_frames(video_path: Path, frames_dir: Path) -> list[Path]:
     import subprocess
-    import static_ffmpeg
-    static_ffmpeg.add_paths()
     frames_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         "ffmpeg", "-i", str(video_path),
