@@ -1,4 +1,5 @@
 import json
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +10,11 @@ DEMOS_DIR = HELM_DIR / "demos"
 RAW_DIR = DEMOS_DIR / "raw"
 PROCESSED_DIR = DEMOS_DIR / "processed"
 LIBRARY_FILE = DEMOS_DIR / "library.json"
+
+
+def _validate_id(demo_id: str) -> None:
+    if not demo_id.isalnum() or len(demo_id) > 32:
+        raise ValueError(f"Invalid demo_id: {demo_id!r}")
 
 
 def _ensure_dirs():
@@ -42,6 +48,7 @@ def create_demo(source_filename: str) -> dict:
 
 
 def get_demo(demo_id: str) -> dict | None:
+    _validate_id(demo_id)
     meta = _read_meta(demo_id)
     if meta is None:
         return None
@@ -49,7 +56,10 @@ def get_demo(demo_id: str) -> dict | None:
 
 
 def update_meta(demo_id: str, updates: dict) -> dict:
-    meta = _read_meta(demo_id) or {}
+    _validate_id(demo_id)
+    meta = _read_meta(demo_id)
+    if meta is None:
+        raise KeyError(f"demo_id not found: {demo_id}")
     meta.update(updates)
     _write_meta(demo_id, meta)
     _update_library(demo_id, meta)
@@ -57,7 +67,7 @@ def update_meta(demo_id: str, updates: dict) -> dict:
 
 
 def delete_demo(demo_id: str) -> None:
-    import shutil
+    _validate_id(demo_id)
     for d in (RAW_DIR / demo_id, PROCESSED_DIR / demo_id):
         if d.exists():
             shutil.rmtree(d)
@@ -74,6 +84,7 @@ def list_demos() -> list:
 
 
 def get_video_path(demo_id: str) -> Path | None:
+    _validate_id(demo_id)
     for ext in ("mp4", "mov", "webm", "mkv", "avi"):
         p = RAW_DIR / demo_id / f"video.{ext}"
         if p.exists():
@@ -82,12 +93,14 @@ def get_video_path(demo_id: str) -> Path | None:
 
 
 def get_frames_dir(demo_id: str) -> Path:
+    _validate_id(demo_id)
     d = PROCESSED_DIR / demo_id / "frames"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def save_actions(demo_id: str, actions: list) -> None:
+    _validate_id(demo_id)
     path = PROCESSED_DIR / demo_id / "actions.json"
     path.write_text(json.dumps(actions, indent=2, ensure_ascii=False), encoding="utf-8")
 

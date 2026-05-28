@@ -99,3 +99,23 @@ def test_title_strips_extension_and_replaces_spaces():
         s = _make_storage(tmp)
         meta = s.create_demo("my screen recording 2.mp4")
         assert meta["title"] == "my_screen_recording_2"
+
+
+def test_update_meta_raises_for_unknown_id():
+    with tempfile.TemporaryDirectory() as tmp:
+        s = _make_storage(tmp)
+        try:
+            s.update_meta("nonexistent1", {"status": "ready"})
+            assert False, "Should have raised KeyError"
+        except KeyError:
+            pass
+
+
+def test_get_demo_raises_for_invalid_demo_id():
+    with tempfile.TemporaryDirectory() as tmp:
+        s = _make_storage(tmp)
+        try:
+            s.get_demo("../../etc/passwd")
+            assert False, "Should have raised ValueError"
+        except ValueError:
+            pass
