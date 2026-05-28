@@ -102,8 +102,9 @@ def add_custom(entry: dict) -> str:
         raise ValueError(f"Invalid key: must be lowercase alphanumeric, 1-32 chars (got '{key}')")
     _RESERVED = {
         "claude", "ollama", "shell",
-        "gemini", "codex", "openrouter", "groq",
+        "gemini", "antigravity", "codex", "openrouter", "groq",
         "local_ai", "github_models", "nemoclaw", "openclaw",
+        "cursor", "kilocode",
     }
     if key in _RESERVED:
         raise ValueError(f"Cannot override built-in AI: {key}")

@@ -337,6 +337,12 @@ def resolve_ai_spec(ai_spec: str) -> tuple[str, str | None]:
         "github_models":  "github_models",
         "github":         "github_models",
         "openclaw":       "openclaw",
+        "antigravity":    "antigravity",
+        "agy":            "antigravity",
+        "cursor":         "cursor",
+        "cursor-agent":   "cursor",
+        "kilocode":       "kilocode",
+        "kilo":           "kilocode",
     }
     backend = _PROVIDER_MAP.get(provider, provider)
     return backend, model
@@ -733,19 +739,21 @@ async def process_message(text: str, source: str = "web",
             await push_message("system", msg, source=source, session_id=sid)
             return msg
 
-        # ── Claude / Gemini / Codex: support --model flag ──────
-        if ai_key in ("claude", "gemini", "codex"):
+        # ── Claude / Gemini / Antigravity / Codex: support --model flag ──────
+        if ai_key in ("claude", "gemini", "antigravity", "codex"):
             if not arg or arg_lower in ("list", "ls", "show", "?"):
                 current_model = sess.get("model") or "(default)"
                 try:
                     from helm.web_routes.helpers import (
                         _fetch_claude_models,
                         _fetch_gemini_models,
+                        _fetch_antigravity_models,
                         _fetch_openai_models,
                     )
                     _fetch_fn = {
                         "claude": _fetch_claude_models,
                         "gemini": _fetch_gemini_models,
+                        "antigravity": _fetch_antigravity_models,
                         "codex": _fetch_openai_models,
                     }[ai_key]
                     available = await asyncio.to_thread(_fetch_fn)
@@ -1570,7 +1578,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         #
         # This way: CLI skill + native MCP + agent loop are ALL available.
         # The AI picks the best approach — we don't limit or choose for it.
-        _NATIVE_MCP_AIS = {"gemini", "codex"}
+        _NATIVE_MCP_AIS = {"gemini", "antigravity", "codex"}
 
         from helm.mcp import get_manager as _get_mcp_mgr2
         from helm.builtin_tools import is_computer_use_enabled as _is_cu2

@@ -397,3 +397,33 @@ def _fetch_gemini_models() -> list[str]:
         return found
 
     return []
+
+
+def _fetch_antigravity_models() -> list[str]:
+    """Return available models for Antigravity CLI (same Gemini API, different OAuth path)."""
+    # Check Antigravity-specific OAuth creds first (~/.antigravity/oauth_creds.json)
+    ag_oauth = pathlib.Path.home() / ".antigravity" / "oauth_creds.json"
+    if ag_oauth.exists():
+        try:
+            creds = json.loads(ag_oauth.read_text(encoding="utf-8"))
+            token = creds.get("access_token", "")
+            expires_ms = creds.get("expiry_date", 0)
+            if token and (expires_ms == 0 or expires_ms > time.time() * 1000):
+                req = urllib.request.Request(
+                    "https://generativelanguage.googleapis.com/v1beta/models",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = json.loads(resp.read())
+                    ids = [
+                        m.get("name", "").split("/")[-1]
+                        for m in data.get("models", [])
+                        if "generateContent" in m.get("supportedGenerationMethods", [])
+                    ]
+                    ids = [i for i in ids if i]
+                    if ids:
+                        return ids
+        except Exception:
+            pass
+    # Fall back to shared Gemini API logic (API key + Gemini OAuth)
+    return _fetch_gemini_models()

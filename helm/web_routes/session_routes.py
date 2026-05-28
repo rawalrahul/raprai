@@ -172,6 +172,38 @@ async def gemini_status():
     })
 
 
+@router.get("/integrations/antigravity/status")
+async def antigravity_status():
+    """Check whether Antigravity CLI (agy) is installed. Auth is optional."""
+    import shutil
+
+    def _check():
+        # Check PATH first, then %LOCALAPPDATA%\Antigravity\agy.exe on Windows
+        if shutil.which("agy"):
+            return True
+        if sys.platform == "win32":
+            local_app = os.environ.get("LOCALAPPDATA", "")
+            if local_app:
+                import pathlib
+                exe = pathlib.Path(local_app) / "Antigravity" / "agy.exe"
+                if exe.exists():
+                    return True
+        return False
+
+    cli_ok = await asyncio.to_thread(_check)
+    key_ok = bool(
+        os.environ.get("GEMINI_API_KEY", "").strip()
+        or os.environ.get("GOOGLE_API_KEY", "").strip()
+    )
+    hint = "" if cli_ok else "Install Antigravity CLI: see antigravity.google/docs/cli-using"
+    return JSONResponse({
+        "ready":         cli_ok,
+        "cli_installed": cli_ok,
+        "api_key_set":   key_ok,
+        "setup_hint":    hint,
+    })
+
+
 @router.get("/integrations/claude/status")
 async def claude_status():
     """Check whether the Claude CLI is installed. Auth is handled by the CLI itself."""
@@ -253,10 +285,11 @@ async def rescan_integrations():
 
     # Static metadata for built-in CLIs (name, emoji, install hint)
     _BUILTIN_META = {
-        "claude": {"name": "Claude Code", "emoji": "🤖", "hint": "Install: npm install -g @anthropic-ai/claude-code"},
-        "gemini": {"name": "Gemini CLI",  "emoji": "✨", "hint": "Install: npm install -g @google/gemini-cli"},
-        "codex":  {"name": "Codex CLI",   "emoji": "🧠", "hint": "Install: npm install -g @openai/codex"},
-        "ollama": {"name": "Ollama",      "emoji": "🦙", "hint": "Download from https://ollama.com/download"},
+        "claude":       {"name": "Claude Code",    "emoji": "🤖", "hint": "Install: npm install -g @anthropic-ai/claude-code"},
+        "gemini":       {"name": "Gemini CLI",     "emoji": "✨", "hint": "Install: npm install -g @google/gemini-cli"},
+        "antigravity":  {"name": "Antigravity",    "emoji": "🪐", "hint": "Install Antigravity CLI: see antigravity.google/docs/cli-using"},
+        "codex":        {"name": "Codex CLI",      "emoji": "🧠", "hint": "Install: npm install -g @openai/codex"},
+        "ollama":       {"name": "Ollama",         "emoji": "🦙", "hint": "Download from https://ollama.com/download"},
     }
 
     def _run_rescan():
@@ -267,7 +300,16 @@ async def rescan_integrations():
 
         # Built-in CLIs first
         for key, meta in _BUILTIN_META.items():
-            found = _find_cli(key)
+            if key == "antigravity":
+                # Binary is "agy", not "antigravity"
+                found = _find_cli("agy")
+                if not found and sys.platform == "win32":
+                    local_app = os.environ.get("LOCALAPPDATA", "")
+                    if local_app:
+                        import pathlib as _pl
+                        found = (_pl.Path(local_app) / "Antigravity" / "agy.exe").exists()
+            else:
+                found = _find_cli(key)
             item = {
                 "key": key, "name": meta["name"], "emoji": meta["emoji"],
                 "found": found, "hint": meta["hint"] if not found else "",
@@ -514,14 +556,16 @@ async def _fetch_models_cached(ai: str) -> list[str]:
     from helm.web_routes.helpers import (
         _fetch_claude_models,
         _fetch_gemini_models,
+        _fetch_antigravity_models,
         _fetch_openai_models,
         _fetch_ollama_models,
     )
     _fetch_fns = {
-        "claude": _fetch_claude_models,
-        "gemini": _fetch_gemini_models,
-        "codex": _fetch_openai_models,
-        "ollama": _fetch_ollama_models,
+        "claude":       _fetch_claude_models,
+        "gemini":       _fetch_gemini_models,
+        "antigravity":  _fetch_antigravity_models,
+        "codex":        _fetch_openai_models,
+        "ollama":       _fetch_ollama_models,
     }
     fn = _fetch_fns.get(ai)
     if fn is None:
