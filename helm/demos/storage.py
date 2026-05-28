@@ -1,5 +1,6 @@
 import json
 import shutil
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,8 @@ DEMOS_DIR = HELM_DIR / "demos"
 RAW_DIR = DEMOS_DIR / "raw"
 PROCESSED_DIR = DEMOS_DIR / "processed"
 LIBRARY_FILE = DEMOS_DIR / "library.json"
+
+_library_lock = threading.Lock()
 
 
 def _validate_id(demo_id: str) -> None:
@@ -25,7 +28,7 @@ def _ensure_dirs():
 def create_demo(source_filename: str) -> dict:
     _ensure_dirs()
     demo_id = uuid.uuid4().hex[:12]
-    title = Path(source_filename).stem.replace(" ", "_")
+    title = Path(Path(source_filename).stem.replace(" ", "_")).name
     meta = {
         "demo_id": demo_id,
         "title": title,
@@ -133,26 +136,28 @@ def _read_actions(demo_id: str) -> list | None:
 
 
 def _update_library(demo_id: str, meta: dict) -> None:
-    library = list_demos()
-    entry = {
-        "demo_id": demo_id,
-        "title": meta.get("title"),
-        "status": meta.get("status"),
-        "duration_s": meta.get("duration_s"),
-        "uploaded_at": meta.get("uploaded_at"),
-    }
-    idx = next((i for i, d in enumerate(library) if d["demo_id"] == demo_id), None)
-    if idx is not None:
-        library[idx] = entry
-    else:
-        library.insert(0, entry)
-    LIBRARY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    LIBRARY_FILE.write_text(json.dumps(library, indent=2, ensure_ascii=False), encoding="utf-8")
+    with _library_lock:
+        library = list_demos()
+        entry = {
+            "demo_id": demo_id,
+            "title": meta.get("title"),
+            "status": meta.get("status"),
+            "duration_s": meta.get("duration_s"),
+            "uploaded_at": meta.get("uploaded_at"),
+        }
+        idx = next((i for i, d in enumerate(library) if d["demo_id"] == demo_id), None)
+        if idx is not None:
+            library[idx] = entry
+        else:
+            library.insert(0, entry)
+        LIBRARY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        LIBRARY_FILE.write_text(json.dumps(library, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _remove_from_library(demo_id: str) -> None:
-    library = [d for d in list_demos() if d["demo_id"] != demo_id]
-    if LIBRARY_FILE.exists():
-        LIBRARY_FILE.write_text(
-            json.dumps(library, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+    with _library_lock:
+        library = [d for d in list_demos() if d["demo_id"] != demo_id]
+        if LIBRARY_FILE.exists():
+            LIBRARY_FILE.write_text(
+                json.dumps(library, indent=2, ensure_ascii=False), encoding="utf-8"
+            )

@@ -11,6 +11,12 @@ from helm.config import logger
 from helm.demos import storage as demo_storage
 from helm.demos.analysis import analyze_demo
 
+try:
+    import static_ffmpeg as _static_ffmpeg
+    _static_ffmpeg.add_paths()
+except Exception:
+    pass
+
 router = APIRouter(prefix="/api/demos", tags=["demos"])
 
 
@@ -57,6 +63,7 @@ async def demos_upload(background_tasks: BackgroundTasks, file: UploadFile = Fil
 
 @router.get("/{demo_id}")
 async def demos_get(demo_id: str):
+    _check_id(demo_id)
     demo = demo_storage.get_demo(demo_id)
     if demo is None:
         raise HTTPException(status_code=404, detail="Demo not found")
@@ -66,6 +73,7 @@ async def demos_get(demo_id: str):
 @router.post("/{demo_id}/run")
 async def demos_run(demo_id: str, background_tasks: BackgroundTasks):
     try:
+        _check_id(demo_id)
         demo = demo_storage.get_demo(demo_id)
         if not demo:
             raise HTTPException(status_code=404, detail="Demo not found")
@@ -91,6 +99,7 @@ async def demos_run(demo_id: str, background_tasks: BackgroundTasks):
 @router.post("/{demo_id}/regenerate")
 async def demos_regenerate(demo_id: str, background_tasks: BackgroundTasks):
     try:
+        _check_id(demo_id)
         demo = demo_storage.get_demo(demo_id)
         if not demo:
             raise HTTPException(status_code=404, detail="Demo not found")
@@ -106,6 +115,7 @@ async def demos_regenerate(demo_id: str, background_tasks: BackgroundTasks):
 @router.delete("/{demo_id}")
 async def demos_delete(demo_id: str):
     try:
+        _check_id(demo_id)
         demo_storage.delete_demo(demo_id)
         return {"ok": True}
     except Exception as e:
@@ -125,3 +135,11 @@ def _get_duration(video_path: Path) -> float | None:
     except Exception:
         pass
     return None
+
+
+def _check_id(demo_id: str) -> None:
+    from helm.demos.storage import _validate_id
+    try:
+        _validate_id(demo_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

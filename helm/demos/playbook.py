@@ -32,7 +32,7 @@ def actions_to_markdown(title: str, actions: list) -> str:
 
 
 def save_playbook(title: str, actions: list) -> Path:
-    out_dir = PLAYBOOKS_DIR / title
+    out_dir = PLAYBOOKS_DIR / Path(title).name
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "v1.md"
     path.write_text(actions_to_markdown(title, actions), encoding="utf-8")
