@@ -36,6 +36,8 @@ from .update_routes import router as update_router
 from .device_routes import router as device_router
 from .agent_routes import router as agent_router
 from .council_routes import router as council_router
+from .learning_routes import router as learning_router
+from .demo_routes import router as demo_router
 
 # Include all routers in the app
 app.include_router(auth_router)
@@ -59,6 +61,8 @@ app.include_router(update_router)
 app.include_router(device_router)
 app.include_router(agent_router)
 app.include_router(council_router)
+app.include_router(learning_router)
+app.include_router(demo_router)
 
 # Re-export model fetchers so they can be imported as: from helm.web_routes import _fetch_claude_models
 from .helpers import (
