@@ -46,6 +46,7 @@ _OLLAMA_TOOL_SUPPORT: dict[str, bool] = {
     "qwen3":            True,
     "llama3.1":         True,
     "llama3.2":         True,
+    "llama3.2-vision":  True,
     "llama3.3":         True,
     "mistral-nemo":     True,
     "mistral":          True,
@@ -53,6 +54,9 @@ _OLLAMA_TOOL_SUPPORT: dict[str, bool] = {
     "granite3":         True,
     "firefunction":     True,
     "smollm2":          True,
+    "qwen2-vl":         True,
+    "qwen2.5vl":        True,
+    "minicpm-v":        True,
     "deepseek-r1":      False,
     "deepseek-v":       False,
     "llama2":           False,
@@ -64,6 +68,25 @@ _OLLAMA_TOOL_SUPPORT: dict[str, bool] = {
     "starcoder":        False,
     "flux":             False,
     "stable-diffusion": False,
+    "llava":            False,
+    "llava-llama3":     False,
+    "llava-phi3":       False,
+    "bakllava":         False,
+    "moondream":        False,
+}
+
+# Vision-capable models — can receive base64 images in messages
+_OLLAMA_VISION_SUPPORT: dict[str, bool] = {
+    "llama3.2-vision":  True,
+    "qwen2-vl":         True,
+    "qwen2.5vl":        True,
+    "minicpm-v":        True,
+    "llava":            True,
+    "llava-llama3":     True,
+    "llava-phi3":       True,
+    "bakllava":         True,
+    "moondream":        True,
+    "gemma3":           True,
 }
 
 
@@ -77,6 +100,15 @@ def ollama_model_supports_tools(model: str) -> bool | None:
         if m.startswith(prefix):
             return supported
     return None
+
+
+def ollama_model_supports_vision(model: str) -> bool:
+    """Return True if the model can process images (multimodal)."""
+    m = model.lower().split(":")[0]
+    for prefix, supported in _OLLAMA_VISION_SUPPORT.items():
+        if m.startswith(prefix):
+            return supported
+    return False
 
 
 _OLLAMA_TOOLS = [
@@ -706,7 +738,8 @@ def _parse_content_tool_calls(content: str) -> list[dict]:
     return []
 
 
-def _ollama_system_prompt(cwd: str, skill_content: str = "", user_prompt: str = "") -> str:
+def _ollama_system_prompt(cwd: str, skill_content: str = "", user_prompt: str = "",
+                          model: str = "") -> str:
     """Build the Ollama system prompt."""
     base = (
         f"You are a capable AI assistant with tools to create and manage files.\n"
@@ -736,6 +769,7 @@ def _ollama_system_prompt(cwd: str, skill_content: str = "", user_prompt: str = 
     try:
         from helm.builtin_tools import is_computer_use_enabled
         if is_computer_use_enabled():
+            _vision = ollama_model_supports_vision(model) if model else False
             base += (
                 "\nDESKTOP CONTROL is available via computer_* tools (mouse, "
                 "keyboard, screenshots, window manipulation, app launch, "
@@ -755,6 +789,28 @@ def _ollama_system_prompt(cwd: str, skill_content: str = "", user_prompt: str = 
                 "native Windows apps. Take computer_screenshot before "
                 "clicking by pixel.\n"
             )
+            if _vision:
+                base += (
+                    "VISION ACTIVE: You can see screenshots. After calling "
+                    "computer_screenshot the image is attached automatically — "
+                    "examine it to identify UI elements, read text, and verify "
+                    "results before proceeding. WORKFLOW:\n"
+                    "  1. computer_screenshot → see current state\n"
+                    "  2. Identify target element by position/text in image\n"
+                    "  3. computer_click at correct pixel coords (or use "
+                    "computer_click_control for Win32 apps)\n"
+                    "  4. computer_screenshot again to confirm result\n"
+                    "Repeat see→act→verify until task is complete.\n"
+                )
+            else:
+                base += (
+                    "NOTE: Your model does not support vision. For computer use, "
+                    "prefer semantic tools (computer_get_window_tree, "
+                    "computer_click_control, computer_type_in_control) which work "
+                    "without seeing the screen. Use computer_screenshot only when "
+                    "you need to extract text (OCR will be attempted automatically).\n"
+                    "Recommended vision-capable models: llama3.2-vision:11b, qwen2-vl:7b\n"
+                )
     except Exception:
         pass
 
@@ -813,6 +869,77 @@ def _ollama_system_prompt(cwd: str, skill_content: str = "", user_prompt: str = 
         pass
 
     return base
+
+
+def _screenshot_path_from_result(tool_result: str) -> str | None:
+    """Extract file path from computer_screenshot tool result string."""
+    m = re.search(r'Screenshot saved:\s*(.+?)\s+\(', tool_result)
+    if m:
+        p = m.group(1).strip()
+        if pathlib.Path(p).exists():
+            return p
+    return None
+
+
+def _screenshot_to_base64(tool_result: str) -> str | None:
+    """Read screenshot PNG and return base64 string, or None on failure."""
+    import base64
+    p = _screenshot_path_from_result(tool_result)
+    if not p:
+        return None
+    try:
+        return base64.b64encode(pathlib.Path(p).read_bytes()).decode()
+    except Exception:
+        return None
+
+
+def _screenshot_to_markitdown(tool_result: str) -> str | None:
+    """Run markitdown on screenshot for non-vision model fallback (OCR/text extraction)."""
+    import shutil
+    p = _screenshot_path_from_result(tool_result)
+    if not p:
+        return None
+    md_bin = shutil.which("markitdown")
+    if not md_bin:
+        return None
+    try:
+        result = subprocess.run(
+            [md_bin, p],
+            capture_output=True, text=True, timeout=30,
+            **hidden_kwargs(),
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return f"[Screenshot OCR via markitdown]\n{result.stdout.strip()[:3000]}"
+    except Exception:
+        pass
+    return None
+
+
+def _append_screenshot_result(sess: dict, tool_result: str, model: str) -> None:
+    """
+    Append a screenshot tool result to ollama_messages.
+    Vision models: keep minimal tool message + inject image as user message.
+    Non-vision models: attempt markitdown OCR fallback, else plain text.
+    """
+    if ollama_model_supports_vision(model):
+        b64 = _screenshot_to_base64(tool_result)
+        if b64:
+            sess["ollama_messages"].append({
+                "role": "tool",
+                "content": "Screenshot captured. Image follows.",
+            })
+            sess["ollama_messages"].append({
+                "role": "user",
+                "content": "[screenshot]",
+                "images": [b64],
+            })
+            return
+    # Non-vision or base64 failed — try markitdown OCR
+    md_text = _screenshot_to_markitdown(tool_result)
+    sess["ollama_messages"].append({
+        "role": "tool",
+        "content": md_text or tool_result,
+    })
 
 
 async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str:
@@ -876,7 +1003,7 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
                      skill_name, len(skill_content))
 
     system_content = _ollama_system_prompt(cwd, skill_content=skill_content,
-                                            user_prompt=text)
+                                            user_prompt=text, model=model)
     if not sess.get("ollama_messages"):
         sess["ollama_messages"] = [{"role": "system", "content": system_content}]
     else:
@@ -1009,10 +1136,13 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
 
             tool_result = await _execute_ollama_tool(tool_name, tool_args, cwd)
 
-            sess["ollama_messages"].append({
-                "role":    "tool",
-                "content": tool_result,
-            })
+            if tool_name == "computer_screenshot" and not tool_result.startswith("Error"):
+                _append_screenshot_result(sess, tool_result, model)
+            else:
+                sess["ollama_messages"].append({
+                    "role":    "tool",
+                    "content": tool_result,
+                })
 
             # Show success or error to the user based on actual result
             if tool_result.startswith("Error") or tool_result.startswith("Exit "):

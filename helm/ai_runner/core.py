@@ -95,6 +95,87 @@ _INFRA_FAILURE_PATTERNS = re.compile(
 # crashes: "(codex exited 1)" — only at the END of the output.
 _EXIT_CODE_PATTERN = re.compile(r"\(\w+ exited [1-9]\d*\)\s*$")
 
+# ---------------------------------------------------------------------------
+# Explicit correction detection
+# ---------------------------------------------------------------------------
+# Signals that the user is rejecting / correcting the last AI response.
+_CORRECTION_NEGATIVE = re.compile(
+    r'\b(wrong|no|not right|incorrect|that\'?s wrong|not what i (want|asked|meant)'
+    r'|undo|redo|try again|do it again|fix that|fix it|that\'?s not|start over'
+    r'|revert|that\'?s incorrect|nope|nah|bad|terrible|awful|useless'
+    r'|not (what|how|the|like)|i said|i meant|i asked for|again please)\b',
+    re.IGNORECASE,
+)
+# Signals that the user is explicitly accepting the response.
+_CORRECTION_POSITIVE = re.compile(
+    r'\b(perfect|great|thanks|thank you|done|exactly|yes|correct|looks good'
+    r'|nice|awesome|good job|well done|that\'?s it|that\'?s right)\b',
+    re.IGNORECASE,
+)
+
+
+def _detect_correction(text: str, sess: dict, ai: str, task_type: str) -> None:
+    """
+    Scan incoming message for explicit correction/acceptance signals.
+    Updates telemetry (3x weight for explicit_negative) and mines
+    antipatterns from correction content. Never raises.
+    """
+    try:
+        is_negative = bool(_CORRECTION_NEGATIVE.search(text))
+        is_positive = bool(_CORRECTION_POSITIVE.search(text))
+
+        if not is_negative and not is_positive:
+            return
+
+        feedback_type = "explicit_negative" if is_negative else "explicit_positive"
+        weight = 3.0 if is_negative else 1.0
+
+        # Update routing stats with feedback signal
+        try:
+            from helm.learning.router import update_stats
+            update_stats(
+                task_type=task_type,
+                ai=ai,
+                duration_seconds=0,
+                success=not is_negative,
+                cost_usd=0.0,
+                weight=weight,
+            )
+        except Exception:
+            pass
+
+        # Mine antipattern from correction content when negative
+        if is_negative and len(text) > 10:
+            try:
+                from helm.learning.analyzer import _append_antipattern
+                last_response = (sess.get("claude_msgs") or sess.get("ollama_messages") or [])
+                last_ai_text = ""
+                for m in reversed(last_response):
+                    if isinstance(m, dict) and m.get("role") == "assistant":
+                        last_ai_text = str(m.get("content", ""))[:300]
+                        break
+                    elif isinstance(m, str):
+                        last_ai_text = m[:300]
+                        break
+
+                antipattern = (
+                    f"User correction detected for task_type={task_type}, ai={ai}.\n"
+                    f"User said: {text[:200]}\n"
+                    f"AI had responded: {last_ai_text[:200]}\n"
+                    f"Action: review this pattern and avoid repeating it."
+                )
+                _append_antipattern(task_type, antipattern)
+            except Exception:
+                pass
+
+        from helm.config import logger
+        logger.info(
+            "Correction detected: type=%s ai=%s task_type=%s weight=%.1f text=%r",
+            feedback_type, ai, task_type, weight, text[:80],
+        )
+    except Exception:
+        pass
+
 # Match run_ai_popen's error wrapper: "(error: ...)"
 _POPEN_ERROR_PATTERN = re.compile(r"^\(error:")
 
@@ -656,27 +737,51 @@ async def process_message(text: str, source: str = "web",
         if ai_key in ("claude", "gemini", "codex"):
             if not arg or arg_lower in ("list", "ls", "show", "?"):
                 current_model = sess.get("model") or "(default)"
-                _model_hints = {
-                    "claude": "claude-sonnet-4-20250514, claude-opus-4-20250514, claude-haiku-3-5-20241022",
-                    "gemini": "gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash",
-                    "codex": "o4-mini, o3, gpt-4.1",
-                }
-                hints = _model_hints.get(ai_key, "")
+                try:
+                    from helm.web_routes.helpers import (
+                        _fetch_claude_models,
+                        _fetch_gemini_models,
+                        _fetch_openai_models,
+                    )
+                    _fetch_fn = {
+                        "claude": _fetch_claude_models,
+                        "gemini": _fetch_gemini_models,
+                        "codex": _fetch_openai_models,
+                    }[ai_key]
+                    available = await asyncio.to_thread(_fetch_fn)
+                except Exception:
+                    available = []
+                if available:
+                    hints = "\n".join(
+                        f"  • `{m}`" + (" ✅" if m == sess.get("model") else "")
+                        for m in available
+                    )
+                    hints_section = f"**Available models:**\n{hints}"
+                else:
+                    hints_section = (
+                        "_Could not fetch model list. Make sure you are logged in "
+                        f"(`{ai_key}` CLI) or have the API key set._\n\n"
+                        f"You can still switch: `/model <name>`"
+                    )
                 msg = (
                     f"**Current model:** `{current_model}`\n"
                     f"**AI:** {ai_key.title()}\n\n"
-                    f"**Available models:** {hints}\n\n"
+                    f"{hints_section}\n\n"
                     f"To switch: `/model <name>` — To reset: `/model default`"
                 )
                 await push_message("system", msg, source=source, session_id=sid)
                 return msg
             if arg_lower == "default":
                 sess["model"] = None
+                from helm.model_prefs import set_model_pref
+                set_model_pref(ai_key, None)
                 await push_state()
                 msg = f"✅ Model reset to default for {ai_key.title()}."
                 await push_message("system", msg, source=source, session_id=sid)
                 return msg
             sess["model"] = arg
+            from helm.model_prefs import set_model_pref
+            set_model_pref(ai_key, arg)
             await push_state()
             msg = f"✅ {ai_key.title()} model switched to `{arg}`."
             await push_message("system", msg, source=source, session_id=sid)
@@ -830,10 +935,44 @@ async def process_message(text: str, source: str = "web",
     cwd      = sess["cwd"]
     terminal = sess["terminal"]
 
+    # Learning telemetry — classify task + open record (fire-and-forget, never raises)
+    _task_id: str | None = None
+    _clf: dict = {"task_type": "unknown", "task_fingerprint": None}
+    try:
+        from helm.learning.classifier import classify_and_fingerprint
+        from helm.learning.telemetry import get_telemetry
+        _clf = classify_and_fingerprint(text)
+        _telem = get_telemetry()
+        _task_id = _telem.start(
+            session_id=sid or "",
+            ai=ai,
+            model=sess.get("model"),
+            prompt=text,
+            source=source,
+        )
+    except Exception:
+        pass
+
     await push_message("user", text, ai=None, source=source, session_id=sid)
+
+    # Detect explicit correction/acceptance signals — 3x weight in routing stats
+    _detect_correction(text, sess, ai, _clf.get("task_type", "unknown"))
 
     # Inject file-deletion safety preamble into every AI prompt
     safe_text = _SAFETY_PREAMBLE + text
+
+    # Prepend learned context (playbooks + antipatterns) — never raises, never blocks
+    try:
+        from helm.learning.injector import build_context as _build_ctx
+        _learned_ctx = _build_ctx(
+            task_type=_clf.get("task_type", "unknown"),
+            fingerprint=_clf.get("task_fingerprint"),
+            ai=ai,
+        )
+        if _learned_ctx:
+            safe_text = _learned_ctx + safe_text
+    except Exception:
+        pass
 
     output = ""  # safe default — overwritten in every branch below
     actual_ai = ai  # tracks which AI actually produced the output (may change on fallback)
@@ -861,6 +1000,62 @@ async def process_message(text: str, source: str = "web",
             logger.info("Token handoff: ai=%s — no actual tokens captured", actual_ai)
         record_usage_task(actual_ai, elapsed, prompt=text, output=output,
                           input_tokens=_tok_in, output_tokens=_tok_out)
+
+        # Learning telemetry — finish record + update routing stats (never raises)
+        try:
+            if _task_id is not None:
+                from helm.learning.telemetry import get_telemetry as _get_telem
+                from helm.learning.router import update_stats as _update_stats
+                _telem_fin = _get_telem()
+                _cost = float(sess.pop("_last_cost_usd", 0.0) or 0.0) if sess else 0.0
+                _success = not _is_infra_failure(output) if output else False
+                _telem_fin.finish(
+                    task_id=_task_id,
+                    duration=elapsed,
+                    input_tokens=_tok_in or 0,
+                    output_tokens=_tok_out or 0,
+                    output_text=(output or "")[:500],
+                    cost_usd=_cost,
+                    errors=None,
+                )
+                _update_stats(
+                    task_type=_clf.get("task_type", "unknown"),
+                    ai=actual_ai,
+                    duration_seconds=elapsed,
+                    success=_success,
+                    cost_usd=_cost,
+                )
+        except Exception:
+            pass
+
+        # Enqueue task record for async analysis (playbook generation, antipattern extraction)
+        try:
+            from helm.learning.analyzer import enqueue as _enqueue_analysis
+            from helm.learning.analyzer import drain_queue as _drain_analysis
+            _analysis_record = {
+                "task_id": _task_id or "",
+                "task_type": _clf.get("task_type", "unknown"),
+                "task_fingerprint": _clf.get("task_fingerprint"),
+                "task_summary": (text or "")[:200],
+                "ai_used": actual_ai,
+                "ai_model_version": sess.get("model") if sess else None,
+                "duration_seconds": elapsed,
+                "success": (not _is_infra_failure(output)) if output else False,
+                "success_confidence": 0.7 if (output and not _is_infra_failure(output)) else 0.3,
+                "errors_hit": [],
+                "session_id": sid or "",
+            }
+            _enqueue_analysis(_analysis_record)
+            asyncio.create_task(_drain_analysis())
+        except Exception:
+            pass
+
+        # Feed cross-AI comparison buffer
+        try:
+            from helm.learning.cross_ai import record_task as _record_cross_ai
+            _record_cross_ai(_analysis_record)
+        except Exception:
+            pass
 
         # Track AI usage for telemetry
         try:

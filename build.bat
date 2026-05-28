@@ -58,6 +58,8 @@ python -m nuitka --standalone --enable-plugin=tk-inter ^
     --include-package=pystray ^
     --include-package=PIL ^
     --nofollow-import-to=helm.plugins.* ^
+    --nofollow-import-to=google.genai ^
+    --include-package=google.genai ^
     web_app.py
 
 if errorlevel 1 (

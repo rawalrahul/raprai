@@ -1322,3 +1322,34 @@ def get_user_skills_dir() -> Optional[str]:
 def get_all_skills_dirs() -> list[str]:
     """Return all loaded skills directories (for display in Settings)."""
     return [str(p) for p in _skills_dirs]
+
+
+def get_pending_proposal_count() -> int:
+    """Return count of pending skill proposals. 0 if learning disabled or no proposals."""
+    try:
+        from helm.learning.skill_proposals import list_proposals
+        proposals = list_proposals(status_filter="pending_review")
+        return len(proposals)
+    except Exception:
+        return 0
+
+
+def list_skills_with_proposals() -> list[dict]:
+    """list_skills() enriched with pending proposal count per skill."""
+    skills = list_skills()
+    try:
+        from helm.learning.skill_proposals import list_proposals
+        proposals = list_proposals(status_filter="pending_review")
+        # Index proposals by target_skill name
+        pending: dict[str, int] = {}
+        for p in proposals:
+            target = p.get("target_skill", "")
+            # target_skill may be a path — extract skill name from it
+            skill_name = pathlib.Path(target).parent.name if "/" in target or "\\" in target else target
+            pending[skill_name] = pending.get(skill_name, 0) + 1
+        for skill in skills:
+            skill["pending_proposals"] = pending.get(skill["name"], 0)
+    except Exception:
+        for skill in skills:
+            skill["pending_proposals"] = 0
+    return skills

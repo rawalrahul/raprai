@@ -224,6 +224,13 @@ async def handle_web_command(command: str, ws: WebSocket):
         sess = focused_session()
         if sess:
             sess["model"] = model_val or None
+            ai_key = sess.get("ai") or ""
+            if ai_key in ("claude", "gemini", "codex", "ollama"):
+                try:
+                    from helm.model_prefs import set_model_pref
+                    set_model_pref(ai_key, model_val or None)
+                except Exception:
+                    pass
             await push_state()
             label = f"`{model_val}`" if model_val else "default"
             await push_message("system", f"✅ Model switched to {label}", source="web",

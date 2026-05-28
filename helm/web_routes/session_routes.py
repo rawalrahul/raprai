@@ -335,11 +335,12 @@ async def rescan_integrations():
 
 @router.get("/skills")
 async def list_skills_endpoint():
-    """Return all registered skills for the Settings panel."""
-    from helm.skills import list_skills, get_skills_dir
+    """Return all registered skills for the Settings panel, with pending proposal counts."""
+    from helm.skills import list_skills_with_proposals, get_skills_dir, get_pending_proposal_count
     return JSONResponse({
         "skills_dir": get_skills_dir(),
-        "skills": list_skills(),
+        "skills": list_skills_with_proposals(),
+        "pending_proposals_total": get_pending_proposal_count(),
     })
 
 
@@ -359,12 +360,20 @@ async def toggle_skill(payload: dict):
 @router.get("/skills/rescan")
 async def rescan_skills():
     """Re-scan the skills directory and return the refreshed registry."""
-    from helm.skills import scan_skills, list_skills, get_skills_dir
+    from helm.skills import scan_skills, list_skills_with_proposals, get_skills_dir, get_pending_proposal_count
     scan_skills()
     return JSONResponse({
         "skills_dir": get_skills_dir(),
-        "skills": list_skills(),
+        "skills": list_skills_with_proposals(),
+        "pending_proposals_total": get_pending_proposal_count(),
     })
+
+
+@router.get("/skills/proposals/count")
+async def skills_proposal_count():
+    """Return count of pending skill proposals — used for nav badge."""
+    from helm.skills import get_pending_proposal_count
+    return JSONResponse({"count": get_pending_proposal_count()})
 
 
 @router.get("/integrations/ollama/status")
@@ -490,3 +499,83 @@ async def delete_custom_integration(key: str):
     from helm.integrations import remove_custom
     ok = remove_custom(key)
     return {"ok": ok}
+
+
+# ---------------------------------------------------------------------------
+# Model discovery & selection endpoints
+# ---------------------------------------------------------------------------
+
+_model_cache: dict[str, tuple[float, list[str]]] = {}
+_MODEL_CACHE_TTL = 300  # 5 minutes
+
+
+async def _fetch_models_cached(ai: str) -> list[str]:
+    import time
+    from helm.web_routes.helpers import (
+        _fetch_claude_models,
+        _fetch_gemini_models,
+        _fetch_openai_models,
+        _fetch_ollama_models,
+    )
+    _fetch_fns = {
+        "claude": _fetch_claude_models,
+        "gemini": _fetch_gemini_models,
+        "codex": _fetch_openai_models,
+        "ollama": _fetch_ollama_models,
+    }
+    fn = _fetch_fns.get(ai)
+    if fn is None:
+        return []
+    now = time.time()
+    cached_at, cached_models = _model_cache.get(ai, (0.0, []))
+    if now - cached_at < _MODEL_CACHE_TTL and cached_models:
+        return cached_models
+    models = await asyncio.to_thread(fn)
+    _model_cache[ai] = (now, models)
+    return models
+
+
+@router.get("/api/models/selected")
+async def get_selected_models():
+    """Return all persisted model selections."""
+    from helm.model_prefs import get_all_prefs
+    return {"ok": True, "selected": get_all_prefs()}
+
+
+@router.get("/api/models/{ai}")
+async def get_models(ai: str):
+    """Return available models for AI (cached 5 min)."""
+    models = await _fetch_models_cached(ai)
+    from helm.model_prefs import get_model_pref
+    selected = get_model_pref(ai)
+    return {"ok": True, "ai": ai, "models": models, "selected": selected}
+
+
+from pydantic import BaseModel as _BaseModel
+
+
+class _SetModelRequest(_BaseModel):
+    model: str | None = None
+
+
+@router.put("/api/models/{ai}")
+async def set_model(ai: str, req: _SetModelRequest):
+    """Persist model selection for AI and apply to all active sessions."""
+    model = req.model or None
+    from helm.model_prefs import set_model_pref
+    set_model_pref(ai, model)
+    # Apply to all live sessions for this AI
+    for sess in _st.sessions.values():
+        if sess.get("ai") == ai:
+            sess["model"] = model
+    return {"ok": True, "ai": ai, "model": model}
+
+
+@router.post("/api/models/{ai}/refresh")
+async def refresh_models(ai: str):
+    """Bust cache and re-fetch model list for AI."""
+    import time
+    _model_cache.pop(ai, None)
+    models = await _fetch_models_cached(ai)
+    _model_cache[ai] = (time.time(), models)
+    return {"ok": True, "ai": ai, "models": models, "count": len(models)}

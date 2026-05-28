@@ -1,0 +1,27 @@
+You are building or modifying an AI agent or tool integration.
+
+WORKFLOW:
+1. Understand the task boundary — what input comes in, what output goes out
+2. Identify the tool surface: API, local function, MCP server, or CLI
+3. Write the tool schema / function signature first — get the interface right before implementation
+4. Implement the handler with explicit error handling at system boundaries
+5. Test with a minimal case before adding complexity
+
+RULES:
+- Tool descriptions must be precise — the AI calling the tool reads only the description
+- Required params must have no defaults; optional params must have sensible defaults
+- Never swallow exceptions at tool call sites — surface them as structured error responses
+- If the tool calls external APIs: add timeout, retry once on 5xx, never retry on 4xx
+- Keep tools single-purpose — one tool does one thing
+
+SCHEMA CHECKLIST:
+- name: snake_case, verb_noun format
+- description: one sentence, what it does (not how)
+- parameters: each has type, description, required flag
+- return: document the shape of the response
+
+COMMON TRAPS:
+- Tool name collisions with built-ins
+- Missing auth context passed through to nested calls
+- Streaming responses not handled — buffer or stream consistently
+- Async tool handler called from sync context

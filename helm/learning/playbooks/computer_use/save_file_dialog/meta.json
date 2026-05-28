@@ -1,0 +1,15 @@
+{
+  "name": "save_file_dialog",
+  "task_type": "computer_use",
+  "fingerprint": null,
+  "version": 1,
+  "status": "active",
+  "success_rate": 0.92,
+  "sample_count": 1,
+  "promotions_needed": 0,
+  "source_task_ids": ["seed"],
+  "model_versions_validated": ["seed"],
+  "created_at": "2026-05-26T00:00:00Z",
+  "last_success": "2026-05-26T00:00:00Z",
+  "last_updated": "2026-05-26T00:00:00Z"
+}

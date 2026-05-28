@@ -543,6 +543,13 @@ async def _main():
     except Exception as exc:
         logger.warning("Cloud backup scheduler start failed: %s", exc)
 
+    # Start learning hygiene runner (weekly: stale playbooks, log compaction, index refresh)
+    try:
+        from helm.learning.hygiene import hygiene_runner as _hygiene_runner
+        asyncio.create_task(_hygiene_runner())
+    except Exception as exc:
+        logger.warning("Learning hygiene runner start failed: %s", exc)
+
     # Start AI subprocess watchdog (detects dead processes, notifies users)
     from helm.resilience import ai_watchdog
     asyncio.create_task(ai_watchdog())

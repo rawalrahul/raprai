@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "description": "Seed routing defaults — used before per-task-type data is available",
+  "last_updated": "2026-05-25",
+  "defaults": {
+    "computer_use":     {"recommended_ai": "gemini",  "reason": "Gemini vision+action is faster for desktop tasks", "confidence": 0.6},
+    "code.debug":       {"recommended_ai": "claude",  "reason": "Claude stronger at multi-step reasoning and code", "confidence": 0.7},
+    "code.write":       {"recommended_ai": "claude",  "reason": "Claude produces clean, well-structured code", "confidence": 0.7},
+    "code.refactor":    {"recommended_ai": "claude",  "reason": "Claude maintains context across large refactors", "confidence": 0.65},
+    "code.explain":     {"recommended_ai": "claude",  "reason": "Claude produces clear explanations", "confidence": 0.65},
+    "code.test":        {"recommended_ai": "codex",   "reason": "Codex specializes in test generation", "confidence": 0.6},
+    "agent_build":      {"recommended_ai": "claude",  "reason": "Claude best at tool-use and agent architecture", "confidence": 0.7},
+    "file_ops":         {"recommended_ai": "claude",  "reason": "Claude safe with file operations", "confidence": 0.6},
+    "research":         {"recommended_ai": "gemini",  "reason": "Gemini web search integration is strong", "confidence": 0.6},
+    "chat":             {"recommended_ai": "ollama",  "reason": "Local model sufficient for chat, cost-free", "confidence": 0.5},
+    "scheduled":        {"recommended_ai": "claude",  "reason": "Claude reliable for scheduled task logic", "confidence": 0.6},
+    "email":            {"recommended_ai": "gemini",  "reason": "Gemini handles Gmail integration well", "confidence": 0.6},
+    "system":           {"recommended_ai": "claude",  "reason": "Claude careful with system configuration", "confidence": 0.65},
+    "unknown":          {"recommended_ai": "claude",  "reason": "Default fallback", "confidence": 0.4}
+  }
+}

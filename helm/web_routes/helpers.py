@@ -2,12 +2,14 @@
 helm/web_routes/helpers.py — Helper functions for model discovery (Claude, Ollama, Gemini, OpenAI, Codex).
 """
 
+import base64
 import json
 import os
 import pathlib
 import re
 import shutil
 import subprocess
+import time
 import urllib.request
 from typing import Optional
 
@@ -115,6 +117,31 @@ def _fetch_claude_models() -> list[str]:
                        if m.get("id", "").startswith("claude-")]
                 if ids:
                     return ids
+        except Exception:
+            pass
+
+    # ── Method 1.5: OAuth token from ~/.claude/.credentials.json ─────────────
+    creds_path = pathlib.Path.home() / ".claude" / ".credentials.json"
+    if creds_path.exists():
+        try:
+            creds = json.loads(creds_path.read_text(encoding="utf-8"))
+            oauth = creds.get("claudeAiOauth", {})
+            token = oauth.get("accessToken", "")
+            expires_ms = oauth.get("expiresAt", 0)
+            if token and (expires_ms == 0 or expires_ms > time.time() * 1000):
+                req = urllib.request.Request(
+                    "https://api.anthropic.com/v1/models?limit=50",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "anthropic-version": "2023-06-01",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = json.loads(resp.read())
+                    ids = [m["id"] for m in data.get("data", [])
+                           if m.get("id", "").startswith("claude-")]
+                    if ids:
+                        return ids
         except Exception:
             pass
 
@@ -231,8 +258,61 @@ def _fetch_ollama_models() -> list[str]:
 
 
 def _fetch_openai_models() -> list[str]:
-    """Return available OpenAI/Codex models via REST API or fallback to known list."""
-    # ── Method 1: OpenAI REST API (needs OPENAI_API_KEY) ──────────────────────
+    """Return available OpenAI/Codex models.
+    Priority: (1) ~/.codex/models_cache.json, (2) OAuth JWT from ~/.codex/auth.json,
+    (3) OPENAI_API_KEY REST API, (4) npm package scan, (5) hardcoded fallback.
+    """
+    _chat_prefixes = ("gpt-", "o1", "o3", "o4", "o1-", "o3-", "o4-")
+    _skip_keywords = ("instruct", "embed", "tts", "whisper", "dall", "babbage", "davinci")
+
+    def _filter_chat_models(ids: list[str]) -> list[str]:
+        return sorted([
+            m for m in ids
+            if any(m.startswith(p) for p in _chat_prefixes)
+            and not any(s in m for s in _skip_keywords)
+        ], reverse=True)
+
+    # ── Method 0: ~/.codex/models_cache.json (fastest — no API call) ─────────
+    cache_path = pathlib.Path.home() / ".codex" / "models_cache.json"
+    if cache_path.exists():
+        try:
+            cache = json.loads(cache_path.read_text(encoding="utf-8"))
+            models = [
+                m["slug"] for m in cache.get("models", [])
+                if m.get("visibility") == "list" and m.get("supported_in_api", False)
+            ]
+            if models:
+                return sorted(models, reverse=True)
+        except Exception:
+            pass
+
+    # ── Method 0.5: OAuth JWT from ~/.codex/auth.json ────────────────────────
+    auth_path = pathlib.Path.home() / ".codex" / "auth.json"
+    if auth_path.exists():
+        try:
+            auth = json.loads(auth_path.read_text(encoding="utf-8"))
+            token = auth.get("tokens", {}).get("access_token", "")
+            if token:
+                parts = token.split(".")
+                if len(parts) == 3:
+                    payload_b64 = parts[1]
+                    payload_b64 += "=" * (4 - len(payload_b64) % 4)
+                    payload = json.loads(base64.b64decode(payload_b64))
+                    exp = payload.get("exp", 0)
+                    if exp == 0 or exp > time.time():
+                        req = urllib.request.Request(
+                            "https://api.openai.com/v1/models",
+                            headers={"Authorization": f"Bearer {token}"},
+                        )
+                        with urllib.request.urlopen(req, timeout=8) as resp:
+                            data = json.loads(resp.read())
+                            ids = _filter_chat_models([m["id"] for m in data.get("data", [])])
+                            if ids:
+                                return ids
+        except Exception:
+            pass
+
+    # ── Method 1: OPENAI_API_KEY env ─────────────────────────────────────────
     key = os.environ.get("OPENAI_API_KEY", "")
     if key:
         try:
@@ -242,7 +322,7 @@ def _fetch_openai_models() -> list[str]:
             )
             with urllib.request.urlopen(req, timeout=8) as resp:
                 data = json.loads(resp.read())
-                ids = sorted([m["id"] for m in data.get("data", [])], reverse=True)
+                ids = _filter_chat_models([m["id"] for m in data.get("data", [])])
                 if ids:
                     return ids
         except Exception:
@@ -259,19 +339,38 @@ def _fetch_openai_models() -> list[str]:
     if found:
         return found
 
-    # ── Method 3: known models (fallback) ──────────────────────────────────
-    return [
-        "gpt-4o",
-        "gpt-4-turbo",
-        "gpt-4",
-        "gpt-3.5-turbo",
-    ]
+    return []
 
 
 def _fetch_gemini_models() -> list[str]:
-    """Return available Gemini models via REST API or fallback to known list."""
+    """Return available Gemini models via OAuth token, REST API, or fallback."""
+    # ── Method 0: OAuth token from ~/.gemini/oauth_creds.json ────────────────
+    oauth_path = pathlib.Path.home() / ".gemini" / "oauth_creds.json"
+    if oauth_path.exists():
+        try:
+            creds = json.loads(oauth_path.read_text(encoding="utf-8"))
+            token = creds.get("access_token", "")
+            expires_ms = creds.get("expiry_date", 0)
+            if token and (expires_ms == 0 or expires_ms > time.time() * 1000):
+                req = urllib.request.Request(
+                    "https://generativelanguage.googleapis.com/v1beta/models",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = json.loads(resp.read())
+                    ids = [
+                        m.get("name", "").split("/")[-1]
+                        for m in data.get("models", [])
+                        if "generateContent" in m.get("supportedGenerationMethods", [])
+                    ]
+                    ids = [i for i in ids if i]
+                    if ids:
+                        return ids
+        except Exception:
+            pass
+
     # ── Method 1: Google Generative AI REST API ────────────────────────────
-    key = os.environ.get("GEMINI_API_KEY", "")
+    key = os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")
     if key:
         try:
             req = urllib.request.Request(
@@ -297,10 +396,4 @@ def _fetch_gemini_models() -> list[str]:
     if found:
         return found
 
-    # ── Method 3: known models (fallback) ──────────────────────────────────
-    return [
-        "gemini-2.0-flash",
-        "gemini-1.5-pro",
-        "gemini-1.5-flash",
-        "gemini-1.0-pro",
-    ]
+    return []
