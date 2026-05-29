@@ -1483,6 +1483,7 @@ function toggleSbSection(headerEl){
     if(tab === 'pipelines') loadPipelines();
     if(tab === 'memory') loadMemoryPanel();
     if(tab === 'agents') loadAgentsPanel();
+    if(tab === 'demos') loadDemosPanel();
   }
 }
 

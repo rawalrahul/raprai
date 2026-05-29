@@ -1,10 +1,14 @@
 import json
+import os
 import shutil
+import stat
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from helm.config import logger
 from helm.paths import HELM_DIR
 
 DEMOS_DIR = HELM_DIR / "demos"
@@ -69,12 +73,40 @@ def update_meta(demo_id: str, updates: dict) -> dict:
     return meta
 
 
+def _on_rm_error(func, path, exc_info):
+    """rmtree onerror: clear read-only / locked attrs and retry (Windows-friendly)."""
+    try:
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+        func(path)
+    except Exception:
+        pass  # leave to outer retry/cleanup
+
+
+def _rmtree_with_retry(path: Path, attempts: int = 4, delay: float = 0.3) -> bool:
+    """Try rmtree several times; return True if directory is gone."""
+    for i in range(attempts):
+        try:
+            shutil.rmtree(path, onerror=_on_rm_error)
+            if not path.exists():
+                return True
+        except Exception as exc:
+            logger.warning("rmtree attempt %d failed for %s: %s", i + 1, path, exc)
+        time.sleep(delay)
+    return not path.exists()
+
+
 def delete_demo(demo_id: str) -> None:
     _validate_id(demo_id)
-    for d in (RAW_DIR / demo_id, PROCESSED_DIR / demo_id):
-        if d.exists():
-            shutil.rmtree(d)
+    # Always remove library entry first so the UI reflects the deletion even
+    # if a file handle (e.g. open by analysis subprocess) blocks rmtree.
     _remove_from_library(demo_id)
+    stuck: list[str] = []
+    for d in (RAW_DIR / demo_id, PROCESSED_DIR / demo_id):
+        if d.exists() and not _rmtree_with_retry(d):
+            stuck.append(str(d))
+    if stuck:
+        logger.warning("delete_demo %s: removed from library but files still locked: %s",
+                       demo_id, stuck)
 
 
 def list_demos() -> list:

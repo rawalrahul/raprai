@@ -2,6 +2,9 @@ import asyncio
 import json
 import os
 import re
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 from helm.config import logger
@@ -60,39 +63,56 @@ async def _run_analysis(demo_id: str) -> list:
         raise FileNotFoundError(f"No video file for demo {demo_id}")
 
     errors: list[str] = []
+    frames: list[Path] = []
 
+    async def _get_frames() -> list[Path]:
+        nonlocal frames
+        if not frames:
+            frames = await asyncio.to_thread(
+                _extract_frames, video_path, storage.get_frames_dir(demo_id)
+            )
+        return frames
+
+    # SDK paths (API key)
     if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
         try:
             return await asyncio.to_thread(_analyze_gemini, demo_id, video_path)
         except Exception as e:
-            logger.warning("Gemini analysis failed: %s", e)
-            errors.append(f"Gemini: {e}")
-
-    frames: list[Path] = []
+            logger.warning("Gemini SDK analysis failed: %s", e)
+            errors.append(f"Gemini SDK: {e}")
 
     if os.environ.get("ANTHROPIC_API_KEY"):
         try:
-            frames = await asyncio.to_thread(
-                _extract_frames, video_path, storage.get_frames_dir(demo_id)
-            )
-            return await asyncio.to_thread(_analyze_claude, frames)
+            return await asyncio.to_thread(_analyze_claude, await _get_frames())
         except Exception as e:
-            logger.warning("Claude analysis failed: %s", e)
-            errors.append(f"Claude: {e}")
+            logger.warning("Claude SDK analysis failed: %s", e)
+            errors.append(f"Claude SDK: {e}")
 
     if os.environ.get("OPENAI_API_KEY"):
         try:
-            if not frames:
-                frames = await asyncio.to_thread(
-                    _extract_frames, video_path, storage.get_frames_dir(demo_id)
-                )
-            return await asyncio.to_thread(_analyze_openai, frames)
+            return await asyncio.to_thread(_analyze_openai, await _get_frames())
         except Exception as e:
             logger.warning("OpenAI analysis failed: %s", e)
             errors.append(f"OpenAI: {e}")
 
+    # CLI paths (OAuth — no API key needed)
+    _ext = ".cmd" if sys.platform == "win32" else ""
+    if shutil.which(f"gemini{_ext}"):
+        try:
+            return await asyncio.to_thread(_analyze_gemini_cli, await _get_frames())
+        except Exception as e:
+            logger.warning("Gemini CLI analysis failed: %s", e)
+            errors.append(f"Gemini CLI: {e}")
+
+    if shutil.which("claude"):
+        try:
+            return await asyncio.to_thread(_analyze_claude_cli, await _get_frames())
+        except Exception as e:
+            logger.warning("Claude CLI analysis failed: %s", e)
+            errors.append(f"Claude CLI: {e}")
+
     raise RuntimeError(
-        f"All analysis paths failed: {'; '.join(errors) or 'no API keys configured'}"
+        f"All analysis paths failed: {'; '.join(errors) or 'no API keys or CLI tools configured'}"
     )
 
 
@@ -149,7 +169,6 @@ def _analyze_gemini(demo_id: str, video_path: Path) -> list:
 
 
 def _extract_frames(video_path: Path, frames_dir: Path) -> list[Path]:
-    import subprocess
     frames_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         "ffmpeg", "-i", str(video_path),
@@ -185,6 +204,53 @@ def _analyze_claude(frames: list[Path]) -> list:
         messages=[{"role": "user", "content": content}],
     )
     return extract_json_array(response.content[0].text)
+
+
+def _analyze_gemini_cli(frames: list[Path]) -> list:
+    """Gemini CLI (Google OAuth) — pipes @frame refs via stdin."""
+    _ext = ".cmd" if sys.platform == "win32" else ""
+    bin_ = shutil.which(f"gemini{_ext}")
+    if not bin_:
+        raise RuntimeError("gemini CLI not found")
+    frame_refs = "\n".join(f"@{f}" for f in frames[:20])
+    result = subprocess.run(
+        [bin_, os.environ.get("GEMINI_APPROVAL_FLAG", "--yolo")],
+        input=f"{frame_refs}\n\n{_PROMPT}",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env={**os.environ, "GEMINI_CLI_TRUST_WORKSPACE": "true"},
+        timeout=300,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"gemini CLI exit {result.returncode}: {result.stderr[-500:]}")
+    return extract_json_array(result.stdout)
+
+
+def _analyze_claude_cli(frames: list[Path]) -> list:
+    """Claude CLI (Anthropic OAuth) — uses --output-format json."""
+    bin_ = shutil.which("claude")
+    if not bin_:
+        raise RuntimeError("claude CLI not found")
+    frame_refs = "\n".join(f"@{f}" for f in frames[:20])
+    result = subprocess.run(
+        [bin_, "--dangerously-skip-permissions", "--output-format", "json",
+         "-p", f"{frame_refs}\n\n{_PROMPT}"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=300,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"claude CLI exit {result.returncode}: {result.stderr[-500:]}")
+    try:
+        data = json.loads(result.stdout)
+        text = data.get("result") or result.stdout
+    except json.JSONDecodeError:
+        text = result.stdout
+    return extract_json_array(text)
 
 
 def _analyze_openai(frames: list[Path]) -> list:

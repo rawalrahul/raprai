@@ -221,6 +221,19 @@
       </div>
     </div>
 
+    <div class="sb-section" data-section="demos" id="sb-section-demos">
+      <div class="sb-section-header" onclick="toggleSbSection(this)" role="button" aria-expanded="false" aria-controls="sb-panel-demos">
+        <span class="sb-section-arrow" aria-hidden="true">▶</span>
+        <span class="sb-section-label">Demos</span>
+        <button onclick="event.stopPropagation();demosUpload()" class="sb-section-action" title="Upload video demo">+</button>
+        <button onclick="event.stopPropagation();loadDemosPanel()" class="sb-section-action" title="Refresh" aria-label="Refresh demos list">⟳</button>
+      </div>
+      <div class="sb-section-body" id="sb-panel-demos">
+        <div class="sb-empty">Loading...</div>
+        <div id="demos-upload-progress" style="padding:4px 10px;font-size:.78em;color:var(--text-muted,#888);display:none"></div>
+      </div>
+    </div>
+
   </div><!-- /sb-sections -->
 
   <!-- RAPR Packages — unified panel (Plugins + MCP + Packages) -->
@@ -1439,6 +1452,7 @@ Example:
 <script src="/js/backup.js?v=2"></script>
 <script src="/js/agents.js?v=12"></script>
 <script src="/js/council.js?v=10"></script>
+<script src="/js/demos.js?v=2"></script>
 <script>
 // Register PWA service worker
 if ('serviceWorker' in navigator) {

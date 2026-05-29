@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 
+import helm.state as _st
 from helm.config import logger
 from helm.demos import storage as demo_storage
 from helm.demos.analysis import analyze_demo
@@ -81,15 +82,14 @@ async def demos_run(demo_id: str, background_tasks: BackgroundTasks):
         if not playbook_path or not Path(playbook_path).exists():
             return {"ok": False, "error": "No playbook available — run analysis first"}
         playbook_text = Path(playbook_path).read_text(encoding="utf-8")
-        from helm.session_mgr import focused_session
-        sess = focused_session()
+        sid = _st.focused_id
+        sess = _st.sessions.get(sid) if sid else None
         if not sess:
             return {"ok": False, "error": "No active session to run demo in"}
         from helm.ai_runner.core import process_message
-        background_tasks.add_task(
-            process_message, sess, f"Execute this playbook step by step:\n\n{playbook_text}", {}
-        )
-        return {"ok": True}
+        prompt = f"Execute this playbook step by step:\n\n{playbook_text}"
+        background_tasks.add_task(process_message, prompt, "web", sid)
+        return {"ok": True, "session_id": sid}
     except HTTPException:
         raise
     except Exception as e:
