@@ -15,7 +15,6 @@ from fastapi.staticfiles import StaticFiles
 
 import helm.state as _st
 from helm.config import logger
-from helm.frontend import _HTML
 from helm.paths import user_data_dir
 import helm.auth as _auth
 
@@ -373,18 +372,13 @@ _SETTINGS_KEYS = [
 # ---------------------------------------------------------------------------
 # Separated frontend support
 # ---------------------------------------------------------------------------
-# The backend can serve a separated frontend from a standalone directory.
-# Priority: FRONTEND_DIR env var > frontend2/ > frontend/ > embedded HTML.
-# Set FRONTEND_DIR env var to override auto-detection.
+# The backend serves the separated frontend from frontend2/.
+# Priority: FRONTEND_DIR env var > frontend2/.
 
 if os.environ.get("FRONTEND_DIR"):
     _FRONTEND_DIR = pathlib.Path(os.environ["FRONTEND_DIR"])
-elif (PROJECT_ROOT / "frontend2" / "index.html").exists():
-    _FRONTEND_DIR = PROJECT_ROOT / "frontend2"
-elif (PROJECT_ROOT / "frontend" / "index.html").exists():
-    _FRONTEND_DIR = PROJECT_ROOT / "frontend"
 else:
-    _FRONTEND_DIR = PROJECT_ROOT / "frontend"
+    _FRONTEND_DIR = PROJECT_ROOT / "frontend2"
 
 _USE_SEPARATED_FRONTEND = _FRONTEND_DIR.exists() and (_FRONTEND_DIR / "index.html").exists()
 
@@ -435,10 +429,13 @@ async def index():
     except Exception:
         pass  # If device_link import fails, don't block the app
 
-    # Serve from separated frontend if available, otherwise use embedded HTML
-    if _USE_SEPARATED_FRONTEND:
-        return HTMLResponse(content=(_FRONTEND_DIR / "index.html").read_text(encoding="utf-8"))
-    return HTMLResponse(content=_HTML)
+    # Serve separated frontend (frontend2/)
+    if not _USE_SEPARATED_FRONTEND:
+        return HTMLResponse(
+            content="<h1>Frontend not found</h1><p>frontend2/index.html missing.</p>",
+            status_code=500,
+        )
+    return HTMLResponse(content=(_FRONTEND_DIR / "index.html").read_text(encoding="utf-8"))
 
 
 @app.get("/agent-run/{run_id}", response_class=HTMLResponse)

@@ -44,7 +44,6 @@ echo  (This may take 10-20 minutes)
 echo.
 
 python -m nuitka --standalone --enable-plugin=tk-inter ^
-    --include-data-dir=helm/frontend=helm/frontend ^
     --include-data-files=rapr-logo.png=rapr-logo.png ^
     --include-data-files=logo-watermark-dark.png=logo-watermark-dark.png ^
     --include-data-files=logo-watermark-light.png=logo-watermark-light.png ^
