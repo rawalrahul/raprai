@@ -164,12 +164,12 @@ async def save_default_models(request: Request):
     updated = []
 
     # Only allow setting defaults for REST-API AIs (ollama + integrations)
-    # CLI/OAuth AIs (claude, gemini, codex) don't support model switching
+    # CLI/OAuth AIs (claude, gemini, codex) don't expose reliable model lists.
     _cli_ais = {"claude", "gemini", "codex"}
 
     for ai_key, model_name in body.items():
         if ai_key in _cli_ais:
-            continue  # skip CLI-based AIs
+            continue  # skip CLI-based OAuth AIs
         model_name = (model_name or "").strip()
         if model_name:
             _st.default_models[ai_key] = model_name
@@ -213,19 +213,19 @@ async def integration_models():
             info.setdefault("errors", {})["ollama"] = str(e)
 
         try:
-            info["models"]["claude"] = _fetch_claude_models()
+            info["models"]["claude"] = []
         except Exception as e:
             info["models"]["claude"] = []
             info.setdefault("errors", {})["claude"] = str(e)
 
         try:
-            info["models"]["codex"] = _fetch_openai_models()
+            info["models"]["codex"] = []
         except Exception as e:
             info["models"]["codex"] = []
             info.setdefault("errors", {})["codex"] = str(e)
 
         try:
-            info["models"]["gemini"] = _fetch_gemini_models()
+            info["models"]["gemini"] = []
         except Exception as e:
             info["models"]["gemini"] = []
             info.setdefault("errors", {})["gemini"] = str(e)
@@ -295,17 +295,17 @@ async def integration_models_debug():
             info["ollama"]["error"] = str(e)
 
         try:
-            info["claude"]["models"] = _fetch_claude_models()
+            info["claude"]["error"] = "Model discovery disabled for OAuth CLI"
         except Exception as e:
             info["claude"]["error"] = str(e)
 
         try:
-            info["gemini"]["models"] = _fetch_gemini_models()
+            info["gemini"]["error"] = "Model discovery disabled for OAuth CLI"
         except Exception as e:
             info["gemini"]["error"] = str(e)
 
         try:
-            info["codex"]["models"] = _fetch_openai_models()
+            info["codex"]["error"] = "Model discovery disabled for OAuth CLI"
         except Exception as e:
             info["codex"]["error"] = str(e)
 

@@ -89,6 +89,23 @@ def load_config(config_path: Optional[str] = None) -> dict:
             logger.warning("MCP config: skipping '%s' — no command", server_id)
             continue
 
+        # Detect ${VAR} references whose env value is missing/empty. A command
+        # like "npx -y mcp-remote ${ZAPIER_MCP_URL}" with no URL set would
+        # otherwise launch the bridge with an empty target and fail cryptically.
+        # Such a server is "unconfigured": keep it listed (so the UI can show a
+        # Connect action) but force it un-startable so nothing tries to run it.
+        referenced = _ENV_VAR_RE.findall(command_str)
+        missing = [v for v in referenced if not os.environ.get(v, "").strip()]
+        needs_config = bool(missing)
+
+        # Resolve ${VAR} references in the command itself (e.g. a hosted MCP
+        # URL that embeds a per-user secret kept in the vault, not on disk).
+        command_str = _resolve_env(command_str).strip()
+        if not command_str:
+            logger.warning("MCP config: skipping '%s' — command resolved to empty "
+                           "(missing env var?)", server_id)
+            continue
+
         # Parse command string into list
         # Handle quoted args if needed, but simple split works for most cases
         command = command_str.split()
@@ -103,11 +120,19 @@ def load_config(config_path: Optional[str] = None) -> dict:
             "type": "subprocess",
             "command": command,
             "env": env,
-            "enabled": enabled,
+            # Unconfigured servers are never reported as enabled, so neither the
+            # auto-starter nor a reload will try to launch them.
+            "enabled": enabled and not needs_config,
+            "needs_config": needs_config,
+            "missing_env": missing,
         }
 
-        logger.info("MCP config: loaded '%s' [%s] — %s",
-                     server_id, status, command_str)
+        if needs_config:
+            logger.info("MCP config: '%s' needs configuration — missing env: %s "
+                        "(not started)", server_id, ", ".join(missing))
+        else:
+            logger.info("MCP config: loaded '%s' [%s] — %s",
+                         server_id, status, command_str)
 
     logger.info("MCP config: %d servers loaded, %d enabled",
                 len(servers), sum(1 for s in servers.values() if s["enabled"]))

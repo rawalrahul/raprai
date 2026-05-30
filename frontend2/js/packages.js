@@ -181,7 +181,8 @@ function renderInstalledPackages(){
       items.push({_source:'mcp', _data:s, name:s.id.replace(/_/g,' '), id:s.id, type:'mcp',
         emoji: s.running ? '🟢' : (s.enabled ? '🟡' : '⚪'),
         description: s.running ? (s.summary||'Running') : 'Server not running',
-        enabled:s.enabled, running:s.running, tool_count:s.tool_count||0});
+        enabled:s.enabled, running:s.running, tool_count:s.tool_count||0,
+        connector:s.connector, connected:s.connected});
     });
   }
 
@@ -276,6 +277,33 @@ function _renderInstalledCard(item){
     const s = item._data;
     const statusCls = s.running ? 'running' : 'stopped';
     const statusTxt = s.running ? 'Running' : (s.enabled ? 'Starting...' : 'Disabled');
+
+    // Zapier: universal connector — connect via pasted MCP URL, not a toggle.
+    if(s.connector === 'zapier'){
+      const connected = !!s.connected;
+      const headerAction = connected
+        ? `<span class="plg-header-connected">Connected</span>`
+        : `<button class="plg-header-connect" onclick="event.stopPropagation();connectZapier()" title="Connect">Connect</button>`;
+      const zStatus = s.running ? 'Running' : (connected ? 'Starting...' : 'Not connected');
+      return `
+      <div class="plg-accordion" data-mcp-id="${id}">
+        <div class="plg-accordion-header" onclick="togglePluginAccordion(this)">
+          <span class="plg-accordion-arrow">▶</span>
+          <span class="plg-emoji">⚡</span>
+          <span class="plg-title">Zapier</span>
+          <span class="mcp-status ${statusCls}">${zStatus}</span> ${typeBadge}
+          <div class="plg-header-right">${headerAction}</div>
+        </div>
+        <div class="plg-accordion-body">
+          <div class="plg-body-desc">Universal connector — one link unlocks 8,000+ apps via Zapier MCP.</div>
+          <div class="plg-body-meta">
+            <span class="mcp-tool-count">${s.running ? (s.tool_count||0)+' tools' : (connected ? 'Waiting...' : 'Paste your Zapier MCP URL')}</span>
+            ${connected ? `<button class="plg-disconnect-btn" onclick="event.stopPropagation();disconnectZapier()" title="Disconnect">Disconnect</button>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }
+
     const toggle = `<button class="toggle-switch ${s.enabled?'on':''}"
       onclick="event.stopPropagation();toggleMcpServer('${id}',${!s.enabled})"
       title="${s.enabled?'Disable':'Enable'}"></button>`;
@@ -845,6 +873,27 @@ function disconnectPlugin(id){
       if(d.ok) loadInstalledPackages();
     }).catch(()=>alert('Failed to disconnect plugin'));
 }
+
+function connectZapier(){
+  const w = 540, h = 640;
+  const left = (screen.width - w) / 2, top = (screen.height - h) / 2;
+  window.open('/mcp/zapier/connect', 'rapr-connect',
+    `width=${w},height=${h},left=${left},top=${top},toolbar=no,menubar=no`);
+}
+
+function disconnectZapier(){
+  if(!confirm('Disconnect Zapier? Your stored MCP URL will be cleared and the server stopped.')) return;
+  fetch('/mcp/zapier/disconnect',{method:'POST', headers:_rpHeaders()})
+    .then(r=>r.json()).then(d=>{ if(d.ok) loadInstalledPackages(); })
+    .catch(()=>alert('Failed to disconnect Zapier'));
+}
+
+// Refresh the installed list when a connect popup reports success.
+window.addEventListener('message', (e)=>{
+  if(e.data && e.data.type === 'plugin-oauth-done' && e.data.success){
+    setTimeout(()=>loadInstalledPackages(), 500);
+  }
+});
 
 function toggleMcpServer(id, enable){
   fetch('/mcp/servers/'+id+'/toggle',{

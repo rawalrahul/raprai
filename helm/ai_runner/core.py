@@ -730,6 +730,23 @@ async def process_message(text: str, source: str = "web",
         arg_lower = arg.lower()
         ai_key = sess.get("ai") or "shell"
 
+        if ai_key in ("claude", "gemini", "codex"):
+            sess["model"] = None
+            try:
+                from helm.model_prefs import set_model_pref
+                set_model_pref(ai_key, None)
+            except Exception:
+                pass
+            await push_state()
+            msg = (
+                f"**Model switching is disabled for {ai_key.title()} OAuth CLI sessions.**\n\n"
+                "Those CLIs do not expose a reliable account-accurate model list through OAuth here, "
+                "and invalid model overrides can make headless runs fail. Use the CLI's own default "
+                "model selection instead."
+            )
+            await push_message("system", msg, source=source, session_id=sid)
+            return msg
+
         # ── Shell / OpenAI: model switching not supported ──────
         if ai_key in ("shell", "openai"):
             msg = (
@@ -739,22 +756,16 @@ async def process_message(text: str, source: str = "web",
             await push_message("system", msg, source=source, session_id=sid)
             return msg
 
-        # ── Claude / Gemini / Antigravity / Codex: support --model flag ──────
-        if ai_key in ("claude", "gemini", "antigravity", "codex"):
+        # ── Antigravity: support --model flag ─────────────────────────
+        if ai_key in ("antigravity",):
             if not arg or arg_lower in ("list", "ls", "show", "?"):
                 current_model = sess.get("model") or "(default)"
                 try:
                     from helm.web_routes.helpers import (
-                        _fetch_claude_models,
-                        _fetch_gemini_models,
                         _fetch_antigravity_models,
-                        _fetch_openai_models,
                     )
                     _fetch_fn = {
-                        "claude": _fetch_claude_models,
-                        "gemini": _fetch_gemini_models,
                         "antigravity": _fetch_antigravity_models,
-                        "codex": _fetch_openai_models,
                     }[ai_key]
                     available = await asyncio.to_thread(_fetch_fn)
                 except Exception:

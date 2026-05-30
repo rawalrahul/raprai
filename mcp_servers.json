@@ -1,1 +1,7 @@
-{}
+{
+  "zapier": {
+    "type": "subprocess",
+    "command": "npx -y mcp-remote ${ZAPIER_MCP_URL}",
+    "enabled": false
+  }
+}
