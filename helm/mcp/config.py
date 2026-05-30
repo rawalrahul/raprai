@@ -98,6 +98,10 @@ def load_config(config_path: Optional[str] = None) -> dict:
         missing = [v for v in referenced if not os.environ.get(v, "").strip()]
         needs_config = bool(missing)
 
+        # Keep the unresolved template for logging — the resolved form may embed
+        # secrets (e.g. Zapier MCP URL contains an API key).
+        log_command_str = command_str
+
         # Resolve ${VAR} references in the command itself (e.g. a hosted MCP
         # URL that embeds a per-user secret kept in the vault, not on disk).
         command_str = _resolve_env(command_str).strip()
@@ -132,7 +136,7 @@ def load_config(config_path: Optional[str] = None) -> dict:
                         "(not started)", server_id, ", ".join(missing))
         else:
             logger.info("MCP config: loaded '%s' [%s] — %s",
-                         server_id, status, command_str)
+                         server_id, status, log_command_str)
 
     logger.info("MCP config: %d servers loaded, %d enabled",
                 len(servers), sum(1 for s in servers.values() if s["enabled"]))
