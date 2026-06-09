@@ -43,6 +43,13 @@ echo  Starting Nuitka compilation...
 echo  (This may take 10-20 minutes)
 echo.
 
+:: -- Optional semantic vector memory: bundle ONLY if fastembed is installed --
+::    On build envs without it (e.g. Python 3.14, no onnxruntime wheel) these
+::    flags are skipped and the app ships with keyword/FTS memory only.
+set "VEC_FLAGS="
+python -c "import fastembed, onnxruntime" 2>nul && set "VEC_FLAGS=--include-package=fastembed --include-package=onnxruntime --include-package=tokenizers --include-package=numpy --include-package=huggingface_hub --include-package-data=onnxruntime --include-package-data=fastembed"
+if defined VEC_FLAGS (echo  Semantic vector memory: ENABLED in this build) else (echo  Semantic vector memory: NOT bundled - keyword/FTS only)
+
 python -m nuitka --standalone --enable-plugin=tk-inter ^
     --include-data-files=rapr-logo.png=rapr-logo.png ^
     --include-data-files=logo-watermark-dark.png=logo-watermark-dark.png ^
@@ -59,6 +66,7 @@ python -m nuitka --standalone --enable-plugin=tk-inter ^
     --nofollow-import-to=helm.plugins.* ^
     --nofollow-import-to=google.genai ^
     --include-package=google.genai ^
+    %VEC_FLAGS% ^
     web_app.py
 
 if errorlevel 1 (

@@ -71,3 +71,13 @@ comtypes>=1.2.0; sys_platform == "win32"
 # ─────────────────────────────────────────────────────────
 # openai-whisper>=20231117
 static-ffmpeg>=2.5
+
+# ─────────────────────────────────────────────────────────
+# Semantic vector memory (P0) — OPTIONAL.
+# Local ONNX embeddings (no API key). If absent, memory automatically
+# falls back to keyword/FTS recall — nothing breaks.
+# Heavy: pulls onnxruntime + tokenizers + numpy. The version marker keeps
+# `pip install -r` from failing on Pythons that lack onnxruntime wheels
+# (e.g. 3.14); relax it once wheels exist for your target runtime.
+# ─────────────────────────────────────────────────────────
+fastembed>=0.3.6 ; python_version < "3.13"

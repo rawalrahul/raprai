@@ -550,16 +550,15 @@ function renderMessage(msg) {
 
   if (msg.role === 'system') {
     el.innerHTML = `
-      <div class="chat-avatar system">S</div>
       <div class="chat-bubble">
         <div class="chat-content">${escHtml(msg.content)}</div>
       </div>
     `;
   } else if (msg.role === 'user') {
-    const source = msg.source === 'telegram' ? ' (Telegram)' : msg.source === 'voice' ? ' (Voice)' : '';
+    const source = msg.source === 'telegram' ? ' · Telegram' : msg.source === 'voice' ? ' · Voice' : '';
     el.innerHTML = `
-      <div class="chat-avatar user">U</div>
       <div class="chat-bubble">
+        <div class="chat-role">You</div>
         <div class="chat-content">${escHtml(msg.content)}</div>
         <div class="chat-metadata">
           <span class="chat-timestamp">${formatTime(msg.timestamp)}${source}</span>
@@ -569,13 +568,11 @@ function renderMessage(msg) {
   } else if (msg.role === 'assistant') {
     const aiName = session?.ai_name || 'AI';
     const aiColor = session?.ai_color || 'var(--color-claude)';
-    const initials = aiName.substring(0, 2).toUpperCase();
     el.innerHTML = `
-      <div class="chat-avatar assistant" style="background:${aiColor}">${initials}</div>
       <div class="chat-bubble">
-        <div class="chat-content">${escHtml(msg.content)}</div>
+        <div class="chat-role"><span class="chat-dot" style="background:${aiColor}"></span>${escHtml(aiName)}</div>
+        <div class="chat-content" style="border-left-color:${aiColor}">${escHtml(msg.content)}</div>
         <div class="chat-metadata">
-          <span>${escHtml(aiName)}</span>
           <span class="chat-timestamp">${formatTime(msg.timestamp)}</span>
         </div>
       </div>
@@ -585,6 +582,55 @@ function renderMessage(msg) {
   container.appendChild(el);
   updateEmptyState();
   scrollChat();
+}
+
+// ── Live activity timeline — populated by 'activity' WS events (live CLI progress) ──
+function _activityCard() {
+  const container = $('messages');
+  if (!container) return null;
+  let card = document.getElementById('activity-card');
+  if (!card) {
+    card = document.createElement('div');
+    card.id = 'activity-card';
+    card.className = 'activity-card';
+    card.innerHTML = `
+      <div class="activity-head">
+        <span class="activity-spinner"></span>
+        <span class="activity-title">Working…</span>
+      </div>
+      <div class="activity-steps" id="activity-steps"></div>`;
+    container.appendChild(card);
+    scrollChat();
+  }
+  return card;
+}
+
+function onActivity(d) {
+  if (!d) return;
+  if (d.session_id && State.focusedId && d.session_id !== State.focusedId) return;
+  if (d.phase === 'done') { clearActivity(); return; }
+  const card = _activityCard();
+  if (!card) return;
+  if (d.phase === 'step') {
+    const steps = document.getElementById('activity-steps');
+    if (!steps) return;
+    const row = document.createElement('div');
+    row.className = 'activity-step';
+    const tick = document.createElement('span'); tick.className = 'activity-tick';
+    const label = document.createElement('span'); label.className = 'activity-label';
+    label.textContent = d.label || 'Working';
+    row.appendChild(tick); row.appendChild(label);
+    steps.appendChild(row);
+  } else if (d.phase === 'note') {
+    const title = card.querySelector('.activity-title');
+    if (title && d.label) title.textContent = d.label;
+  }
+  scrollChat();
+}
+
+function clearActivity() {
+  const card = document.getElementById('activity-card');
+  if (card) card.remove();
 }
 
 /**
@@ -1538,6 +1584,10 @@ function initWebSocket() {
   WS.on('council_round_result', (d) => { if (typeof councilOnRoundResult  === 'function') councilOnRoundResult(d);  });
   WS.on('council_completed',    (d) => { if (typeof councilOnCompleted    === 'function') councilOnCompleted(d);    });
   WS.on('council_stopped',      (d) => { if (typeof councilOnStopped      === 'function') councilOnStopped(d);      });
+
+  WS.on('activity', (d) => { if (typeof onActivity === 'function') onActivity(d); });
+  WS.on('message',  (d) => { if (typeof clearActivity === 'function') clearActivity(); });
+  WS.on('thinking', (d) => { if (d && d.active === false && typeof clearActivity === 'function') clearActivity(); });
 
   WS.on('error', (err) => {
     console.error('[RAPR AI] WebSocket error:', err);

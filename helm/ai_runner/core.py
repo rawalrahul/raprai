@@ -1445,6 +1445,41 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
             mcp_config=_mcp_config_path,
         )
 
+        # ── Live-progress helper (default OFF; RAPR_LIVE_PROGRESS=1) ──────────
+        # Streams Claude stream-json step events to the UI for a live activity
+        # timeline. The final answer always comes from the result event via the
+        # unchanged parser, and any problem falls back to the normal blocking run.
+        _loop = asyncio.get_running_loop()
+
+        def _emit(ev, _sid=sid, _loop=_loop):
+            try:
+                from helm.broadcast import broadcast as _b
+                asyncio.run_coroutine_threadsafe(
+                    _b({"type": "activity", "session_id": _sid, "ai": "claude", **ev}),
+                    _loop,
+                )
+            except Exception:
+                pass
+
+        async def _claude_raw(_cmd):
+            try:
+                from helm.ai_runner.streaming import (
+                    live_progress_enabled, run_claude_stream, StreamUnavailable,
+                )
+                if live_progress_enabled():
+                    _to = CLAUDE_TIMEOUT if CLAUDE_TIMEOUT > 0 else None
+                    try:
+                        return await asyncio.to_thread(
+                            run_claude_stream, _cmd, cwd, sess, _emit, _to,
+                        )
+                    except StreamUnavailable as _su:
+                        logger.info("live progress unavailable, using blocking run: %s", _su)
+                    except Exception as _e:
+                        logger.warning("live progress error, using blocking run: %s", _e)
+            except Exception as _e2:
+                logger.warning("live progress disabled (import): %s", _e2)
+            return await asyncio.to_thread(run_ai_popen, _cmd, cwd, "claude", sess)
+
         if _needs_tools:
             # Agent loop wrapper: watches for <tool_call> XML in output.
             # If Claude uses native MCP for everything, wrapper exits on
@@ -1458,7 +1493,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
                     auto_approve=True,
                     mcp_config=_mcp_config_path,
                 )
-                raw = await asyncio.to_thread(run_ai_popen, _cmd, cwd, "claude", sess)
+                raw = await _claude_raw(_cmd)
                 parsed = parse_claude_json_output(raw)
                 if parsed.get("input_tokens") is not None or parsed.get("output_tokens") is not None:
                     sess["_last_tokens"] = {
@@ -1481,7 +1516,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         else:
             # No MCP servers — pure Claude, no tool wrappers needed
             before = await asyncio.to_thread(snapshot_dir, cwd)
-            raw_output = await asyncio.to_thread(run_ai_popen, cmd, cwd, "claude", sess)
+            raw_output = await _claude_raw(cmd)
             after  = await asyncio.to_thread(snapshot_dir, cwd)
 
             parsed = parse_claude_json_output(raw_output)

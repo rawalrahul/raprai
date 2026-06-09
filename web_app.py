@@ -245,6 +245,15 @@ async def _main():
     _thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
     _thread_pool.submit(rebuild_hist_cache_sync)
 
+    # Index any pre-existing memories for semantic recall (idempotent, best-effort).
+    # No-op if the vector layer is disabled/unavailable; cheap once the back-catalogue
+    # is indexed. Runs in the background so it never delays startup.
+    try:
+        from helm.memory import backfill_vectors
+        _thread_pool.submit(backfill_vectors)
+    except Exception as exc:
+        logger.debug("semantic memory backfill not scheduled: %s", exc)
+
     if not BOT_TOKEN:
         logger.warning("TELEGRAM_BOT_TOKEN not set — Telegram bot disabled.")
 

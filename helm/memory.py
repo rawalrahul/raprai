@@ -30,6 +30,12 @@ from typing import Optional
 
 from helm.config import logger
 
+# Optional semantic (vector) memory layer. Falls back to keyword/FTS if absent.
+try:
+    from helm import memory_vector as _mv
+except Exception:  # pragma: no cover
+    _mv = None
+
 # ---------------------------------------------------------------------------
 # Categories — keep this small and high-signal
 # ---------------------------------------------------------------------------
@@ -178,6 +184,10 @@ def add_memory(
     mid = cur.lastrowid
     logger.info("Memory added #%d: [%s] %s", mid, category, content[:80])
 
+    # Best-effort semantic indexing (no-op if vector layer disabled/unavailable)
+    if _mv is not None:
+        _mv.upsert("mem", mid, content)
+
     # Enforce cap — auto-archive excess memories
     enforce_memory_cap()
 
@@ -220,7 +230,13 @@ def edit_memory(memory_id: int, content: str = "", category: str = "") -> bool:
     vals.append(memory_id)
     cur = db.execute(f"UPDATE memories SET {', '.join(parts)} WHERE id = ?", vals)
     db.commit()
-    return cur.rowcount > 0
+    ok = cur.rowcount > 0
+
+    # Re-index for semantic recall when content changed (best-effort)
+    if ok and plaintext_content and _mv is not None:
+        _mv.upsert("mem", memory_id, plaintext_content)
+
+    return ok
 
 
 def delete_memory(memory_id: int) -> bool:
@@ -228,7 +244,10 @@ def delete_memory(memory_id: int) -> bool:
     db = _db()
     cur = db.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
     db.commit()
-    return cur.rowcount > 0
+    deleted = cur.rowcount > 0
+    if deleted and _mv is not None:
+        _mv.delete("mem", memory_id)
+    return deleted
 
 
 def pin_memory(memory_id: int, pinned: bool = True) -> bool:
@@ -284,11 +303,15 @@ def list_memories(
 
 
 def search_memories(query: str, limit: int = 20) -> list[dict]:
-    """Search memories by keyword matching.
+    """Search memories by keyword matching, blended with semantic recall.
 
     First searches the ``search_text`` column (unencrypted keywords) for fast
     filtering, then decrypts content for display.  Falls back to scanning
     decrypted content if search_text is empty (pre-v8 rows).
+
+    When the optional vector layer is available, semantic (embedding) hits are
+    merged in so related memories surface even without shared keywords. The
+    whole vector path is guarded — any failure falls back to keyword ranking.
 
     Filters out stop words so common words like 'the', 'is', 'a' don't
     pollute results.  Falls back to all terms if stop-word filtering
@@ -340,7 +363,44 @@ def search_memories(query: str, limit: int = 20) -> list[dict]:
             d["_score"] = score
             scored.append(d)
 
+    # Keyword ranking (always available).
     scored.sort(key=lambda x: (-x["_score"], -x.get("pinned", 0), -x.get("use_count", 0)))
+
+    # Hybrid: blend in semantic (vector) recall when available. Fully guarded —
+    # any failure falls back to the keyword ranking above. Surfaces memories
+    # that are semantically related even when they share no literal keywords.
+    if _mv is not None:
+        try:
+            if _mv.is_enabled():
+                allowed = {r["id"] for r in rows}
+                vec_hits = _mv.search(query, limit=max(limit * 3, 30),
+                                      namespace="mem", allowed_ids=allowed)
+                if vec_hits:
+                    raw_by_id = {r["id"]: r for r in rows}
+                    max_kw = max((d["_score"] for d in scored), default=0.0) or 1.0
+                    combined: dict = {}
+                    for d in scored:
+                        d["_kw"] = d["_score"] / max_kw
+                        d["_vec"] = 0.0
+                        combined[d["id"]] = d
+                    for rid, vscore in vec_hits:
+                        if rid in combined:
+                            combined[rid]["_vec"] = vscore
+                        elif rid in raw_by_id:
+                            dd = _decrypt_row(dict(raw_by_id[rid]))
+                            dd["_kw"] = 0.0
+                            dd["_vec"] = vscore
+                            combined[rid] = dd
+                    for d in combined.values():
+                        d["_score"] = 0.5 * d.get("_kw", 0.0) + 0.5 * d.get("_vec", 0.0)
+                    merged = sorted(
+                        combined.values(),
+                        key=lambda x: (-x["_score"], -x.get("pinned", 0), -x.get("use_count", 0)),
+                    )
+                    return merged[:limit]
+        except Exception as exc:
+            logger.debug("memory: hybrid vector merge skipped (%s)", exc)
+
     return scored[:limit]
 
 
@@ -756,3 +816,40 @@ def apply_memory_decay() -> dict:
     except Exception as e:
         logger.warning("Memory decay failed: %s", e)
         return {"decayed": 0, "archived": 0}
+
+
+# ---------------------------------------------------------------------------
+# Semantic vector backfill — index pre-existing memories (idempotent)
+# ---------------------------------------------------------------------------
+
+def backfill_vectors(limit: int = 5000) -> int:
+    """Index active memories that don't yet have a semantic vector.
+
+    Idempotent and best-effort: a no-op if the vector layer is unavailable,
+    and only embeds memories missing from the vector store — so calling it on
+    every app start is cheap once the back-catalogue is indexed.
+
+    Returns the number of memories newly indexed.
+    """
+    if _mv is None or not _mv.is_enabled():
+        return 0
+    try:
+        db = _db()
+        rows = db.execute(
+            "SELECT id, content FROM memories WHERE archived = 0 LIMIT ?",
+            (limit,),
+        ).fetchall()
+        if not rows:
+            return 0
+        have = _mv.indexed_ids("mem")
+        pending = [
+            (r["id"], _decrypt(r["content"] or ""))
+            for r in rows if r["id"] not in have
+        ]
+        pending = [(i, c) for (i, c) in pending if c]
+        if not pending:
+            return 0
+        return _mv.backfill("mem", pending)
+    except Exception as exc:
+        logger.warning("memory: vector backfill failed: %s", exc)
+        return 0

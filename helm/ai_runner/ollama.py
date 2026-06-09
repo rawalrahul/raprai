@@ -46,17 +46,22 @@ _OLLAMA_TOOL_SUPPORT: dict[str, bool] = {
     "qwen3":            True,
     "llama3.1":         True,
     "llama3.2":         True,
-    "llama3.2-vision":  True,
     "llama3.3":         True,
     "mistral-nemo":     True,
+    "mistral-small3.1": True,   # vision + tools (good for computer use)
+    "mistral-small3.2": True,   # vision + tools (good for computer use)
     "mistral":          True,
     "command-r":        True,
     "granite3":         True,
     "firefunction":     True,
     "smollm2":          True,
-    "qwen2-vl":         True,
-    "qwen2.5vl":        True,
-    "minicpm-v":        True,
+    # Vision-first models below carry NO `tools` capability tag in Ollama —
+    # /api/chat rejects requests with a `tools` key ("does not support tools").
+    # They must be False so the agent loop never passes tools to them.
+    "llama3.2-vision":  False,
+    "qwen2-vl":         False,
+    "qwen2.5vl":        False,
+    "minicpm-v":        False,
     "deepseek-r1":      False,
     "deepseek-v":       False,
     "llama2":           False,
@@ -78,6 +83,8 @@ _OLLAMA_TOOL_SUPPORT: dict[str, bool] = {
 # Vision-capable models — can receive base64 images in messages
 _OLLAMA_VISION_SUPPORT: dict[str, bool] = {
     "llama3.2-vision":  True,
+    "mistral-small3.1": True,   # vision + tools — preferred for computer use
+    "mistral-small3.2": True,   # vision + tools — preferred for computer use
     "qwen2-vl":         True,
     "qwen2.5vl":        True,
     "minicpm-v":        True,
@@ -90,25 +97,34 @@ _OLLAMA_VISION_SUPPORT: dict[str, bool] = {
 }
 
 
+def _longest_prefix_match(m: str, table: dict[str, bool]) -> bool | None:
+    """Return the value for the LONGEST matching prefix, or None if none match.
+
+    Longest-match matters: 'llama3.2-vision' starts with both 'llama3.2' and
+    'llama3.2-vision'. First-match would wrongly inherit the 'llama3.2' value;
+    the more specific 'llama3.2-vision' entry must win.
+    """
+    best: bool | None = None
+    best_len = -1
+    for prefix, supported in table.items():
+        if m.startswith(prefix) and len(prefix) > best_len:
+            best, best_len = supported, len(prefix)
+    return best
+
+
 def ollama_model_supports_tools(model: str) -> bool | None:
     """
     Return True if the model is known to support tool calling,
     False if known not to, or None if unknown.
     """
     m = model.lower().split(":")[0]
-    for prefix, supported in _OLLAMA_TOOL_SUPPORT.items():
-        if m.startswith(prefix):
-            return supported
-    return None
+    return _longest_prefix_match(m, _OLLAMA_TOOL_SUPPORT)
 
 
 def ollama_model_supports_vision(model: str) -> bool:
     """Return True if the model can process images (multimodal)."""
     m = model.lower().split(":")[0]
-    for prefix, supported in _OLLAMA_VISION_SUPPORT.items():
-        if m.startswith(prefix):
-            return supported
-    return False
+    return _longest_prefix_match(m, _OLLAMA_VISION_SUPPORT) is True
 
 
 _OLLAMA_TOOLS = [
@@ -809,7 +825,9 @@ def _ollama_system_prompt(cwd: str, skill_content: str = "", user_prompt: str = 
                     "computer_click_control, computer_type_in_control) which work "
                     "without seeing the screen. Use computer_screenshot only when "
                     "you need to extract text (OCR will be attempted automatically).\n"
-                    "Recommended vision-capable models: llama3.2-vision:11b, qwen2-vl:7b\n"
+                    "For full Computer Use (vision + tool calling in one model), use "
+                    "mistral-small3.1 — most other Ollama vision models (llama3.2-vision, "
+                    "qwen2.5vl) cannot call tools.\n"
                 )
     except Exception:
         pass
@@ -975,14 +993,31 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
         model = "qwen3:4b"
 
     tool_support = ollama_model_supports_tools(model)
+    from helm.builtin_tools import is_computer_use_enabled
+    _cu_on = is_computer_use_enabled()
     if tool_support is False:
-        await push_message(
-            "system",
-            f"⚠️ **{model}** does not support tool calling — file creation tools are disabled.\n"
-            f"Switch to a compatible model (e.g. `qwen2.5-coder:7b`, `qwen3:4b`, `llama3.1:8b`) "
-            f"via `/model` to enable tools.",
-            source=source, session_id=sid,
-        )
+        if _cu_on:
+            # Computer Use needs BOTH vision + tools. On Ollama only the
+            # mistral-small3.x family carries both tags; the popular vision
+            # models (llama3.2-vision, qwen2.5vl, minicpm-v) are vision-only
+            # and Ollama's /api/chat rejects any request that includes tools.
+            await push_message(
+                "system",
+                f"⚠️ **{model}** is vision-capable but does NOT support tool calling on Ollama, "
+                f"so Computer Use (and all file tools) cannot work with it.\n"
+                f"Computer Use needs a model with BOTH vision **and** tools. "
+                f"Switch via `/model` to **`mistral-small3.1`** (or `mistral-small3.2`), "
+                f"then `ollama pull mistral-small3.1`.",
+                source=source, session_id=sid,
+            )
+        else:
+            await push_message(
+                "system",
+                f"⚠️ **{model}** does not support tool calling — file creation tools are disabled.\n"
+                f"Switch to a compatible model (e.g. `qwen2.5-coder:7b`, `qwen3:4b`, `llama3.1:8b`) "
+                f"via `/model` to enable tools.",
+                source=source, session_id=sid,
+            )
     elif tool_support is None:
         await push_message(
             "system",
@@ -1086,6 +1121,22 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
             logger.warning(
                 "Ollama API returned error (%s) — falling back to CLI", api_error
             )
+            # "does not support tools" while Computer Use is on means the bare
+            # CLI fallback has no computer/file tools — it would silently do
+            # nothing useful. Tell the user to switch to a vision+tools model.
+            if _cu_on and "does not support tools" in api_error.lower():
+                await push_message(
+                    "system",
+                    f"⚠️ **{model}** rejected tool calls (`{api_error.strip()}`), so Computer Use "
+                    f"cannot run. Switch via `/model` to **`mistral-small3.1`** "
+                    f"(vision + tools) and `ollama pull mistral-small3.1`.",
+                    source=source, session_id=sid,
+                )
+                final_output = (
+                    f"Computer Use is unavailable: **{model}** does not support tool calling "
+                    f"on Ollama. Use a vision+tools model like `mistral-small3.1`."
+                )
+                break
             cli_text = inject_skill_prefix(text, ai=sess.get("ai", "ollama"))
             cmd = _st.integrations["ollama"]["build_command"](
                 cli_text, model=sess.get("model")

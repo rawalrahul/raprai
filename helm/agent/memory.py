@@ -14,6 +14,12 @@ from typing import Optional
 from helm.config import logger
 from helm.db import get_db
 
+# Optional semantic (vector) memory layer. Falls back to FTS/LIKE if absent.
+try:
+    from helm import memory_vector as _mv
+except Exception:  # pragma: no cover
+    _mv = None
+
 _WRITE_LOCK = asyncio.Lock()
 
 # ---------------------------------------------------------------------------
@@ -77,12 +83,15 @@ async def store_node_output(agent_id: str, node_id: str, run_id: str,
     async with _WRITE_LOCK:
         try:
             db = get_db()
-            db.execute(
+            cur = db.execute(
                 "INSERT INTO agent_node_outputs (agent_id, node_id, run_id, title, output, created_at)"
                 " VALUES (?, ?, ?, ?, ?, ?)",
                 (agent_id, node_id, run_id, title, output[:8000], time.time()),
             )
             db.commit()
+            # Best-effort semantic indexing of this output (no-op if disabled)
+            if _mv is not None:
+                _mv.upsert(f"agent:{agent_id}", cur.lastrowid, f"{title}\n{output[:4000]}")
         except Exception as exc:
             logger.warning("memory Layer1 store failed: %s", exc)
 
@@ -95,10 +104,10 @@ def query_past_outputs(agent_id: str, text: str, limit: int = 5) -> list[dict]:
     _ensure_schema()
     try:
         db = get_db()
-        # Try FTS5 first
+        # --- keyword candidates (FTS5 first, LIKE fallback) ---
         try:
             rows = db.execute(
-                "SELECT title, output, run_id, node_id, created_at"
+                "SELECT id, title, output, run_id, node_id, created_at"
                 " FROM agent_node_outputs_fts"
                 " WHERE agent_id = ? AND agent_node_outputs_fts MATCH ?"
                 " ORDER BY rank LIMIT ?",
@@ -108,22 +117,53 @@ def query_past_outputs(agent_id: str, text: str, limit: int = 5) -> list[dict]:
             # FTS5 not available — fall back to LIKE
             pattern = f"%{text[:50]}%"
             rows = db.execute(
-                "SELECT title, output, run_id, node_id, created_at"
+                "SELECT id, title, output, run_id, node_id, created_at"
                 " FROM agent_node_outputs"
                 " WHERE agent_id = ? AND (title LIKE ? OR output LIKE ?)"
                 " ORDER BY created_at DESC LIMIT ?",
                 (agent_id, pattern, pattern, limit),
             ).fetchall()
-        return [
-            {
+
+        results: dict = {}
+        order: list = []
+        for r in rows:
+            results[r["id"]] = {
                 "title": r["title"],
                 "output": r["output"],
                 "run_id": r["run_id"],
                 "node_id": r["node_id"],
                 "created_at": r["created_at"],
             }
-            for r in rows
-        ]
+            order.append(r["id"])
+
+        # --- semantic candidates (optional, guarded) ---
+        if _mv is not None:
+            try:
+                if _mv.is_enabled():
+                    vec_hits = _mv.search(text, limit=limit, namespace=f"agent:{agent_id}")
+                    if vec_hits:
+                        missing = [rid for rid, _ in vec_hits if rid not in results]
+                        if missing:
+                            ph = ",".join("?" * len(missing))
+                            for e in db.execute(
+                                "SELECT id, title, output, run_id, node_id, created_at"
+                                f" FROM agent_node_outputs WHERE id IN ({ph})",
+                                missing,
+                            ).fetchall():
+                                results[e["id"]] = {
+                                    "title": e["title"],
+                                    "output": e["output"],
+                                    "run_id": e["run_id"],
+                                    "node_id": e["node_id"],
+                                    "created_at": e["created_at"],
+                                }
+                        # Semantically-ranked hits first, then remaining keyword hits.
+                        vec_order = [rid for rid, _ in vec_hits if rid in results]
+                        order = vec_order + [i for i in order if i not in vec_order]
+            except Exception as exc:
+                logger.debug("agent memory: vector augment skipped (%s)", exc)
+
+        return [results[i] for i in order[:limit] if i in results]
     except Exception as exc:
         logger.warning("memory Layer1 query failed: %s", exc)
         return []

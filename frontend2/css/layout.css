@@ -582,78 +582,81 @@
 
 .chat-message {
   display: flex;
-  gap: var(--sp-4);
   animation: slide-up var(--duration-slow) var(--ease-out);
 }
 
 .chat-message.user {
-  flex-direction: row-reverse;
+  justify-content: flex-end;
+}
+
+.chat-message.assistant {
+  justify-content: flex-start;
 }
 
 .chat-message.system {
   justify-content: center;
-  gap: 0;
 }
 
-.chat-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-md);
+/* Sender label — states clearly who is speaking, above the message */
+.chat-role {
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-bold);
-  flex-shrink: 0;
-  color: white;
-}
-
-.chat-avatar.user {
-  background: var(--color-primary);
-}
-
-.chat-avatar.assistant {
-  background: var(--color-claude);
-}
-
-.chat-avatar.system {
-  width: 24px;
-  height: 24px;
-  background: var(--bg-tertiary);
-  color: var(--text-tertiary);
+  gap: 6px;
   font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-wide);
+  color: var(--text-secondary);
+}
+
+.chat-message.user .chat-role {
+  justify-content: flex-end;
+  color: var(--color-primary);
+}
+
+.chat-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
 }
 
 .chat-bubble {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
-  max-width: 85%;
+  gap: var(--sp-2);
+  max-width: 80%;
+  min-width: 0;
 }
 
 .chat-message.system .chat-bubble {
   max-width: 100%;
-  gap: var(--sp-2);
+  align-items: center;
 }
 
 .chat-content {
-  padding: var(--sp-3) var(--sp-4);
-  border-radius: var(--radius-lg);
   line-height: var(--leading-relaxed);
   word-wrap: break-word;
   overflow-wrap: break-word;
 }
 
+/* You — restrained right-aligned accent block (deliberately not an iMessage bubble) */
 .chat-message.user .chat-content {
   background: var(--color-primary-subtle);
   color: var(--text-primary);
-  border-radius: 16px 4px 16px 16px;
+  font-size: var(--text-base);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-lg);
+  border: 0.5px solid var(--border-default);
 }
 
+/* AI — flat, open, comfortable reading size with a provider-coloured spine */
 .chat-message.assistant .chat-content {
   background: transparent;
   color: var(--text-primary);
-  border-radius: 4px 16px 16px 16px;
+  font-size: var(--text-md);
+  padding: var(--sp-1) 0 var(--sp-1) var(--sp-4);
+  border-left: 2px solid var(--color-claude);
+  border-radius: 0;
 }
 
 .chat-message.system .chat-content {
@@ -661,13 +664,15 @@
   color: var(--text-tertiary);
   font-size: var(--text-sm);
   padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--radius-md);
+  text-align: center;
 }
 
 .chat-content code {
   background: var(--bg-tertiary);
   padding: 2px 6px;
   border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
 }
 
 .chat-content pre {
@@ -694,6 +699,32 @@
   font-size: var(--text-xs);
   color: var(--text-tertiary);
 }
+
+/* Live activity timeline — live CLI step progress */
+.activity-card {
+  align-self: flex-start;
+  max-width: 80%;
+  margin-left: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-secondary);
+  border: 0.5px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  animation: slide-up var(--duration-slow) var(--ease-out);
+}
+.activity-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.activity-title { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-secondary); }
+.activity-spinner {
+  width: 12px; height: 12px; flex-shrink: 0;
+  border-radius: var(--radius-full);
+  border: 2px solid var(--color-primary-subtle);
+  border-top-color: var(--color-primary);
+  animation: ai-spin 0.8s linear infinite;
+}
+.activity-steps { display: flex; flex-direction: column; gap: var(--sp-1); }
+.activity-step { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-sm); color: var(--text-secondary); }
+.activity-tick { width: 6px; height: 6px; flex-shrink: 0; border-radius: var(--radius-full); background: var(--color-success); }
+.activity-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes ai-spin { to { transform: rotate(360deg); } }
 
 .chat-thinking {
   display: flex;
