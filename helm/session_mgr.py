@@ -40,10 +40,7 @@ def make_session(ai: Optional[str], cwd: Optional[str] = None,
         name  = f"Shell #{_st.session_counter}"; emoji = "🐚"; color = "#6b7280"; ai = None
 
     # Auto-apply model: explicit arg > persisted pref > configured default
-    _oauth_cli_model_disabled = {"claude", "gemini", "codex"}
-    if ai in _oauth_cli_model_disabled:
-        model = None
-    elif not model and ai:
+    if not model and ai:
         try:
             from helm.model_prefs import get_model_pref
             model = get_model_pref(ai) or _st.default_models.get(ai) or None

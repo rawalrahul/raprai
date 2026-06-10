@@ -598,6 +598,9 @@ def kill_session_proc(sess: dict) -> None:
         except Exception:
             pass
         sess["proc"] = None
+        # Tell streaming wrappers this was a deliberate stop — they must not
+        # treat it as a stream failure or fall back to a blocking re-run.
+        sess["_user_killed"] = True
 
 
 _kill_session_proc = kill_session_proc  # legacy alias
@@ -730,23 +733,6 @@ async def process_message(text: str, source: str = "web",
         arg_lower = arg.lower()
         ai_key = sess.get("ai") or "shell"
 
-        if ai_key in ("claude", "gemini", "codex"):
-            sess["model"] = None
-            try:
-                from helm.model_prefs import set_model_pref
-                set_model_pref(ai_key, None)
-            except Exception:
-                pass
-            await push_state()
-            msg = (
-                f"**Model switching is disabled for {ai_key.title()} OAuth CLI sessions.**\n\n"
-                "Those CLIs do not expose a reliable account-accurate model list through OAuth here, "
-                "and invalid model overrides can make headless runs fail. Use the CLI's own default "
-                "model selection instead."
-            )
-            await push_message("system", msg, source=source, session_id=sid)
-            return msg
-
         # ── Shell / OpenAI: model switching not supported ──────
         if ai_key in ("shell", "openai"):
             msg = (
@@ -756,31 +742,43 @@ async def process_message(text: str, source: str = "web",
             await push_message("system", msg, source=source, session_id=sid)
             return msg
 
-        # ── Antigravity: support --model flag ─────────────────────────
-        if ai_key in ("antigravity",):
+        # ── CLI agents with a --model flag: live model discovery + switch ───
+        # Model lists are fetched live (CLI's own cache / OAuth creds / API key /
+        # installed-bundle scan) — never hardcoded, since names change often.
+        if ai_key in ("claude", "gemini", "codex", "antigravity"):
             if not arg or arg_lower in ("list", "ls", "show", "?"):
-                current_model = sess.get("model") or "(default)"
+                current_model = sess.get("model") or "(CLI default)"
                 try:
                     from helm.web_routes.helpers import (
+                        _fetch_claude_models,
+                        _fetch_openai_models,
+                        _fetch_gemini_models,
                         _fetch_antigravity_models,
                     )
                     _fetch_fn = {
+                        "claude":      _fetch_claude_models,
+                        "codex":       _fetch_openai_models,
+                        "gemini":      _fetch_gemini_models,
                         "antigravity": _fetch_antigravity_models,
                     }[ai_key]
                     available = await asyncio.to_thread(_fetch_fn)
                 except Exception:
                     available = []
                 if available:
+                    _shown = available[:30]
                     hints = "\n".join(
                         f"  • `{m}`" + (" ✅" if m == sess.get("model") else "")
-                        for m in available
+                        for m in _shown
                     )
-                    hints_section = f"**Available models:**\n{hints}"
+                    if len(available) > len(_shown):
+                        hints += f"\n  … and {len(available) - len(_shown)} more"
+                    hints_section = f"**Available models (fetched live):**\n{hints}"
                 else:
                     hints_section = (
-                        "_Could not fetch model list. Make sure you are logged in "
+                        "_Could not fetch a live model list. Make sure you are logged in "
                         f"(`{ai_key}` CLI) or have the API key set._\n\n"
-                        f"You can still switch: `/model <name>`"
+                        f"You can still switch directly: `/model <name>` — any model id "
+                        f"your account supports is passed straight to the CLI's `--model` flag."
                     )
                 msg = (
                     f"**Current model:** `{current_model}`\n"
@@ -1462,22 +1460,37 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
                 pass
 
         async def _claude_raw(_cmd):
+            _dbg = "disabled"
             try:
                 from helm.ai_runner.streaming import (
                     live_progress_enabled, run_claude_stream, StreamUnavailable,
+                    mark_unavailable,
                 )
-                if live_progress_enabled():
+                _lp = live_progress_enabled("claude")
+                logger.info("claude: live_progress enabled=%s", _lp)
+                if _lp:
                     _to = CLAUDE_TIMEOUT if CLAUDE_TIMEOUT > 0 else None
                     try:
                         return await asyncio.to_thread(
                             run_claude_stream, _cmd, cwd, sess, _emit, _to,
                         )
                     except StreamUnavailable as _su:
+                        if sess.pop("_user_killed", None):
+                            logger.info("claude stream stopped by user — no fallback rerun")
+                            return ""  # parse_claude_json_output handles empty
+                        _dbg = f"stream unavailable: {_su}"
                         logger.info("live progress unavailable, using blocking run: %s", _su)
+                        mark_unavailable(str(_su), "claude")
                     except Exception as _e:
+                        _dbg = f"stream error: {_e}"
                         logger.warning("live progress error, using blocking run: %s", _e)
+                        mark_unavailable(str(_e), "claude")
+                else:
+                    _dbg = "disabled (RAPR_LIVE_PROGRESS=0 or auto-disabled)"
             except Exception as _e2:
+                _dbg = f"import failed: {_e2}"
                 logger.warning("live progress disabled (import): %s", _e2)
+            logger.info("claude: blocking run (%s)", _dbg)
             return await asyncio.to_thread(run_ai_popen, _cmd, cwd, "claude", sess)
 
         if _needs_tools:
@@ -1633,6 +1646,54 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         _computer_on2 = _is_cu2()
         _needs_tools2 = bool(_has_mcp2 or _computer_on2)
 
+        # ── Live-progress helper for Codex/Gemini (default ON; RAPR_LIVE_PROGRESS=1) ──
+        # Streams their JSONL step events to the UI and returns the final text. Any
+        # problem falls back to the normal blocking run, so the reply is unchanged.
+        _loop2 = asyncio.get_running_loop()
+
+        def _emit2(ev, _sid=sid, _loop=_loop2, _ai=ai):
+            try:
+                from helm.broadcast import broadcast as _b
+                asyncio.run_coroutine_threadsafe(
+                    _b({"type": "activity", "session_id": _sid, "ai": _ai, **ev}), _loop)
+            except Exception:
+                pass
+
+        async def _integration_raw(_cmd, _stdin):
+            # antigravity is a Gemini CLI fork — same stream-json flags. Any
+            # mismatch raises StreamUnavailable and falls back to a blocking run.
+            if ai in ("codex", "gemini", "antigravity"):
+                try:
+                    from helm.ai_runner.streaming import (
+                        live_progress_enabled, run_codex_stream, run_gemini_stream,
+                        StreamUnavailable, mark_unavailable,
+                    )
+                    _lp = live_progress_enabled(ai)
+                    logger.info("%s: live_progress enabled=%s", ai, _lp)
+                    if _lp:
+                        _fn = run_codex_stream if ai == "codex" else run_gemini_stream
+                        _to = INTEGRATION_TIMEOUT if INTEGRATION_TIMEOUT > 0 else None
+                        try:
+                            return await asyncio.to_thread(
+                                _fn, _cmd, cwd, sess, _emit2, _stdin,
+                                integration.get("process_env") or None, _to,
+                            )
+                        except StreamUnavailable as _su:
+                            if sess.pop("_user_killed", None):
+                                logger.info("%s stream stopped by user — no fallback rerun", ai)
+                                return "(stopped)"
+                            logger.info("live progress unavailable (%s): %s", ai, _su)
+                            mark_unavailable(str(_su), ai)
+                        except Exception as _e:
+                            logger.warning("live progress error (%s): %s", ai, _e)
+                            mark_unavailable(str(_e), ai)
+                except Exception as _e2:
+                    logger.warning("live progress disabled (import): %s", _e2)
+            return await asyncio.to_thread(
+                run_ai_popen, _cmd, cwd, ai, sess, INTEGRATION_TIMEOUT,
+                stdin_text=_stdin, extra_env=integration.get("process_env") or None,
+            )
+
         if _needs_tools2:
             # Inject tool descriptions (MCP + computer_use). inject_mcp_context
             # itself decides what to include based on the flags.
@@ -1647,11 +1708,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
 
             async def _integration_run_fn(prompt: str) -> str:
                 cmd = integration["build_command"](prompt, model=sess.get("model"))
-                out = await asyncio.to_thread(
-                    run_ai_popen, cmd, cwd, ai, sess, INTEGRATION_TIMEOUT,
-                    stdin_text=prompt if use_stdin else None,
-                    extra_env=integration.get("process_env") or None,
-                )
+                out = await _integration_raw(cmd, prompt if use_stdin else None)
                 cli_tokens = _extract_tokens_from_cli_output(out)
                 if cli_tokens:
                     sess["_last_tokens"] = cli_tokens
@@ -1670,11 +1727,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
             # No MCP servers — pure CLI, no tool wrappers needed
             cmd    = integration["build_command"](enriched_text, model=sess.get("model"))
             before = await asyncio.to_thread(snapshot_dir, cwd)
-            output = await asyncio.to_thread(
-                run_ai_popen, cmd, cwd, ai, sess, INTEGRATION_TIMEOUT,
-                stdin_text=enriched_text if use_stdin else None,
-                extra_env=integration.get("process_env") or None,
-            )
+            output = await _integration_raw(cmd, enriched_text if use_stdin else None)
             after  = await asyncio.to_thread(snapshot_dir, cwd)
 
             # Try to extract token counts from CLI output (Gemini, Codex, etc.)

@@ -166,6 +166,7 @@ function connect(){
       }
     }
     else if(d.type==='state') applyState(d);
+    else if(d.type==='activity') onActivity(d);
     else if(d.type==='thinking') setThinking(d.active, d.ai, d.session_id);
     else if(d.type==='cwd') applyCwd(d.path);
     else if(d.type==='schedule_list') renderSchedules(d.tasks);
@@ -561,6 +562,22 @@ const _thinkingMessages = [
   "Doing complicated math in my head...",
   "Please hold, your call is important to us...",
   // ── Feature tips ──
+  "💡 New: Watch AI work live — each file read and command shows up as a step in chat",
+  "💡 New: Type /model to list available models live and switch any CLI's model",
+  "💡 Tip: Build custom Agents — chain steps visually in the Agent Builder",
+  "💡 Tip: Import and export Agents as JSON to share them",
+  "💡 Tip: Check Agent run statistics from the Agents panel",
+  "💡 Tip: Open AI Council ⚖️ — multiple AIs debate your question and agree on an answer",
+  "💡 Tip: Click the mic 🎤 to send a voice message instead of typing",
+  "💡 Tip: Upload a video demo — AI analyzes it and replicates the workflow",
+  "💡 Tip: AI can control your browser through the Chrome extension",
+  "💡 Tip: Risky commands pause for your approval — watch for the approval banner",
+  "💡 Tip: Add any CLI tool as a custom AI in Settings",
+  "💡 Tip: Vector memory finds related facts even when the wording differs",
+  "💡 Tip: The learning system improves AI from your past runs — auto-enabled",
+  "💡 Tip: Protect access with a PIN — set it in Settings → Security",
+  "💡 Tip: Install RAPR AI as a desktop app — use your browser's Install button",
+  "💡 Tip: Toggle light/dark theme with the 🌙 button in the toolbar",
   "💡 Tip: Use /remember to save facts AI will recall later",
   "💡 Tip: Schedule tasks — say \"every morning at 9am, summarize my emails\"",
   "💡 Tip: Heartbeat monitors your pending tasks and reminds you via Telegram",
@@ -685,6 +702,7 @@ function stripCodeBlocks(text){
   return cleaned || text; // fallback to original if everything was code
 }
 function renderMsg(m){
+  if(m.role === 'assistant') _finishActivity();  // freeze live activity card when the reply lands
   const wrap = document.getElementById('messages');
   const placeholder = wrap.querySelector('.grp.system .bubble');
   if(placeholder && placeholder.textContent === 'Connecting to server...'){
@@ -722,6 +740,89 @@ function renderMsg(m){
   scroll();
 }
 function scroll(){ const m = document.getElementById('messages'); m.scrollTop = m.scrollHeight; }
+
+// --- Live activity timeline -----------------------------------------------------------------
+// Rendered from 'activity' WS events emitted while a CLI agent (Claude/Codex/Gemini) works:
+//   {phase:'step', n, label} per tool call · {phase:'note', label} for text · {phase:'done'}
+function _ensureActivityStyle(){
+  if(document.getElementById('activity-style')) return;
+  const st = document.createElement('style');
+  st.id = 'activity-style';
+  st.textContent =
+    '.activity-card{align-self:flex-start;max-width:74ch;width:fit-content;min-width:260px;margin:2px 0 4px;'
+    + 'padding:10px 14px;background:var(--bg-surface,#16161d);border:1px solid var(--border-subtle,rgba(255,255,255,.09));'
+    + 'border-radius:12px;animation:msgIn .22s ease;}'
+    + '.activity-card.done{opacity:.75;}'
+    + '.activity-card.done .activity-spinner{display:none;}'
+    + '.activity-head{display:flex;align-items:center;gap:8px;}'
+    + '.activity-title{font-size:12px;font-weight:600;color:var(--text-muted,#9aa0ab);'
+    + 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60ch;}'
+    + '.activity-spinner{width:11px;height:11px;flex-shrink:0;border-radius:50%;'
+    + 'border:2px solid oklch(from var(--accent, #7c77dd) l c h / 0.25);border-top-color:var(--accent,#7c77dd);'
+    + 'animation:activity-spin .8s linear infinite;}'
+    + '.activity-steps{display:flex;flex-direction:column;gap:3px;margin-top:6px;}'
+    + '.activity-steps:empty{margin-top:0;}'
+    + '.activity-step{display:flex;align-items:center;gap:8px;font-size:12px;line-height:1.5;'
+    + 'color:var(--text-muted,#aab);font-family:"JetBrains Mono",ui-monospace,monospace;}'
+    + '.activity-tick{width:5px;height:5px;flex-shrink:0;border-radius:50%;background:var(--ok,#3fb950);}'
+    + '.activity-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
+    + '@keyframes activity-spin{to{transform:rotate(360deg)}}';
+  document.head.appendChild(st);
+}
+
+function _activityCard(){
+  const wrap = document.getElementById('messages');
+  if(!wrap) return null;
+  _ensureActivityStyle();
+  let card = document.getElementById('activity-card');
+  if(!card){
+    card = document.createElement('div');
+    card.id = 'activity-card';
+    card.className = 'activity-card';
+    card.innerHTML =
+      '<div class="activity-head"><span class="activity-spinner"></span>'
+      + '<span class="activity-title">Working…</span></div>'
+      + '<div class="activity-steps"></div>';
+    wrap.appendChild(card);
+    wrap.classList.add('has-messages');
+    scroll();
+  }
+  return card;
+}
+
+/** Freeze the live card: stop spinner, keep the step history in the transcript. */
+function _finishActivity(){
+  const card = document.getElementById('activity-card');
+  if(!card) return;
+  card.classList.add('done');
+  const t = card.querySelector('.activity-title');
+  if(t){
+    const n = card.querySelectorAll('.activity-step').length;
+    t.textContent = n ? `Done — ${n} step${n>1?'s':''}` : 'Done';
+  }
+  card.removeAttribute('id');  // next run gets a fresh card
+}
+
+function onActivity(d){
+  if(!d || _viewingHistory) return;
+  if(d.session_id && _focusedId && d.session_id !== _focusedId) return;
+  if(d.phase === 'done'){ _finishActivity(); return; }
+  const card = _activityCard();
+  if(!card) return;
+  if(d.phase === 'step'){
+    const steps = card.querySelector('.activity-steps');
+    const row  = document.createElement('div'); row.className = 'activity-step';
+    const tick = document.createElement('span'); tick.className = 'activity-tick';
+    const lab  = document.createElement('span'); lab.className = 'activity-label';
+    lab.textContent = d.label || 'Working';
+    row.appendChild(tick); row.appendChild(lab);
+    steps.appendChild(row);
+  } else if(d.phase === 'note'){
+    const t = card.querySelector('.activity-title');
+    if(t && d.label) t.textContent = d.label;
+  }
+  scroll();
+}
 
 // --- Send ------------------------------------------------------------------------------------------------------
 function send(){

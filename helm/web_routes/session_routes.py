@@ -549,18 +549,21 @@ async def delete_custom_integration(key: str):
 
 _model_cache: dict[str, tuple[float, list[str]]] = {}
 _MODEL_CACHE_TTL = 300  # 5 minutes
-_OAUTH_CLI_MODEL_DISABLED = {"claude", "gemini", "codex"}
 
 
 async def _fetch_models_cached(ai: str) -> list[str]:
     import time
     from helm.web_routes.helpers import (
         _fetch_antigravity_models,
+        _fetch_claude_models,
+        _fetch_gemini_models,
         _fetch_ollama_models,
+        _fetch_openai_models,
     )
-    if ai in _OAUTH_CLI_MODEL_DISABLED:
-        return []
     _fetch_fns = {
+        "claude":       _fetch_claude_models,
+        "codex":        _fetch_openai_models,
+        "gemini":       _fetch_gemini_models,
         "antigravity":  _fetch_antigravity_models,
         "ollama":       _fetch_ollama_models,
     }
@@ -581,23 +584,12 @@ async def get_selected_models():
     """Return all persisted model selections."""
     from helm.model_prefs import get_all_prefs
     selected = get_all_prefs()
-    for ai in _OAUTH_CLI_MODEL_DISABLED:
-        selected[ai] = None
     return {"ok": True, "selected": selected}
 
 
 @router.get("/api/models/{ai}")
 async def get_models(ai: str):
     """Return available models for AI (cached 5 min)."""
-    if ai in _OAUTH_CLI_MODEL_DISABLED:
-        return {
-            "ok": True,
-            "ai": ai,
-            "models": [],
-            "selected": None,
-            "model_switching": False,
-            "reason": "Model discovery and switching are disabled for OAuth CLI integrations.",
-        }
     models = await _fetch_models_cached(ai)
     from helm.model_prefs import get_model_pref
     selected = get_model_pref(ai)
@@ -614,13 +606,6 @@ class _SetModelRequest(_BaseModel):
 @router.put("/api/models/{ai}")
 async def set_model(ai: str, req: _SetModelRequest):
     """Persist model selection for AI and apply to all active sessions."""
-    if ai in _OAUTH_CLI_MODEL_DISABLED:
-        return {
-            "ok": False,
-            "ai": ai,
-            "model": None,
-            "error": "Model switching is disabled for OAuth CLI integrations.",
-        }
     model = req.model or None
     from helm.model_prefs import set_model_pref
     set_model_pref(ai, model)
@@ -634,16 +619,6 @@ async def set_model(ai: str, req: _SetModelRequest):
 @router.post("/api/models/{ai}/refresh")
 async def refresh_models(ai: str):
     """Bust cache and re-fetch model list for AI."""
-    if ai in _OAUTH_CLI_MODEL_DISABLED:
-        _model_cache.pop(ai, None)
-        return {
-            "ok": True,
-            "ai": ai,
-            "models": [],
-            "count": 0,
-            "model_switching": False,
-            "reason": "Model discovery is disabled for OAuth CLI integrations.",
-        }
     import time
     _model_cache.pop(ai, None)
     models = await _fetch_models_cached(ai)

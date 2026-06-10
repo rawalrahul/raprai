@@ -543,6 +543,8 @@ function renderMessage(msg) {
   const container = $('messages');
   if (!container) return;
 
+  if (msg.role === 'user' && typeof clearActivity === 'function') clearActivity();
+
   const session = State.sessions.find(s => s.id === msg.session_id);
 
   const el = document.createElement('div');
@@ -588,6 +590,21 @@ function renderMessage(msg) {
 function _activityCard() {
   const container = $('messages');
   if (!container) return null;
+  if (!document.getElementById('activity-style')) {
+    const st = document.createElement('style');
+    st.id = 'activity-style';
+    st.textContent =
+      '.activity-card{align-self:flex-start;max-width:80%;margin:6px 0 6px 16px;padding:10px 14px;background:var(--bg-secondary,#1a1a22);border:1px solid var(--border-default,rgba(255,255,255,0.14));border-radius:var(--radius-lg,12px);}'
+      + '.activity-card.done .activity-spinner{display:none;}'
+      + '.activity-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;}'
+      + '.activity-title{font-size:12.5px;font-weight:500;color:var(--text-secondary,#b7b7c6);}'
+      + '.activity-spinner{width:12px;height:12px;flex-shrink:0;border-radius:50%;border:2px solid var(--color-primary-subtle,rgba(120,110,220,0.3));border-top-color:var(--color-primary,#7c77dd);animation:ai-spin .8s linear infinite;}'
+      + '.activity-steps{display:flex;flex-direction:column;gap:4px;}'
+      + '.activity-step{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-secondary,#c8c8d4);}'
+      + '.activity-tick{width:6px;height:6px;flex-shrink:0;border-radius:50%;background:var(--color-success,#3fb950);}'
+      + '@keyframes ai-spin{to{transform:rotate(360deg)}}';
+    document.head.appendChild(st);
+  }
   let card = document.getElementById('activity-card');
   if (!card) {
     card = document.createElement('div');
@@ -608,7 +625,15 @@ function _activityCard() {
 function onActivity(d) {
   if (!d) return;
   if (d.session_id && State.focusedId && d.session_id !== State.focusedId) return;
-  if (d.phase === 'done') { clearActivity(); return; }
+  if (d.phase === 'done') {
+    const c = document.getElementById('activity-card');
+    if (c) {
+      c.classList.add('done');
+      const t = c.querySelector('.activity-title');
+      if (t) t.textContent = 'Done';
+    }
+    return;
+  }
   const card = _activityCard();
   if (!card) return;
   if (d.phase === 'step') {
@@ -1586,8 +1611,6 @@ function initWebSocket() {
   WS.on('council_stopped',      (d) => { if (typeof councilOnStopped      === 'function') councilOnStopped(d);      });
 
   WS.on('activity', (d) => { if (typeof onActivity === 'function') onActivity(d); });
-  WS.on('message',  (d) => { if (typeof clearActivity === 'function') clearActivity(); });
-  WS.on('thinking', (d) => { if (d && d.active === false && typeof clearActivity === 'function') clearActivity(); });
 
   WS.on('error', (err) => {
     console.error('[RAPR AI] WebSocket error:', err);
