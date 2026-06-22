@@ -166,6 +166,8 @@ if exist "%ISCC%" (
     ) else (
         echo.
         echo  Installer created: installer_output\RAPR_AI_Setup_2.0.0.exe
+        echo  Signing installer...
+        powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\sign.ps1" -File "installer_output\RAPR_AI_Setup_2.0.0.exe"
     )
 ) else (
     echo  Inno Setup not found — skipping installer creation.
