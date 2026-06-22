@@ -10,6 +10,7 @@ voice_routes.py — Web UI voice I/O.
 import asyncio
 import tempfile
 import os
+import re
 import logging
 
 from fastapi import APIRouter, UploadFile, File, Request
@@ -117,13 +118,24 @@ def tts_backend() -> str:
     return "elevenlabs" if _eleven_key() else "offline"
 
 
+# ElevenLabs voice ids are short alphanumeric tokens. Validate before putting the
+# caller-supplied value into the request URL path (prevents path injection / hitting
+# other API routes).
+_VOICE_ID_RE = re.compile(r"[A-Za-z0-9]{15,40}")
+
+
 def _tts_elevenlabs(text: str, voice: str = "") -> bytes:
     """Synthesize speech via ElevenLabs. Returns MP3 bytes. Blocking."""
     import json
+    import urllib.parse
     import urllib.request
 
     voice_id = voice or _ELEVEN_DEFAULT_VOICE
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    if not _VOICE_ID_RE.fullmatch(voice_id):
+        raise ValueError("Invalid ElevenLabs voice id")
+    # Encode the path segment defensively even after validation.
+    safe_voice = urllib.parse.quote(voice_id, safe="")
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{safe_voice}"
     payload = json.dumps({
         "text": text,
         "model_id": _ELEVEN_MODEL,
