@@ -580,20 +580,30 @@ async def _main():
 
     if _st.telegram_app:
         from telegram import Update
-        async with _st.telegram_app:
-            await _st.telegram_app.start()
-            await _st.telegram_app.updater.start_polling(
-                allowed_updates=Update.ALL_TYPES,
-                error_callback=_telegram_polling_error_handler("Startup", _st.telegram_app),
-            )
-            logger.info("Telegram bot started. Polling for updates...")
-            if _st.telegram_chat_id:
-                logger.info("Telegram chat_id pre-set to %s — web→Telegram forwarding ready", _st.telegram_chat_id)
-            else:
-                logger.warning("No ALLOWED_USER_IDS configured — web→Telegram forwarding disabled until first Telegram message")
-            await server.serve()           # blocks until Ctrl+C
-            await _st.telegram_app.updater.stop()
-            await _st.telegram_app.stop()
+        try:
+            async with _st.telegram_app:
+                await _st.telegram_app.start()
+                await _st.telegram_app.updater.start_polling(
+                    allowed_updates=Update.ALL_TYPES,
+                    error_callback=_telegram_polling_error_handler("Startup", _st.telegram_app),
+                )
+                logger.info("Telegram bot started. Polling for updates...")
+                if _st.telegram_chat_id:
+                    logger.info("Telegram chat_id pre-set to %s — web→Telegram forwarding ready", _st.telegram_chat_id)
+                else:
+                    logger.warning("No ALLOWED_USER_IDS configured — web→Telegram forwarding disabled until first Telegram message")
+                await server.serve()           # blocks until Ctrl+C
+                await _st.telegram_app.updater.stop()
+                await _st.telegram_app.stop()
+        except Exception as exc:
+            # Telegram init/start must never take down the web UI. A network
+            # timeout reaching api.telegram.org (firewall/VPN/ISP block) or a
+            # stale token should degrade gracefully: log it, drop the bot, and
+            # keep serving the web app.
+            logger.error("Telegram bot disabled (%s) — serving web UI without Telegram", exc)
+            _st.telegram_app = None
+            if not server.started:
+                await server.serve()
     else:
         await server.serve()
         # Clean up any hot-started Telegram bot
