@@ -1913,3 +1913,20 @@ header { gap: 12px !important; }
 .council-dot {
   width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
 }
+
+/* Voice out: speaker button on assistant replies */
+.msg-speak-btn {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 1px 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  background: transparent;
+  border: 1px solid var(--border-subtle, rgba(255,255,255,.12));
+  border-radius: 8px;
+  color: var(--text-muted, #9aa0ab);
+  cursor: pointer;
+  opacity: .55;
+  transition: opacity .15s ease, background .15s ease;
+}
+.msg-speak-btn:hover { opacity: 1; background: var(--bg-surface, rgba(255,255,255,.05)); }

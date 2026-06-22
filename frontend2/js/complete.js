@@ -735,10 +735,62 @@ function renderMsg(m){
   bub.className = 'bubble';
   bub.textContent = m.role === 'assistant' ? stripCodeBlocks(m.content) : m.content;
   grp.appendChild(bub);
+
+  // Voice out: speaker button on assistant replies (+ optional auto-speak).
+  if(m.role === 'assistant'){
+    const speakable = (bub.textContent || '').trim();
+    if(speakable){
+      const spk = document.createElement('button');
+      spk.className = 'msg-speak-btn';
+      spk.title = 'Read aloud';
+      spk.setAttribute('aria-label', 'Read message aloud');
+      spk.textContent = '🔊';
+      spk.onclick = () => speakText(speakable, spk);
+      grp.appendChild(spk);
+      if(window._autoSpeak) speakText(speakable, spk);
+    }
+  }
+
   wrap.appendChild(grp);
   _updateLogoState();
   scroll();
 }
+
+// --- Text-to-speech (voice out) -------------------------------------------------------------
+let _ttsAudio = null;   // currently-playing HTMLAudioElement
+function speakText(text, btn){
+  if(!text) return;
+  // Toggle: clicking again while playing stops it.
+  if(_ttsAudio){
+    try{ _ttsAudio.pause(); }catch(e){}
+    if(_ttsAudio._url) URL.revokeObjectURL(_ttsAudio._url);
+    _ttsAudio = null;
+    if(btn) btn.textContent = '🔊';
+    return;
+  }
+  if(btn) btn.textContent = '⏳';
+  fetch('/tts', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({text})
+  }).then(r => { if(!r.ok) throw new Error('tts failed'); return r.blob(); })
+    .then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = new Audio(url);
+      a._url = url;
+      _ttsAudio = a;
+      if(btn) btn.textContent = '⏸';
+      a.onended = () => { URL.revokeObjectURL(url); _ttsAudio = null; if(btn) btn.textContent = '🔊'; };
+      a.onerror = () => { URL.revokeObjectURL(url); _ttsAudio = null; if(btn) btn.textContent = '🔊'; };
+      a.play();
+    })
+    .catch(() => { _ttsAudio = null; if(btn) btn.textContent = '🔊'; });
+}
+function toggleAutoSpeak(on){
+  window._autoSpeak = !!on;
+  try{ localStorage.setItem('rapr_auto_speak', on ? '1' : '0'); }catch(e){}
+}
+try{ window._autoSpeak = localStorage.getItem('rapr_auto_speak') === '1'; }catch(e){}
 function scroll(){ const m = document.getElementById('messages'); m.scrollTop = m.scrollHeight; }
 
 // --- Live activity timeline -----------------------------------------------------------------

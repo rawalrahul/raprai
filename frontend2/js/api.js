@@ -851,6 +851,30 @@ const API = {
     transcribe(formData) {
       return API._upload('/transcribe', formData);
     },
+
+    /**
+     * Synthesize speech from text (voice out).
+     *
+     * @param {string} text - Text to speak
+     * @param {string} [voice] - Optional voice id (ElevenLabs backend only)
+     * @returns {Promise<Blob>} Audio blob (MP3 for ElevenLabs, WAV offline)
+     */
+    tts(text, voice) {
+      return fetch('/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice }),
+      }).then(r => { if (!r.ok) throw new Error('tts failed'); return r.blob(); });
+    },
+
+    /**
+     * Which TTS backend is active ('elevenlabs' or 'offline').
+     *
+     * @returns {Promise<Object>}
+     */
+    ttsStatus() {
+      return API._get('/tts/status');
+    },
   },
 
   /**
