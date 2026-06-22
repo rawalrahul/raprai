@@ -188,6 +188,7 @@
         <span class="sb-section-label">Memory</span>
         <span class="sb-section-count" id="sb-count-memory" aria-live="polite"></span>
         <button onclick="event.stopPropagation();openKnowledgeTransfer()" class="sb-section-action" title="Import knowledge from other AIs" style="font-size:11px">🔄 Transfer</button>
+        <button onclick="event.stopPropagation();memExportVault()" class="sb-section-action" title="Export memories as an Obsidian-compatible Markdown vault (.zip)" aria-label="Export memory vault" style="font-size:11px">⬇ Vault</button>
         <button onclick="event.stopPropagation();loadMemoryPanel()" class="sb-section-action" title="Refresh" aria-label="Refresh memory list">⟳</button>
       </div>
       <div class="sb-section-body" id="sb-panel-memory">

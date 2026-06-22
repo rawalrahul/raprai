@@ -47,6 +47,7 @@ function _renderMemories(container){
         ${pinIcon}${catBadge}${srcBadge}
         <div class="mem-entry-actions">
           <button onclick="memTogglePin(${m.id},${m.pinned?0:1})" title="${m.pinned?'Unpin':'Pin'}">${m.pinned?'📌':'📍'}</button>
+          <button onclick="memEdit(${m.id})" title="Edit">✎</button>
           <button onclick="memArchive(${m.id})" title="Archive">📦</button>
           <button onclick="memDelete(${m.id})" title="Delete">✕</button>
         </div>
@@ -114,11 +115,40 @@ function memTogglePin(id, pinned){
   });
 }
 
+function memEdit(id){
+  const m = _memData.find(x => x.id === id);
+  if(!m) return;
+  const content = prompt('Edit memory:', m.content);
+  if(content === null) return;               // cancelled
+  const trimmed = content.trim();
+  if(!trimmed || trimmed === m.content) return;
+  fetch('/memory/' + id, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({content: trimmed})
+  }).then(r=>r.json()).then(d=>{
+    if(d.ok) loadMemoryPanel();
+    else alert('Failed to update memory');
+  }).catch(()=> alert('Failed to update memory'));
+}
+
 function memArchive(id){
   fetch('/memory/' + id + '/archive', {method: 'POST'})
     .then(r=>r.json()).then(d=>{
       if(d.ok) loadMemoryPanel();
     });
+}
+
+// ─── Obsidian-style Markdown vault export ────────────────────────────────────
+
+function memExportVault(){
+  // GET /memory/export returns a .zip (Content-Disposition: attachment).
+  const a = document.createElement('a');
+  a.href = '/memory/export';
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 function memDelete(id){

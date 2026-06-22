@@ -17,6 +17,7 @@ Endpoints:
 """
 
 from fastapi import APIRouter, Request
+from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Optional
 import re
@@ -133,6 +134,127 @@ async def trigger_decay():
     from helm.memory import apply_memory_decay
     result = apply_memory_decay()
     return {"ok": True, **result}
+
+
+# ---------------------------------------------------------------------------
+# Obsidian-style Markdown vault export
+# ---------------------------------------------------------------------------
+
+# Fields kept out of the YAML frontmatter (content is the body; search_text is
+# an internal keyword index with no user value).
+_VAULT_SKIP_FIELDS = {"content", "search_text", "_score", "_relevance", "_kw", "_vec"}
+
+
+def _slugify(text: str, maxlen: int = 50) -> str:
+    """Filesystem-safe slug from memory content for the .md filename."""
+    s = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
+    return (s[:maxlen].rstrip("-")) or "memory"
+
+
+def _yaml_scalar(v) -> str:
+    """Render a Python scalar as a safe single-line YAML value."""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if v is None:
+        return '""'
+    s = str(v)
+    # Quote if it contains YAML-significant characters
+    if s == "" or re.search(r'[:#\[\]{}",&*!|>%@`]', s) or s != s.strip():
+        return '"' + s.replace('"', '\\"') + '"'
+    return s
+
+
+def _memory_to_markdown(m: dict) -> str:
+    """Render one memory dict as an Obsidian-compatible Markdown note."""
+    category = m.get("category", "fact")
+    pinned = bool(m.get("pinned"))
+    archived = bool(m.get("archived"))
+
+    lines = ["---"]
+    # Obsidian tags: memory + category (+ pinned/archived flags as tags)
+    tags = ["memory", category]
+    if pinned:
+        tags.append("pinned")
+    if archived:
+        tags.append("archived")
+    lines.append("tags: [" + ", ".join(tags) + "]")
+
+    # All remaining scalar DB fields become frontmatter keys (schema-agnostic).
+    for k, v in m.items():
+        if k in _VAULT_SKIP_FIELDS:
+            continue
+        if isinstance(v, (str, int, float, bool)) or v is None:
+            lines.append(f"{k}: {_yaml_scalar(v)}")
+    lines.append("---")
+    lines.append("")
+    lines.append(m.get("content", "").strip())
+    lines.append("")
+    return "\n".join(lines)
+
+
+@router.get("/export")
+async def export_vault(include_archived: bool = True):
+    """Export all memories as an Obsidian-compatible Markdown vault (.zip).
+
+    One .md note per memory (YAML frontmatter + content body) plus an index.md
+    that links every note via [[wikilinks]]. Content is decrypted by
+    list_memories() before export.
+    """
+    import io
+    import zipfile
+    from datetime import datetime, timezone
+
+    from helm.memory import list_memories
+
+    memories = list_memories(include_archived=include_archived, limit=100000)
+
+    buf = io.BytesIO()
+    index_lines = [
+        "---",
+        "tags: [memory, index]",
+        "---",
+        "",
+        "# RAPR AI Memory Vault",
+        "",
+        f"Exported: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
+        f"Total memories: {len(memories)}",
+        "",
+    ]
+
+    # Group index by category for readability
+    by_cat: dict[str, list[str]] = {}
+    used_names: set[str] = set()
+
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for m in memories:
+            mid = m.get("id", 0)
+            slug = _slugify(m.get("content", ""))
+            name = f"{mid:04d}-{slug}"
+            # Guard against rare collisions
+            base = name
+            n = 1
+            while name in used_names:
+                name = f"{base}-{n}"
+                n += 1
+            used_names.add(name)
+
+            zf.writestr(f"memories/{name}.md", _memory_to_markdown(m))
+            by_cat.setdefault(m.get("category", "fact"), []).append(name)
+
+        for cat in sorted(by_cat):
+            index_lines.append(f"## {cat} ({len(by_cat[cat])})")
+            for name in by_cat[cat]:
+                index_lines.append(f"- [[{name}]]")
+            index_lines.append("")
+
+        zf.writestr("index.md", "\n".join(index_lines))
+
+    buf.seek(0)
+    stamp = datetime.now().strftime("%Y%m%d")
+    headers = {
+        "Content-Disposition": f'attachment; filename="rapr_memory_vault_{stamp}.zip"'
+    }
+    return Response(content=buf.getvalue(), media_type="application/zip", headers=headers)
 
 
 # ---------------------------------------------------------------------------
