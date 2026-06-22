@@ -304,6 +304,32 @@ function _renderInstalledCard(item){
       </div>`;
     }
 
+    // Composio: universal connector — connect via pasted MCP URL, not a toggle.
+    if(s.connector === 'composio'){
+      const connected = !!s.connected;
+      const headerAction = connected
+        ? `<span class="plg-header-connected">Connected</span>`
+        : `<button class="plg-header-connect" onclick="event.stopPropagation();connectComposio()" title="Connect">Connect</button>`;
+      const cStatus = s.running ? 'Running' : (connected ? 'Starting...' : 'Not connected');
+      return `
+      <div class="plg-accordion" data-mcp-id="${id}">
+        <div class="plg-accordion-header" onclick="togglePluginAccordion(this)">
+          <span class="plg-accordion-arrow">▶</span>
+          <span class="plg-emoji">🔗</span>
+          <span class="plg-title">Composio</span>
+          <span class="mcp-status ${statusCls}">${cStatus}</span> ${typeBadge}
+          <div class="plg-header-right">${headerAction}</div>
+        </div>
+        <div class="plg-accordion-body">
+          <div class="plg-body-desc">Universal connector — one link unlocks 100+ apps with managed OAuth via Composio MCP.</div>
+          <div class="plg-body-meta">
+            <span class="mcp-tool-count">${s.running ? (s.tool_count||0)+' tools' : (connected ? 'Waiting...' : 'Paste your Composio MCP URL')}</span>
+            ${connected ? `<button class="plg-disconnect-btn" onclick="event.stopPropagation();disconnectComposio()" title="Disconnect">Disconnect</button>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }
+
     const toggle = `<button class="toggle-switch ${s.enabled?'on':''}"
       onclick="event.stopPropagation();toggleMcpServer('${id}',${!s.enabled})"
       title="${s.enabled?'Disable':'Enable'}"></button>`;
@@ -886,6 +912,20 @@ function disconnectZapier(){
   fetch('/mcp/zapier/disconnect',{method:'POST', headers:_rpHeaders()})
     .then(r=>r.json()).then(d=>{ if(d.ok) loadInstalledPackages(); })
     .catch(()=>alert('Failed to disconnect Zapier'));
+}
+
+function connectComposio(){
+  const w = 540, h = 640;
+  const left = (screen.width - w) / 2, top = (screen.height - h) / 2;
+  window.open('/mcp/composio/connect', 'rapr-connect',
+    `width=${w},height=${h},left=${left},top=${top},toolbar=no,menubar=no`);
+}
+
+function disconnectComposio(){
+  if(!confirm('Disconnect Composio? Your stored MCP URL will be cleared and the server stopped.')) return;
+  fetch('/mcp/composio/disconnect',{method:'POST', headers:_rpHeaders()})
+    .then(r=>r.json()).then(d=>{ if(d.ok) loadInstalledPackages(); })
+    .catch(()=>alert('Failed to disconnect Composio'));
 }
 
 // Refresh the installed list when a connect popup reports success.

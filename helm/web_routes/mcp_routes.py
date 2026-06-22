@@ -86,6 +86,18 @@ async def list_mcp_servers():
                 logger.warning("zapier status check failed: %s", exc)
             continue
 
+        # Composio is the other Tier-2 universal connector: connected via a
+        # pasted MCP server URL (managed OAuth for 100+ apps), not a toggle.
+        if sid == "composio":
+            srv["connector"] = "composio"
+            srv["connected"] = False
+            try:
+                from helm.mcp.composio_mcp import is_connected as _cmp_connected
+                srv["connected"] = _cmp_connected()
+            except Exception as exc:
+                logger.warning("composio status check failed: %s", exc)
+            continue
+
         base = sid.lower().replace("-oauth", "").replace("_oauth", "").replace("-", "_")
         setup = None
         token_env = ""
@@ -425,6 +437,135 @@ async function save() {{
   btn.disabled=true; btn.innerHTML='<span class="spinner"></span>Connecting...'; msg.className='msg';
   try{{
     const r=await fetch('/mcp/zapier/connect',{{method:'POST',
+      headers:{{'Content-Type':'application/json','x-csrf-token':csrf()}},
+      body:JSON.stringify({{url}})}});
+    const d=await r.json();
+    if(d.ok){{
+      msg.className='msg ok'; msg.textContent='Connected! '+(d.tool_count||0)+' tools available.';
+      btn.textContent='Connected!';
+      if(window.opener){{ try{{window.opener.postMessage({{type:'plugin-oauth-done',success:true}},'*');}}catch(e){{}} }}
+      setTimeout(()=>window.close(),1500);
+    }} else {{
+      msg.className='msg err'; msg.textContent=d.error||'Connection failed.';
+      btn.disabled=false; btn.textContent='Save & Connect';
+    }}
+  }}catch(e){{ msg.className='msg err'; msg.textContent=e.message; btn.disabled=false; btn.textContent='Save & Connect'; }}
+}}
+</script>
+</body></html>"""
+
+
+# ── Composio (Tier-2 universal connector) ────────────────────────────────────
+# Composio MCP is core infrastructure like Zapier: one connection unlocks 100+
+# apps with managed OAuth. The user pastes their personal Composio MCP server URL
+# (from mcp.composio.dev); we store it encrypted and bridge it in as a regular
+# MCP server. See helm/mcp/composio_mcp.py.
+
+@router.get("/mcp/composio/status")
+async def composio_status():
+    """Return Composio connector status: connected / running / tool_count."""
+    from helm.mcp.composio_mcp import status
+    return JSONResponse(status())
+
+
+@router.get("/mcp/composio/connect")
+async def composio_connect_page():
+    """Show the connect page where the user pastes their Composio MCP server URL."""
+    from helm.mcp.composio_mcp import is_connected
+    return HTMLResponse(_composio_connect_page(is_connected()))
+
+
+@router.post("/mcp/composio/connect")
+async def composio_connect(request: Request):
+    """Save the user's Composio MCP URL, start the server. Body: {"url": "https://..."}"""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid JSON body"}, status_code=400)
+    url = (body.get("url") or "").strip()
+    from helm.mcp.composio_mcp import connect
+    result = await connect(url)
+    return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
+@router.post("/mcp/composio/disconnect")
+async def composio_disconnect():
+    """Disconnect Composio: clear the stored URL and stop the server."""
+    from helm.mcp.composio_mcp import disconnect
+    return JSONResponse(await disconnect())
+
+
+def _composio_connect_page(connected: bool) -> str:
+    """Render the Composio MCP connect page (single URL field)."""
+    badge = ('<span class="badge">Connected</span>' if connected else "")
+    return f"""<!DOCTYPE html>
+<html><head><title>RAPR AI — Connect Composio</title>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    display:flex;align-items:center;justify-content:center;min-height:100vh;
+    background:#0d0d0d;color:#e0e0e0;padding:20px}}
+  .card{{background:#1a1a1a;border-radius:16px;padding:36px;max-width:520px;width:100%;
+    box-shadow:0 4px 24px rgba(0,0,0,.5)}}
+  .header{{text-align:center;margin-bottom:24px}}
+  .emoji{{font-size:44px;margin-bottom:8px}}
+  h2{{font-size:20px;font-weight:600;margin-bottom:4px}}
+  .subtitle{{color:#888;font-size:13px}}
+  .badge{{background:#065f46;color:#34d399;font-size:10px;padding:2px 8px;border-radius:10px;
+    margin-left:8px;vertical-align:middle}}
+  .steps{{font-size:12px;color:#888;line-height:1.7;background:#111;border:1px solid #262626;
+    border-radius:10px;padding:14px 16px;margin-bottom:18px}}
+  .steps a{{color:#a78bfa;text-decoration:none}}
+  label{{font-size:13px;font-weight:600;color:#ddd;display:block;margin-bottom:6px}}
+  input{{width:100%;background:#111;border:1px solid #333;border-radius:8px;padding:10px 14px;
+    color:#e0e0e0;font-size:13px;font-family:monospace;outline:none}}
+  input:focus{{border-color:#7c3aed}}
+  .actions{{display:flex;flex-direction:column;gap:10px;margin-top:22px}}
+  .btn-save{{padding:12px 20px;background:#7c3aed;color:#fff;border:none;border-radius:10px;
+    font-size:14px;font-weight:500;cursor:pointer}}
+  .btn-save:hover{{background:#6d28d9}}
+  .btn-save:disabled{{background:#333;color:#666;cursor:not-allowed}}
+  .btn-close{{padding:10px 20px;background:transparent;color:#888;border:1px solid #333;
+    border-radius:10px;font-size:13px;cursor:pointer}}
+  .msg{{text-align:center;padding:10px;border-radius:8px;font-size:13px;margin-top:12px;display:none}}
+  .msg.ok{{display:block;background:#052e16;color:#34d399;border:1px solid #065f46}}
+  .msg.err{{display:block;background:#450a0a;color:#f87171;border:1px solid #7f1d1d}}
+  .spinner{{display:inline-block;width:16px;height:16px;border:2px solid #fff3;border-top-color:#fff;
+    border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}}
+  @keyframes spin{{to{{transform:rotate(360deg)}}}}
+</style></head>
+<body>
+<div class="card">
+  <div class="header">
+    <div class="emoji">&#128279;</div>
+    <h2>Connect Composio{badge}</h2>
+    <div class="subtitle">One connection unlocks 100+ apps with managed OAuth</div>
+  </div>
+  <div class="steps">
+    1. Go to <a href="https://mcp.composio.dev" target="_blank" rel="noopener">mcp.composio.dev</a>
+       and create an MCP server.<br>
+    2. Connect the apps/toolkits you want RAPR AI to use (Gmail, Slack, Notion, ...).<br>
+    3. Copy the <b>Server URL</b> (it contains your secret).<br>
+    4. Paste it below.
+  </div>
+  <label>Composio MCP Server URL</label>
+  <input type="password" id="url" placeholder="https://mcp.composio.dev/composio/server/.../mcp"
+         autocomplete="off" spellcheck="false" {'value="••••••••"' if connected else ''} />
+  <div class="actions">
+    <button class="btn-save" id="btn" onclick="save()">Save &amp; Connect</button>
+    <button class="btn-close" onclick="window.close()">Cancel</button>
+  </div>
+  <div class="msg" id="msg"></div>
+</div>
+<script>
+function csrf(){{ const m=document.cookie.match(/(?:^|; )hq_csrf=([^;]+)/); return m?decodeURIComponent(m[1]):''; }}
+async function save() {{
+  const btn=document.getElementById('btn'), msg=document.getElementById('msg');
+  const url=document.getElementById('url').value.trim();
+  if(!url || url==='••••••••'){{ msg.className='msg err'; msg.textContent='Paste your Composio MCP server URL.'; return; }}
+  btn.disabled=true; btn.innerHTML='<span class="spinner"></span>Connecting...'; msg.className='msg';
+  try{{
+    const r=await fetch('/mcp/composio/connect',{{method:'POST',
       headers:{{'Content-Type':'application/json','x-csrf-token':csrf()}},
       body:JSON.stringify({{url}})}});
     const d=await r.json();
