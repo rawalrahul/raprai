@@ -1,14 +1,47 @@
 """
-helm/terminal.py — TerminalSession (cmd.exe wrapper) and ANSI output cleaner.
+helm/terminal.py — TerminalSession (persistent shell wrapper) and ANSI output cleaner.
+
+Cross-platform: wraps cmd.exe on Windows and the user's login shell
+($SHELL, falling back to /bin/bash then /bin/sh) on macOS/Linux.
 """
 
 import os
 import queue
 import signal
 import subprocess
+import sys
 import threading
 
 from helm.config import ANSI_ESCAPE, IDLE_TIMEOUT, MAX_WAIT, NO_OUTPUT_TIMEOUT
+
+IS_WINDOWS = sys.platform == "win32"
+
+
+def _shell_command() -> list[str]:
+    """Return the argv for an interactive shell on this platform."""
+    if IS_WINDOWS:
+        return ["cmd.exe"]
+    # POSIX: prefer the user's login shell, then bash, then sh.
+    shell = os.environ.get("SHELL")
+    for candidate in (shell, "/bin/bash", "/bin/sh"):
+        if candidate and os.path.exists(candidate):
+            return [candidate, "-i"]
+    return ["/bin/sh", "-i"]
+
+
+def _spawn_kwargs() -> dict:
+    """Platform-specific Popen kwargs for a controllable shell process group.
+
+    Windows: hide the console window and put the child in its own process
+    group so we can send CTRL_C_EVENT.
+    POSIX: start a new session (setsid) so we can signal the whole group.
+    """
+    if IS_WINDOWS:
+        return {
+            "creationflags": (subprocess.CREATE_NO_WINDOW
+                              | subprocess.CREATE_NEW_PROCESS_GROUP),
+        }
+    return {"start_new_session": True}
 
 
 # ---------------------------------------------------------------------------
@@ -40,7 +73,10 @@ _clean_output = clean_output
 # ---------------------------------------------------------------------------
 
 class TerminalSession:
-    """Wraps a persistent cmd.exe subprocess with a non-blocking output queue."""
+    """Wraps a persistent shell subprocess with a non-blocking output queue.
+
+    Uses cmd.exe on Windows and the login shell on macOS/Linux.
+    """
 
     def __init__(self):
         self._proc: subprocess.Popen | None = None
@@ -70,7 +106,7 @@ class TerminalSession:
                 raise RuntimeError("Session already running (PID %d)" % self._proc.pid)
             self._q = queue.Queue()
             self._proc = subprocess.Popen(
-                ["cmd.exe"],
+                _shell_command(),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -78,7 +114,7 @@ class TerminalSession:
                 encoding="utf-8",
                 errors="replace",
                 bufsize=0,
-                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP,
+                **_spawn_kwargs(),
             )
             self._reader_thread = threading.Thread(target=self._read_loop, daemon=True)
             self._reader_thread.start()
@@ -132,7 +168,15 @@ class TerminalSession:
     def send_interrupt(self):
         if not self.is_alive():
             raise RuntimeError("No active session.")
-        os.kill(self._proc.pid, signal.CTRL_C_EVENT)
+        if IS_WINDOWS:
+            # Child is in its own process group (CREATE_NEW_PROCESS_GROUP).
+            os.kill(self._proc.pid, signal.CTRL_C_EVENT)
+        else:
+            # Child started a new session (setsid); signal its whole group.
+            try:
+                os.killpg(os.getpgid(self._proc.pid), signal.SIGINT)
+            except (ProcessLookupError, PermissionError):
+                self._proc.send_signal(signal.SIGINT)
 
     def stop(self):
         if self._proc:
