@@ -66,6 +66,8 @@ python -m nuitka --standalone --enable-plugin=tk-inter ^
     --nofollow-import-to=helm.plugins.* ^
     --nofollow-import-to=google.genai ^
     --include-package=google.genai ^
+    --include-module=helm.mcp.composio_mcp ^
+    --include-module=helm.mcp.zapier_mcp ^
     %VEC_FLAGS% ^
     web_app.py
 
