@@ -128,3 +128,10 @@ node_modules/
 user_prefs.json
 .rapr_screenshots/
 nuitka-crash-report.xml
+
+# Learning system runtime state (generated per user)
+helm/learning/ENABLED
+helm/learning/task_logs/
+helm/learning/user_context.json
+helm/learning/routing_table.json
+helm/learning/playbooks/20*/

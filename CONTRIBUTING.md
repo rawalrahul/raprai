@@ -19,8 +19,6 @@ See `README.md` for configuration and troubleshooting.
 | `helm/` | Core: sessions, AI runners, memory, council, pipelines, plugins, MCP |
 | `frontend2/` | Web UI (vanilla JS) |
 | `chrome-extension/` | Browser companion for computer use |
-| `marketplace/` | Built-in marketplace packages |
-| `rapr-oauth-proxy/` | Optional Cloudflare Worker for OAuth token exchange |
 | `tests/` | Test suite (`pytest`) |
 | `.skills/skills/` | Built-in skill library loaded at startup |
 
