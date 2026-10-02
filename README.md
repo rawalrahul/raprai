@@ -2,6 +2,8 @@
 
 Run Claude Code, Gemini, Codex, Ollama, and any custom AI CLI as **parallel independent sessions** — controlled from a local web UI in your browser and/or Telegram on your phone. Both channels stay in sync. Every session gets its own terminal, its own working directory, and its own conversation history.
 
+RAPR AI is free and open source under the [MIT License](LICENSE). Use it, fork it, experiment with it, and contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ---
 
 ## How it works
@@ -396,6 +398,8 @@ Back up the full RAPR AI database to cloud storage or a local folder. Configure 
 
 Supported providers: OneDrive, Google Drive, Dropbox, and local/network folder. Each provider uses OAuth 2.0 for authentication (tokens stored in the encrypted vault). The local provider requires no authentication — just set a folder path.
 
+No OAuth apps are bundled: to use OneDrive, Google Drive or Dropbox, register your own app with the provider and set its credentials in `.env` (`BACKUP_GDRIVE_CLIENT_ID`, `BACKUP_GDRIVE_CLIENT_SECRET`, etc. — see `.env.example`) or in Settings → Cloud Backup.
+
 Schedule automatic backups (daily or weekly at a chosen time), or trigger a manual backup with the "Backup Now" button. Each backup is a ZIP containing the SQLite database, a SHA-256 checksum, and a manifest with table row counts. Job history shows status, size, and timestamps for recent backups.
 
 ---
@@ -483,3 +487,13 @@ RAPR-AI/
 
 **Switching AI on a session clears the conversation history**
 - This is intentional. A new AI needs a clean slate; the old history is still in the daily log file.
+
+---
+
+## Contributing
+
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) to get set up, and [SECURITY.md](SECURITY.md) to report a vulnerability privately.
+
+## License
+
+RAPR AI is released under the [MIT License](LICENSE).
