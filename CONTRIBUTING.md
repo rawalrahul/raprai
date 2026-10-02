@@ -9,7 +9,7 @@ Thanks for your interest in RAPR AI.
 3. Copy `.env.example` to `.env` and fill in what you need.
 4. `python web_app.py`, then open http://localhost:8000.
 
-See `QUICK_START.md` and `INSTALL_GUIDE.md` for details.
+See `README.md` for configuration and troubleshooting.
 
 ## Layout
 
@@ -22,7 +22,7 @@ See `QUICK_START.md` and `INSTALL_GUIDE.md` for details.
 | `marketplace/` | Built-in marketplace packages |
 | `rapr-oauth-proxy/` | Optional Cloudflare Worker for OAuth token exchange |
 | `tests/` | Test suite (`pytest`) |
-| `docs/` | Design specs and plans |
+| `.skills/skills/` | Built-in skill library loaded at startup |
 
 ## Pull requests
 

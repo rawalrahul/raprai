@@ -85,9 +85,6 @@ desktop.ini
 .claude/
 .superpowers/
 
-# Skills (managed externally)
-.skills/
-
 # Runtime state
 .heartbeat_last
 .fuse_hidden*
