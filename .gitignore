@@ -120,3 +120,14 @@ selected_news_topic.json
 
 # Test caches
 .pytest_cache/
+
+# Dependencies
+node_modules/
+
+# Cloudflare Wrangler local state
+.wrangler/
+
+# Per-user runtime state
+user_prefs.json
+.rapr_screenshots/
+nuitka-crash-report.xml

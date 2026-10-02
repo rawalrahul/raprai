@@ -1,0 +1,31 @@
+# Contributing
+
+Thanks for your interest in RAPR AI.
+
+## Getting started
+
+1. Install Python 3.11+ and at least one AI CLI (Claude Code, Gemini, Codex or Ollama).
+2. `pip install -r requirements.txt`
+3. Copy `.env.example` to `.env` and fill in what you need.
+4. `python web_app.py`, then open http://localhost:8000.
+
+See `QUICK_START.md` and `INSTALL_GUIDE.md` for details.
+
+## Layout
+
+| Path | What lives there |
+|------|------------------|
+| `web_app.py` | Entry point (FastAPI + Telegram bot) |
+| `helm/` | Core: sessions, AI runners, memory, council, pipelines, plugins, MCP |
+| `frontend2/` | Web UI (vanilla JS) |
+| `chrome-extension/` | Browser companion for computer use |
+| `marketplace/` | Built-in marketplace packages |
+| `rapr-oauth-proxy/` | Optional Cloudflare Worker for OAuth token exchange |
+| `tests/` | Test suite (`pytest`) |
+| `docs/` | Design specs and plans |
+
+## Pull requests
+
+- Keep changes focused; one feature or fix per PR.
+- Run `pytest` before opening a PR.
+- Do not commit secrets, local databases, logs or `node_modules/`.

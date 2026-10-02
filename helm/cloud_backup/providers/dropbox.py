@@ -35,14 +35,14 @@ class DropboxBackupProvider(BackupProvider):
     # Token vault key for Dropbox
     VAULT_KEY = "BACKUP_DROPBOX_TOKEN"
 
-    # Bundled OAuth app credentials (registered by RAPR AI developer).
-    # Users can override via env vars or the Settings UI (token vault).
-    _DEFAULT_APP_KEY = "REDACTED"
-    _DEFAULT_APP_SECRET = "REDACTED"
+    # No bundled OAuth app: register your own and set the credentials via
+    # env vars or the Settings UI (token vault).
+    _DEFAULT_APP_KEY = ""
+    _DEFAULT_APP_SECRET = ""
 
     def __init__(self):
         """Initialize the Dropbox provider."""
-        # Priority: env var → token vault → bundled default
+        # Priority: env var → token vault
         self.app_key = os.environ.get("BACKUP_DROPBOX_APP_KEY", "")
         self.app_secret = os.environ.get("BACKUP_DROPBOX_APP_SECRET", "")
         if not self.app_key or not self.app_secret:
@@ -52,7 +52,7 @@ class DropboxBackupProvider(BackupProvider):
                 self.app_secret = self.app_secret or load_token("BACKUP_DROPBOX_APP_SECRET")
             except Exception:
                 pass
-        # Fall back to bundled defaults
+        # Fall back to (empty) defaults
         self.app_key = self.app_key or self._DEFAULT_APP_KEY
         self.app_secret = self.app_secret or self._DEFAULT_APP_SECRET
         self._token_data: Optional[dict] = None

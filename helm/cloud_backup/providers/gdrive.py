@@ -37,13 +37,13 @@ class GDriveBackupProvider(BackupProvider):
 
     VAULT_KEY = "BACKUP_GDRIVE_TOKEN"
 
-    # Bundled OAuth app credentials (registered by RAPR AI developer).
-    # Users can override via env vars or the Settings UI (token vault).
-    _DEFAULT_CLIENT_ID = "REDACTED"
-    _DEFAULT_CLIENT_SECRET = "REDACTED"
+    # No bundled OAuth app: register your own and set the credentials via
+    # env vars or the Settings UI (token vault).
+    _DEFAULT_CLIENT_ID = ""
+    _DEFAULT_CLIENT_SECRET = ""
 
     def __init__(self):
-        # Priority: env var → token vault → bundled default
+        # Priority: env var → token vault
         self.client_id = os.getenv("BACKUP_GDRIVE_CLIENT_ID", "")
         self.client_secret = os.getenv("BACKUP_GDRIVE_CLIENT_SECRET", "")
         if not self.client_id or not self.client_secret:
@@ -53,7 +53,7 @@ class GDriveBackupProvider(BackupProvider):
                 self.client_secret = self.client_secret or load_token("BACKUP_GDRIVE_CLIENT_SECRET")
             except Exception:
                 pass
-        # Fall back to bundled defaults
+        # Fall back to (empty) defaults
         self.client_id = self.client_id or self._DEFAULT_CLIENT_ID
         self.client_secret = self.client_secret or self._DEFAULT_CLIENT_SECRET
         self._token_data: Optional[dict] = None
