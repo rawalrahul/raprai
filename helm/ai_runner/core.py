@@ -17,7 +17,7 @@ from typing import Optional
 from helm.subprocess_utils import hidden_kwargs
 
 import helm.state as _st
-from helm.broadcast import push_message, push_state, push_thinking
+from helm.broadcast import broadcast, push_agent_error, push_message, push_state, push_thinking
 from helm.config import CLAUDE_TIMEOUT, INTEGRATION_TIMEOUT, logger
 from helm.history import save_cwd_to_log
 from helm.session_mgr import focused_session, record_usage_task
@@ -716,14 +716,18 @@ async def process_message(text: str, source: str = "web",
     if os.environ.get("PIPELINE_AUTO_SUGGEST", "1") == "1":
         from helm.pipeline.planner import looks_complex
         if looks_complex(stripped) and not (sess or {}).get("pipeline_id"):
+            # Remember the prompt so the web UI's "Call the Kelvin crew" button
+            # (WS command "crew") can re-run it as a pipeline.
+            sess["crew_prompt"] = stripped
             await push_message(
                 "system",
-                "💡 This looks like a complex multi-step task. Want me to break it "
-                "into a pipeline with different AIs handling each part?\n\n"
-                "Type `/pipeline` followed by your task to decompose it, "
-                "or just press Enter to run it directly with the current AI.",
+                f"💡 This looks like a big multi-step task. {(sess.get('ai') or 'The current AI').capitalize()} "
+                "has started on it. The Kelvin crew can split it across several AIs and run "
+                "independent parts in parallel instead: use the button below, or type /pipeline "
+                "followed by your task.",
                 source=source, session_id=sid,
             )
+            await broadcast({"type": "crew_suggest", "session_id": sid})
 
     # ── /model slash command — handled before routing to any AI ──────────────
     if stripped.lower().startswith("/model"):
@@ -1111,6 +1115,9 @@ async def process_message(text: str, source: str = "web",
             _sess_lock.release()
         await push_state()  # flip session back to idle
         await tg_progress_notify(sess, output, elapsed, source, prompt_text=text)
+        if not _is_failure(output):
+            from helm.kelvin_stickers import done_sticker_for_task
+            done_sticker_for_task(elapsed, output, source)
 
     return output
 
@@ -1838,6 +1845,7 @@ async def _dispatch_with_recovery(ai: str, sess: dict, text: str, safe_text: str
             f"Last error:\n{last_output[:500]}"
         )
         await push_message("system", fail_msg, source=source, session_id=sid)
+        await push_agent_error(fail_msg, session_id=sid, source=source)
         return last_output, ai
 
     fallback_list = await asyncio.to_thread(_find_available_ais, ai)
@@ -1849,6 +1857,7 @@ async def _dispatch_with_recovery(ai: str, sess: dict, text: str, safe_text: str
             f"Last error:\n{last_output[:500]}"
         )
         await push_message("system", fail_msg, source=source, session_id=sid)
+        await push_agent_error(fail_msg, session_id=sid, source=source)
         return last_output, ai
 
     fallback_ai = fallback_list[0]  # pick the first available
@@ -1898,6 +1907,7 @@ async def _dispatch_with_recovery(ai: str, sess: dict, text: str, safe_text: str
                 f"{fallback_output[:500]}"
             )
             await push_message("system", all_fail_msg, source=source, session_id=sid)
+            await push_agent_error(all_fail_msg, session_id=sid, source=source)
             await push_state()
             return fallback_output, fallback_list[-1]
 
@@ -1916,4 +1926,5 @@ async def _dispatch_with_recovery(ai: str, sess: dict, text: str, safe_text: str
         await push_state()
         error_msg = f"❌ Fallback to **{fallback_ai}** failed with error: {exc}"
         await push_message("system", error_msg, source=source, session_id=sid)
+        await push_agent_error(error_msg, session_id=sid, source=source)
         return str(exc), ai

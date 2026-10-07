@@ -889,7 +889,6 @@ header {
 /* Thinking indicator */
 #thinking {
   padding: 8px 28px !important;
-  display: flex;
   align-items: center;
   gap: 8px;
 }

@@ -498,6 +498,8 @@ async def execute_pipeline(pipeline_id: str) -> None:
             for s in pipeline["steps"]
         )
         pipeline["status"] = "completed" if all_completed else "failed"
+        from helm.kelvin_stickers import kelvin_sticker_soon
+        kelvin_sticker_soon("done" if all_completed else "error")
 
     pipeline["completed_at"] = time.time()
 

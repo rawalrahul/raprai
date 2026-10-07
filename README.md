@@ -54,6 +54,10 @@ Telegram App (your phone)        ←── Bot API  ────┘             
    ```
    Copy it — you'll need it in Step 3.
 
+6. *(Optional)* Give your bot Kelvin's face: send `/setuserpic` to **@BotFather**, pick your bot, and upload `frontend2/assets/kelvin/avatar.png`.
+
+> **Kelvin stickers.** Kelvin, the RAPR AI penguin, can also send a sticker when a long task or pipeline finishes, when a run fails, and alongside approval requests. It's off by default: turn on **Settings → Personalization → Kelvin stickers on Telegram**.
+
 ---
 
 ## Step 2 — Find your Telegram User ID

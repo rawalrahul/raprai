@@ -175,6 +175,46 @@ async def ws_endpoint(websocket: WebSocket):
 # Web command handler
 # ---------------------------------------------------------------------------
 
+CREW_WAIT_SECONDS = 15
+
+
+async def call_kelvin_crew(sess: dict) -> bool:
+    """Stop the session's solo run (if any) and re-run its last big task as a pipeline.
+
+    Returns True when the pipeline was started.
+    """
+    prompt = sess.get("crew_prompt")
+    if not prompt:
+        await push_message("system", "There's no recent task for the Kelvin crew to pick up.",
+                           source="web", session_id=sess["id"])
+        return False
+
+    lock = sess.get("_lock")
+    if lock and lock.locked():
+        kill_session_proc(sess)
+        sess["busy"] = False
+        sess["task_start"] = None
+        await push_thinking(False, session_id=sess["id"])
+        await push_message("system", "⏸ Stopped the solo run. Calling the Kelvin crew…",
+                           source="web", session_id=sess["id"])
+        waited = 0.0
+        while lock.locked() and waited < CREW_WAIT_SECONDS:
+            await asyncio.sleep(0.2)
+            waited += 0.2
+        if lock.locked():
+            await push_message(
+                "system",
+                "The current run hasn't stopped yet, so the crew can't start. "
+                "Try again when it finishes.",
+                source="web", session_id=sess["id"],
+            )
+            return False
+
+    sess.pop("crew_prompt", None)
+    asyncio.create_task(process_message(f"/pipeline {prompt}", source="web", session_id=sess["id"]))
+    return True
+
+
 async def handle_web_command(command: str, ws: WebSocket):
     """Handle control commands sent from the web UI (multi-session aware)."""
     from helm.terminal import TerminalSession
@@ -349,6 +389,13 @@ async def handle_web_command(command: str, ws: WebSocket):
                                        session_id=sess["id"])
             except RuntimeError as e:
                 await push_message("system", str(e), source="web")
+        return
+
+    # --- crew: re-run the last big task as a parallel pipeline ---
+    if command == "crew":
+        sess = focused_session()
+        if sess:
+            await call_kelvin_crew(sess)
         return
 
     # --- clear ---

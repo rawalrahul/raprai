@@ -173,6 +173,9 @@ async def _send_approval_to_telegram(req: dict):
 
     text += "\nApprove or deny this action:"
 
+    from helm.kelvin_stickers import send_kelvin_sticker
+    await send_kelvin_sticker("approval")  # no-op unless the user opted in
+
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ Approve", callback_data=f"appr:approve:{req_id}"),

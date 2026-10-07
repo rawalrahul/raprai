@@ -15,6 +15,7 @@ from fastapi import WebSocket
 import helm.state as _st
 from helm.config import logger
 from helm.history import save_message_to_log, save_last_state, ts
+from helm.kelvin_status import status as _kelvin_status
 from helm.session_mgr import focused_session, sessions_state_payload
 
 
@@ -24,6 +25,8 @@ from helm.session_mgr import focused_session, sessions_state_payload
 
 async def broadcast(data: dict):
     """Push a JSON message to every connected WebSocket client."""
+    # Kelvin's tray badge must keep up even when no browser is open.
+    _kelvin_status.observe(data)
     if not _st.ws_clients:
         return
     payload = json.dumps(data, default=str)
@@ -103,3 +106,20 @@ async def push_thinking(active: bool, ai: Optional[str] = None,
 
 
 _push_thinking = push_thinking  # legacy alias
+
+
+async def push_agent_error(message: str, session_id: Optional[str] = None,
+                           source: str = ""):
+    """Tell clients an AI run failed for good (after retries and fallbacks).
+
+    The web UI uses this to show Kelvin's error state; the human-readable
+    explanation still arrives as a normal system message. Users who opted in
+    also get Kelvin's error sticker on Telegram.
+    """
+    from helm.kelvin_stickers import error_sticker_for_task
+    error_sticker_for_task(source)
+    await broadcast({
+        "type": "agent_error",
+        "message": message[:300],
+        "session_id": session_id,
+    })

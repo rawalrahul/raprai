@@ -155,6 +155,7 @@ function connect(){
   ws.onerror = (ev) => { console.error('[RAPR AI] WS error', ev); };
   ws.onmessage = e => {
     const d = JSON.parse(e.data);
+    if(window.KelvinUI) KelvinUI.onWs(d, _focusedId);
     if(d.type==='message'){
       _liveHistory.push(d);
       if(!_viewingHistory && (!d.session_id || d.session_id === _focusedId)){
@@ -675,9 +676,9 @@ function _refreshThinkingUI(){
 
 // --- Logo watermark helpers ------------------------------------------------------------------------------
 function _clearMessages(){
-  // Remove all message groups but keep #chat-logo-bg intact
+  // Remove all message groups but keep #chat-logo-bg and Kelvin's greeting intact
   const wrap = document.getElementById('messages');
-  [...wrap.children].forEach(el => { if(el.id !== 'chat-logo-bg') el.remove(); });
+  [...wrap.children].forEach(el => { if(el.id !== 'chat-logo-bg' && el.id !== 'kelvin-hello') el.remove(); });
   wrap.classList.remove('has-messages');
 }
 function _updateLogoState(){
@@ -2140,7 +2141,7 @@ function loadSettings(){
                   'CLAUDE_TIMEOUT','SESSION_DAYS','WEB_PORT','WEB_HOST',
                   'HEARTBEAT_ENABLED','HEARTBEAT_AI',
                   'AI_MAX_RETRIES','AI_AUTO_SWITCH',
-                  'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD',
+                  'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD','TELEGRAM_KELVIN_STICKERS',
                   'LOCAL_AI_URL','LOCAL_AI_MODEL',
                   'COMPUTER_USE','COMPUTER_USE_TIER2','OMNIPARSER_ENABLED'];
     keys.forEach(k=>{
@@ -2226,7 +2227,7 @@ function saveSettings(){
                 'CLAUDE_TIMEOUT','SESSION_DAYS','WEB_PORT','WEB_HOST',
                 'HEARTBEAT_ENABLED','HEARTBEAT_AI',
                 'AI_MAX_RETRIES','AI_AUTO_SWITCH',
-                'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD',
+                'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD','TELEGRAM_KELVIN_STICKERS',
                 'LOCAL_AI_URL','LOCAL_AI_MODEL',
                 'COMPUTER_USE','COMPUTER_USE_TIER2','OMNIPARSER_ENABLED'];
   const body = {};

@@ -18,6 +18,7 @@
 <link rel="stylesheet" href="/css/premium.css?v=3">
 <link rel="stylesheet" href="/css/overhaul.css?v=1">
 <link rel="stylesheet" href="/css/impeccable.css?v=3">
+<link rel="stylesheet" href="/css/kelvin.css?v=3">
 </head>
 <body>
 <div id="app" class="main-layout">
@@ -304,7 +305,7 @@
     <button class="panel-toggle" id="toggle-left-panel" onclick="toggleLeftPanel()" title="Toggle left sidebar" aria-label="Toggle left sidebar">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
-    <div class="logo">RAPR<em>AI</em></div>
+    <div class="logo">RAPR<em>AI</em><span class="kelvin-slot" id="kelvin-header"></span></div>
   </div>
   <div class="header-context" id="header-context" aria-live="polite">
     <div class="hctx-dot" id="hctx-dot"></div>
@@ -344,6 +345,7 @@
 <!-- Approval request banner (shown when destructive action needs user confirmation) -->
 <div id="approval-banner" class="approval-banner" style="display:none">
   <div class="approval-banner-content">
+    <span class="kelvin-slot" id="kelvin-approval"></span>
     <span id="approval-banner-icon">⚠️</span>
     <span id="approval-banner-msg">An action requires your approval</span>
   </div>
@@ -565,6 +567,25 @@ Example:
             <small>What your AI assistant calls itself</small>
           </label>
           <input class="settings-input wide" type="text" id="st-ai-name" placeholder="e.g. Jarvis, Nova" autocomplete="off">
+        </div>
+        <div class="settings-row">
+          <label for="st-kelvin">Kelvin the penguin
+            <small>Shows what your AI is doing. Saved on this device.</small>
+          </label>
+          <select class="settings-input" id="st-kelvin" onchange="KelvinUI.setMode(this.value)">
+            <option value="animated">Animated</option>
+            <option value="still">Still</option>
+            <option value="hidden">Hidden</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <label for="st-TELEGRAM_KELVIN_STICKERS">Kelvin stickers on Telegram
+            <small>Kelvin sends a sticker when a long task or pipeline finishes, when a run fails, and with approval requests. Saved with the other settings.</small>
+          </label>
+          <select class="settings-input" id="st-TELEGRAM_KELVIN_STICKERS" style="width:auto">
+            <option value="0">Off</option>
+            <option value="1">On</option>
+          </select>
         </div>
         <div style="padding:8px 0">
           <button class="settings-save-btn" onclick="savePersonalization()" style="font-size:11px;padding:4px 12px">Save Names</button>
@@ -1080,11 +1101,19 @@ Example:
   <div class="grp system">
     <div class="bubble">Connecting to server...</div>
   </div>
+  <div id="kelvin-hello">
+    <span class="kelvin-slot" id="kelvin-hello-art"></span>
+    <div class="kelvin-hello-title">Kelvin is here</div>
+    <div class="kelvin-hello-sub">Pick an AI below and say hello. Kelvin shows what it's doing while it works.</div>
+  </div>
 </div>
 <div id="thinking" role="status" aria-live="polite">
+  <span class="kelvin-slot" id="kelvin-thinking"></span>
   <div class="dots" aria-hidden="true"><span></span><span></span><span></span></div>
   <span id="thlabel">Thinking...</span>
 </div>
+
+<div id="kelvin-crew" class="kelvin-crew" aria-live="polite" hidden></div>
 
 <div class="input-bar" role="form" aria-label="Chat input">
   <!-- AI picker chip -->
@@ -1446,6 +1475,7 @@ Example:
   </div>
 </div>
 
+<script src="/js/kelvin.js?v=3"></script>
 <script src="/js/complete.js?v=9"></script>
 <script src="/js/packages.js?v=4"></script>
 <script src="/js/memory.js?v=2"></script>

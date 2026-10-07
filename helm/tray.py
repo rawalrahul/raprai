@@ -103,10 +103,23 @@ def start_tray(port: int, shutdown_callback=None):
                      "Install with: pip install pystray")
         return
 
-    icon_image = _load_icon()
-    if icon_image is None:
+    logo_image = _load_icon()
+    if logo_image is None:
         logger.warning("No icon image available — skipping tray")
         return
+
+    # Kelvin sits next to the logo as a small badge whose colour shows what
+    # the agents are doing (see helm/kelvin_status.py).
+    from helm.kelvin_status import status as kelvin, tray_icon_image
+
+    def _icon_for(mood):
+        try:
+            return tray_icon_image(mood, logo=logo_image)
+        except Exception as exc:
+            logger.warning("Kelvin tray badge unavailable: %s", exc)
+            return logo_image
+
+    icon_image = _icon_for(kelvin.mood())
 
     url = f"http://localhost:{port}"
 
@@ -198,6 +211,7 @@ def start_tray(port: int, shutdown_callback=None):
 
     menu = Menu(
         MenuItem(f"RAPR AI — {url}", on_open_ui, default=True),
+        MenuItem(lambda item: kelvin.describe(), on_open_ui, enabled=False),
         Menu.SEPARATOR,
         MenuItem("Open in Browser", on_open_ui),
         MenuItem("Show Console", on_show_console),
@@ -213,6 +227,29 @@ def start_tray(port: int, shutdown_callback=None):
         title=f"RAPR AI — Running on {url}",
         menu=menu,
     )
+
+    def _on_kelvin(mood, new_approval):
+        icon = _tray_icon
+        if icon is None:
+            return
+        try:
+            icon.icon = _icon_for(mood)
+            icon.title = f"RAPR AI — {kelvin.describe()}"[:127]
+            icon.update_menu()
+            if new_approval and getattr(icon, "HAS_NOTIFICATION", True):
+                icon.notify(new_approval["description"][:200], "Kelvin needs your approval")
+        except Exception as exc:
+            logger.debug("Kelvin tray update failed: %s", exc)
+
+    kelvin.subscribe(_on_kelvin)
+
+    def _tick():
+        # Lets timed moods (done, error) fade back to idle without new events.
+        while _tray_icon is not None:
+            kelvin.tick()
+            threading.Event().wait(2.0)
+
+    threading.Thread(target=_tick, daemon=True, name="kelvin-tray-tick").start()
 
     def _run_tray():
         try:

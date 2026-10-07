@@ -1,0 +1,104 @@
+/* Kelvin, the RAPR AI penguin. Slots are filled by js/kelvin.js. */
+
+.kelvin-slot { display: inline-flex; flex-shrink: 0; }
+.kelvin-slot .kelvin-svg { width: 100%; height: 100%; display: block; overflow: visible; }
+
+/* Header: beside the RAPR logo, shows the focused session's mood */
+#kelvin-header { width: 24px; height: 27px; margin-left: 8px; vertical-align: -6px; }
+
+/* Thinking indicator: Kelvin replaces the three dots */
+#kelvin-thinking { width: 26px; height: 30px; }
+:root:not([data-kelvin="hidden"]) #thinking .dots { display: none; }
+
+/* Approval banner: Kelvin replaces the warning icon */
+#kelvin-approval { width: 28px; height: 32px; }
+:root:not([data-kelvin="hidden"]) #approval-banner-icon { display: none; }
+
+/* Empty chat greeting */
+#kelvin-hello {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  margin: auto; padding: 32px 16px; text-align: center; position: relative; z-index: 1;
+}
+#kelvin-hello-art { width: 150px; height: 160px; }
+#kelvin-hello .kelvin-hello-title { font-size: 15px; font-weight: 700; color: var(--text, inherit); }
+#kelvin-hello .kelvin-hello-sub { font-size: 12.5px; color: var(--muted); max-width: 34ch; }
+#messages.has-messages #kelvin-hello { display: none; }
+
+/* Hidden mode: remove every Kelvin, restore the original dots and icon */
+:root[data-kelvin="hidden"] .kelvin-slot,
+:root[data-kelvin="hidden"] #kelvin-hello { display: none !important; }
+
+/* State effects drawn around the large Kelvin */
+.kv-ov { transition: opacity .35s ease; }
+.kv-ov * { transform-box: fill-box; transform-origin: center; }
+.kv-d1 { animation-delay: .2s !important; }
+.kv-d2 { animation-delay: .4s !important; }
+.kv-d3 { animation-delay: .7s !important; }
+.kv-d4 { animation-delay: .9s !important; }
+.kv-d5 { animation-delay: 1.8s !important; }
+.kv-bob { animation: kv-bob 1.2s ease-in-out infinite; }
+@keyframes kv-bob { 50% { transform: translateY(-5px); } }
+.kv-spin { animation: kv-spin 1.6s linear infinite; }
+@keyframes kv-spin { to { transform: rotate(360deg); } }
+.kv-twinkle { animation: kv-twinkle 1.1s ease-in-out infinite; }
+@keyframes kv-twinkle { 0%, 100% { transform: scale(.4); opacity: .3; } 50% { transform: scale(1.1); opacity: 1; } }
+.kv-drip { animation: kv-drip 1.8s ease-in infinite; }
+@keyframes kv-drip { 0% { transform: translateY(-4px); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateY(14px); opacity: 0; } }
+.kv-zz { animation: kv-zz 2.6s ease-out infinite; }
+@keyframes kv-zz { 0% { transform: translate(0, 0) scale(.6); opacity: 0; } 25% { opacity: 1; } 100% { transform: translate(14px, -26px) scale(1.15); opacity: 0; } }
+.kv-wave { animation: kv-wave 1.4s ease-out infinite; }
+@keyframes kv-wave { 0% { opacity: 0; transform: scale(.7); } 30% { opacity: 1; } 100% { opacity: 0; transform: scale(1.25); } }
+.kv-pulse { animation: kv-pulse 1.6s ease-in-out infinite; }
+@keyframes kv-pulse { 50% { transform: scale(1.04); } }
+
+:root[data-kelvin="still"] .kv-ov *,
+:root[data-kelvin="still"] .kv-ov { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .kv-ov, .kv-ov * { animation: none !important; transition: none !important; }
+}
+
+/* Kelvin crew: duplicates for parallel sessions and pipeline steps */
+.kelvin-crew {
+  display: grid; gap: 10px; margin: 0 20px 8px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--surface, transparent);
+}
+.kelvin-crew[hidden] { display: none; }
+:root[data-kelvin="hidden"] .kelvin-crew { display: none !important; }
+.kc-group { display: grid; gap: 6px; min-width: 0; }
+.kc-group + .kc-group { border-top: 1px solid var(--border); padding-top: 10px; }
+.kc-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.kc-title { font-size: 12.5px; font-weight: 700; }
+.kc-sub { font-size: 12px; color: var(--muted); flex: 1; min-width: 0; }
+.kc-close { color: var(--muted); cursor: pointer; font-size: 12px; padding: 2px 6px; border-radius: 6px; }
+.kc-close:hover { color: inherit; }
+.kc-row { display: flex; align-items: center; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.kc-wave { display: flex; flex-direction: column; gap: 4px; }
+.kc-parallel { padding: 4px; border-radius: 10px; background: color-mix(in oklab, var(--accent, #f2b33d) 7%, transparent); }
+.kc-handoff { color: var(--muted); font-size: 14px; flex-shrink: 0; }
+.kc-m {
+  display: grid; grid-template-columns: 30px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 6px;
+  align-items: center; width: 152px; padding: 4px 8px 4px 4px; border-radius: 9px;
+  border: 1px solid transparent;
+}
+.kc-click { cursor: pointer; }
+.kc-click:hover, .kc-click:focus-visible { border-color: var(--border); }
+.kc-m.kc-focused { border-color: var(--accent, #f2b33d); }
+.kc-art { grid-row: 1 / 3; width: 30px; height: 34px; }
+.kc-name { grid-column: 2; grid-row: 1; align-self: end; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kc-tag { grid-column: 2; grid-row: 2; align-self: start; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kc-m[data-status="pending"] .kc-art, .kc-m[data-status="skipped"] { opacity: .5; }
+.kc-m[data-status="failed"] .kc-tag { grid-column: 2; grid-row: 2; align-self: start; color: var(--err, #f87171); }
+.kc-m[data-status="completed"] .kc-tag::before { content: "✓ "; color: var(--ok, #34d399); }
+.kc-lead .kc-name { grid-column: 2; grid-row: 1; align-self: end; color: var(--accent, #f2b33d); }
+
+/* "Call the Kelvin crew" offer under a big task */
+.kelvin-crew-offer {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; align-self: flex-start;
+  max-width: min(560px, 100%); padding: 10px 12px; border: 1px dashed var(--border); border-radius: 12px;
+  position: relative; z-index: 1;
+}
+.kco-art { display: flex; }
+.kco-art .kelvin-slot { width: 26px; height: 30px; margin-right: -6px; }
+:root[data-kelvin="hidden"] .kco-art { display: none; }
+.kco-text { font-size: 12.5px; color: var(--muted); flex: 1; min-width: 180px; }
+.kco-text b { color: inherit; }

@@ -500,6 +500,12 @@ async def _main():
         os._exit(0)
 
     try:
+        from helm.kelvin_status import startup_banner
+        startup_banner(url)
+    except Exception:
+        pass
+
+    try:
         from helm.tray import hide_console, start_tray, stop_tray
         hide_console()
         start_tray(actual_port, shutdown_callback=_tray_shutdown)
