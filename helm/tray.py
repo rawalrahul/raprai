@@ -209,12 +209,36 @@ def start_tray(port: int, shutdown_callback=None):
             # Force exit if no callback provided
             os._exit(0)
 
+    from helm.keep_awake import MODES as _awake_modes, MODE_LABELS as _awake_labels, \
+        current_mode as _awake_mode, set_mode as _awake_set
+
+    def _set_awake(mode):
+        def _handler(icon, item):
+            try:
+                _awake_set(mode)
+                icon.update_menu()
+            except Exception as exc:
+                logger.warning("Could not change keep-awake mode: %s", exc)
+        return _handler
+
+    from helm.desktop_kelvin import pet_enabled as _pet_enabled, set_pet_enabled, start_desktop_kelvin
+
+    def _toggle_pet(icon, item):
+        set_pet_enabled(not _pet_enabled())
+        icon.update_menu()
+
     menu = Menu(
         MenuItem(f"RAPR AI — {url}", on_open_ui, default=True),
         MenuItem(lambda item: kelvin.describe(), on_open_ui, enabled=False),
         Menu.SEPARATOR,
         MenuItem("Open in Browser", on_open_ui),
         MenuItem("Show Console", on_show_console),
+        MenuItem("Kelvin on desktop", _toggle_pet, checked=lambda item: _pet_enabled()),
+        MenuItem("Keep PC awake", Menu(*[
+            MenuItem(_awake_labels[m], _set_awake(m), radio=True,
+                     checked=(lambda m: lambda item: _awake_mode() == m)(m))
+            for m in _awake_modes
+        ])),
         MenuItem("Start on Login", on_toggle_autostart,
                  checked=lambda item: _is_autostart_enabled()),
         Menu.SEPARATOR,
@@ -251,15 +275,43 @@ def start_tray(port: int, shutdown_callback=None):
 
     threading.Thread(target=_tick, daemon=True, name="kelvin-tray-tick").start()
 
+    def _setup(icon):
+        icon.visible = True
+        try:
+            from helm.kelvin_tips import first_run_tip
+            threading.Event().wait(2.0)  # give Windows a moment to show the icon first
+            first_run_tip(notify)
+        except Exception as exc:
+            logger.debug("First-run tip failed: %s", exc)
+
     def _run_tray():
         try:
-            _tray_icon.run()
+            _tray_icon.run(setup=_setup)
         except Exception as exc:
             logger.warning("Tray icon error: %s", exc)
 
     tray_thread = threading.Thread(target=_run_tray, daemon=True, name="tray-icon")
     tray_thread.start()
+
+    # Kelvin on the desktop: a draggable, always-on-top companion (Windows).
+    try:
+        start_desktop_kelvin(lambda: _open_app_mode(url))
+    except Exception as exc:
+        logger.info("Desktop Kelvin not started: %s", exc)
     logger.info("System tray icon started")
+
+
+def notify(title: str, message: str) -> bool:
+    """Show a Windows notification from the tray icon (no-op if the tray isn't running)."""
+    icon = _tray_icon
+    if icon is None or not getattr(icon, "HAS_NOTIFICATION", True):
+        return False
+    try:
+        icon.notify(message, title)
+        return True
+    except Exception as exc:
+        logger.debug("Tray notification failed: %s", exc)
+        return False
 
 
 def stop_tray():

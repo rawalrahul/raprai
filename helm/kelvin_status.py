@@ -42,6 +42,9 @@ class KelvinStatus:
         self._lock = threading.Lock()
         self._busy: set[str] = set()
         self._approvals: dict[str, str] = {}
+        self._pipelines: set[str] = set()
+        self.started_at = time.time()
+        self._last_event = time.time()
         self._done_until = 0.0
         self._error_until = 0.0
         self._listeners: list[Callable[[str, Optional[dict]], None]] = []
@@ -81,13 +84,19 @@ class KelvinStatus:
                 self._done_until = now + DONE_SECONDS
                 self._error_until = 0.0
             elif kind == "pipeline_update":
-                status = (data.get("pipeline") or {}).get("status")
+                pl = data.get("pipeline") or {}
+                status = pl.get("status")
+                if status == "running":
+                    self._pipelines.add(str(pl.get("id")))
+                else:
+                    self._pipelines.discard(str(pl.get("id")))
                 if status == "completed":
                     self._done_until = now + DONE_SECONDS
                 elif status == "failed":
                     self._error_until = now + ERROR_SECONDS
             else:
                 return
+            self._last_event = now
         self._notify(new_approval)
 
     # -- output --------------------------------------------------------------
@@ -104,6 +113,21 @@ class KelvinStatus:
             if now < self._done_until:
                 return "done"
             return "idle"
+
+    def active(self) -> bool:
+        """True while there is real work in flight (busy sessions, running pipelines, waiting approvals)."""
+        with self._lock:
+            return bool(self._busy or self._pipelines or self._approvals)
+
+    def idle_seconds(self, now: Optional[float] = None) -> float:
+        """Seconds since the last agent event (used to let Kelvin doze off)."""
+        with self._lock:
+            return (now or time.time()) - self._last_event
+
+    def counts(self) -> dict:
+        with self._lock:
+            return {"busy": len(self._busy), "pipelines": len(self._pipelines), "approvals": len(self._approvals),
+                    "approval_texts": list(self._approvals.values())}
 
     def describe(self, now: Optional[float] = None) -> str:
         mood = self.mood(now)

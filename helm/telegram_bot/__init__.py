@@ -26,7 +26,7 @@ from .browse import (
 # Commands (all /command handlers)
 from .commands import (
     tg_start, tg_menu, tg_launch, tg_claude, tg_codex, tg_gemini,
-    tg_stop_ai, tg_clear, tg_cmd, tg_status, tg_interrupt, tg_stop,
+    tg_stop_ai, tg_clear, tg_cmd, tg_status, tg_kelvin, tg_interrupt, tg_stop,
     tg_cwd, tg_timeout, tg_schedule, tg_history, tg_resume,
     tg_clear_context, tg_text, tg_voice, tg_file, tg_pipeline, tg_agent,
     perform_resume, _perform_resume,
@@ -73,6 +73,7 @@ __all__ = [
     "tg_clear",
     "tg_cmd",
     "tg_status",
+    "tg_kelvin",
     "tg_interrupt",
     "tg_stop",
     "tg_cwd",

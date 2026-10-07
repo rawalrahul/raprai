@@ -68,6 +68,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 Name: "rundeps"; Description: "Install required tools (Node.js, Pandoc, FFmpeg)"; GroupDescription: "Post-install:"; Flags: checkedonce
+Name: "autostart"; Description: "Start RAPR AI when Windows starts (keeps Kelvin, schedules and Telegram always on)"; GroupDescription: "Startup:"
 
 [Files]
 ; Include EVERYTHING from the Nuitka dist folder EXCEPT plugins and skills
@@ -85,6 +86,10 @@ Name: "{group}\RAPR AI Folder"; Filename: "{app}"; Comment: "Open RAPR AI instal
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 ; Desktop shortcut (with app icon)
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\logo.ico"; Tasks: desktopicon; Comment: "Launch RAPR AI"
+
+[Registry]
+; Same value the tray's "Start on Login" toggle writes, so the two stay in sync.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "RAPR AI"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
 ; Run setup_dist.bat after install (if user checked the option)

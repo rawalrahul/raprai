@@ -169,6 +169,13 @@ async def ws_endpoint(websocket: WebSocket):
     finally:
         _st.ws_clients.discard(websocket)
         logger.info("WS client disconnected (total: %d)", len(_st.ws_clients))
+        if not _st.ws_clients:
+            # Last RAPR window closed: remind the user (a few times) that RAPR keeps running.
+            try:
+                from helm.kelvin_tips import schedule_window_closed_check
+                schedule_window_closed_check(lambda: bool(_st.ws_clients))
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------

@@ -226,6 +226,7 @@ Tap **➕ New Session** → pick an AI.
 | `/gemini` | Creates a new Gemini session |
 | `/codex` | Creates a new Codex session |
 | `/status` | Lists all sessions with status, AI, and directory |
+| `/kelvin` | Is RAPR on? Uptime, what's running, approvals waiting, next schedule, keep-awake. No reply means RAPR is off or the PC is asleep |
 | `/stop` | Stops the focused session |
 | `/interrupt` | Sends Ctrl+C to the focused session |
 | `/stop_ai` | Removes the AI from the focused session (keeps terminal running as shell) |

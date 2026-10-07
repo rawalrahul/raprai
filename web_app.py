@@ -288,7 +288,7 @@ async def _main():
             tg_browse, tg_clear, tg_clear_context, tg_claude, tg_cmd,
             tg_codex, tg_cwd, tg_gemini, tg_history, tg_interrupt,
             tg_launch, tg_menu, tg_pipeline, tg_agent, tg_resume, tg_schedule,
-            tg_start, tg_status, tg_stop, tg_stop_ai, tg_text, tg_timeout,
+            tg_start, tg_status, tg_kelvin, tg_stop, tg_stop_ai, tg_text, tg_timeout,
             tg_voice, tg_file,
         )
 
@@ -310,6 +310,7 @@ async def _main():
         tg.add_handler(CommandHandler("interrupt", tg_interrupt))
         tg.add_handler(CommandHandler("stop_ai",   tg_stop_ai))
         tg.add_handler(CommandHandler("status",    tg_status))
+        tg.add_handler(CommandHandler("kelvin",    tg_kelvin))
         # Utility
         tg.add_handler(CommandHandler("cwd",          tg_cwd))
         tg.add_handler(CommandHandler("browse",        tg_browse))
@@ -380,7 +381,7 @@ async def _main():
                 tg_browse, tg_clear, tg_clear_context, tg_claude, tg_cmd,
                 tg_codex, tg_cwd, tg_gemini, tg_history, tg_interrupt,
                 tg_launch, tg_menu, tg_pipeline, tg_agent, tg_resume, tg_schedule,
-                tg_start, tg_status, tg_stop, tg_stop_ai, tg_text, tg_timeout,
+                tg_start, tg_status, tg_kelvin, tg_stop, tg_stop_ai, tg_text, tg_timeout,
                 tg_voice, tg_file,
             )
             _st.telegram_app = (
@@ -397,6 +398,7 @@ async def _main():
             tg.add_handler(CommandHandler("interrupt", tg_interrupt))
             tg.add_handler(CommandHandler("stop_ai",   tg_stop_ai))
             tg.add_handler(CommandHandler("status",    tg_status))
+            tg.add_handler(CommandHandler("kelvin",    tg_kelvin))
             tg.add_handler(CommandHandler("cwd",          tg_cwd))
             tg.add_handler(CommandHandler("browse",        tg_browse))
             tg.add_handler(CommandHandler("cmd",           tg_cmd))
@@ -506,6 +508,12 @@ async def _main():
         pass
 
     try:
+        from helm.keep_awake import start_keep_awake
+        start_keep_awake()
+    except Exception as exc:
+        logger.info("Keep-awake not available: %s", exc)
+
+    try:
         from helm.tray import hide_console, start_tray, stop_tray
         hide_console()
         start_tray(actual_port, shutdown_callback=_tray_shutdown)
@@ -548,6 +556,8 @@ async def _main():
     # Load persisted scheduled tasks and start the cron runner
     load_scheduled_tasks()
     asyncio.create_task(cron_runner())
+    from helm.kelvin_report import daily_checkin_loop
+    asyncio.create_task(daily_checkin_loop())
     asyncio.create_task(heartbeat_runner())
     asyncio.create_task(_open_browser())
 

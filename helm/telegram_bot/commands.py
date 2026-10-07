@@ -228,6 +228,17 @@ async def tg_status(update, context):
 
 
 @authorized_only
+async def tg_kelvin(update, context):
+    """'Is Kelvin on?' — uptime, what's running, approvals, next schedule, keep-awake."""
+    from helm.kelvin_report import kelvin_report
+    from helm.kelvin_status import status
+    from helm.kelvin_stickers import send_kelvin_sticker
+    mood = status.mood()
+    await send_kelvin_sticker(mood if mood in ("approval", "error", "working", "done") else "idle")
+    await update.message.reply_text(kelvin_report())
+
+
+@authorized_only
 async def tg_interrupt(update, context):
     """Interrupt the currently-running AI task."""
     from helm.session_mgr import focused_session

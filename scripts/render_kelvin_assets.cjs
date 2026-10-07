@@ -6,7 +6,7 @@
  *   node scripts/render_kelvin_assets.cjs
  *
  * Writes PNGs (stickers, tray faces, avatar) to frontend2/assets/kelvin/.
- * Convert the stickers to WEBP with:
+ * Convert the stickers to WEBP and pack the desktop sprite strips with:
  *   python scripts/png_to_webp.py
  */
 const path = require('path');
@@ -57,6 +57,31 @@ const STICKERS = ['done', 'error', 'approval', 'working', 'idle'];
     await page.waitForTimeout(150);
     await page.locator('#s').screenshot({ path: path.join(OUT, `tray-${mood}.png`), omitBackground: true });
   }
+
+  // Desktop Kelvin: one horizontal sprite strip per mood, animated frames captured live.
+  const PET_W = 160, PET_H = 170, PET_FRAMES = 16, PET_STEP_MS = 75;
+  await page.evaluate(([w, h]) => {
+    document.documentElement.setAttribute('data-kelvin', 'animated');
+    const host = document.getElementById('s');
+    host.style.width = w + 'px';
+    host.style.height = h + 'px';
+  }, [PET_W, PET_H]);
+  for (const mood of ['idle', 'working', 'thinking', 'approval', 'done', 'error', 'sleeping']) {
+    await page.evaluate((m) => {
+      const host = document.getElementById('s');
+      host.innerHTML = '';
+      window.__pet = Kelvin.mount(host, { pokeable: false, track: false });
+      window.__pet.setState(m);
+    }, mood);
+    await page.waitForTimeout(600); // let springs settle into the pose
+    const frames = [];
+    for (let i = 0; i < PET_FRAMES; i++) {
+      frames.push(await page.locator('#s').screenshot({ omitBackground: true }));
+      await page.waitForTimeout(PET_STEP_MS);
+    }
+    fs.writeFileSync(path.join(OUT, `pet-${mood}.frames.json`), JSON.stringify(frames.map((b) => b.toString('base64'))));
+  }
+  await page.evaluate(() => document.documentElement.setAttribute('data-kelvin', 'still'));
 
   // Avatar: square, opaque, Kelvin centred (Telegram crops it to a circle).
   await page.evaluate(() => {

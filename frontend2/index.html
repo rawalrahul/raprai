@@ -587,6 +587,38 @@ Example:
             <option value="1">On</option>
           </select>
         </div>
+        <div class="settings-row">
+          <label for="st-KELVIN_KEEP_AWAKE">Keep PC awake
+            <small>Stops Windows sleeping so tasks and schedules keep running. The screen can still turn off. Also in the tray menu.</small>
+          </label>
+          <select class="settings-input" id="st-KELVIN_KEEP_AWAKE" style="width:auto">
+            <option value="working">While Kelvin works</option>
+            <option value="always">Always</option>
+            <option value="off">Off</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <label for="st-KELVIN_DESKTOP_PET">Kelvin on desktop
+            <small>A small Kelvin you can drag anywhere on screen, always on top. Double-click to open RAPR. Also in the tray menu.</small>
+          </label>
+          <select class="settings-input" id="st-KELVIN_DESKTOP_PET" style="width:auto">
+            <option value="1">Show</option>
+            <option value="0">Hide</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <label for="st-KELVIN_DAILY_CHECKIN">Kelvin daily check-in
+            <small>Kelvin messages you on Telegram once a day so you know RAPR is on. Send /kelvin any time for the same report.</small>
+          </label>
+          <select class="settings-input" id="st-KELVIN_DAILY_CHECKIN" style="width:auto">
+            <option value="off">Off</option>
+            <option value="08:00">08:00</option>
+            <option value="09:00">09:00</option>
+            <option value="10:00">10:00</option>
+            <option value="18:00">18:00</option>
+            <option value="21:00">21:00</option>
+          </select>
+        </div>
         <div style="padding:8px 0">
           <button class="settings-save-btn" onclick="savePersonalization()" style="font-size:11px;padding:4px 12px">Save Names</button>
           <span id="personalization-msg" style="font-size:11px;color:var(--accent);margin-left:8px"></span>
