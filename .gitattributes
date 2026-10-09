@@ -1,0 +1,19 @@
+# Normalise line endings in the repo; let Git pick the right ones on checkout.
+* text=auto
+
+# Windows scripts must have CRLF endings or cmd.exe misparses labels,
+# goto/call targets and multi-line blocks. Force CRLF on every checkout
+# (including Linux/macOS clones and GitHub "Download ZIP").
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.iss text eol=crlf
+
+# Binary assets
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.zip  binary
