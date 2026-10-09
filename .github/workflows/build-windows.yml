@@ -25,11 +25,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 3.12: newest Python that Nuitka and fastembed/onnxruntime wheels all support,
-      # so semantic memory is bundled (build.bat skips it when fastembed is absent).
+      # 3.13 matches the source install. requirements.txt only pulls fastembed on
+      # <3.13, so build.bat skips bundling onnxruntime/numpy/tokenizers (keyword/FTS
+      # memory only). Compiling those with Nuitka pushed builds past 2h on 3.12.
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'
           cache: pip
 
       - name: Install Python dependencies
@@ -45,8 +46,28 @@ jobs:
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
           if (-not (Test-Path $iscc)) { throw "Inno Setup not found at $iscc" }
 
+      # Output goes to build.log as well as the console. If the build fails or
+      # times out, the next step posts the log tail as an annotation, which is
+      # readable from the API even where raw job logs are not.
       - name: Build (build.bat)
-        run: build.bat
+        timeout-minutes: 150
+        shell: pwsh
+        env:
+          NUITKA_EXTRA: --lto=no
+        run: |
+          cmd /c "build.bat 2>&1" | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) { throw "build.bat exited with $LASTEXITCODE" }
+
+      - name: Report build failure
+        if: failure()
+        shell: pwsh
+        run: |
+          if (Test-Path build.log) {
+            $tail = (Get-Content build.log -Tail 40) -join '%0A'
+            Write-Output "::error title=build.bat log tail::$tail"
+          } else {
+            Write-Output '::error title=build.bat::no build.log produced'
+          }
 
       - name: Check installer and rename for release
         shell: pwsh

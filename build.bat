@@ -74,6 +74,7 @@ python -m nuitka --standalone --assume-yes-for-downloads --enable-plugin=tk-inte
     --include-module=helm.mcp.composio_mcp ^
     --include-module=helm.mcp.zapier_mcp ^
     %VEC_FLAGS% ^
+    %NUITKA_EXTRA% ^
     web_app.py
 
 if errorlevel 1 (
