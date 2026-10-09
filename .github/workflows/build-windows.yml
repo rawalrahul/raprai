@@ -15,6 +15,9 @@ jobs:
   build:
     runs-on: windows-latest
     timeout-minutes: 180
+    env:
+      # 'true' only when the RELEASES_TOKEN secret exists; gates the publish step.
+      HAS_RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN != '' }}
     defaults:
       run:
         shell: cmd
@@ -84,3 +87,23 @@ jobs:
           path: installer_output/RAPR_AI_Setup.exe
           if-no-files-found: error
           retention-days: 30
+
+      # Publish: replace RAPR_AI_Setup.exe in the existing rapr-releases v1.0.0
+      # release (raprai.com/download links to that exact URL, so it never
+      # changes). Runs only after the smoke test passed, and only when the
+      # RELEASES_TOKEN secret (fine-grained PAT, Contents: read/write on
+      # rawalrahul/rapr-releases) is configured; otherwise it is skipped.
+      - name: Publish to rapr-releases (replace RAPR_AI_Setup.exe in v1.0.0)
+        if: ${{ env.HAS_RELEASES_TOKEN == 'true' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          gh release upload v1.0.0 installer_output\RAPR_AI_Setup.exe --clobber --repo rawalrahul/rapr-releases
+          if ($LASTEXITCODE -ne 0) { throw 'Upload to rapr-releases failed.' }
+          $rel = gh release view v1.0.0 --repo rawalrahul/rapr-releases --json assets | ConvertFrom-Json
+          $a = $rel.assets | Where-Object { $_.name -eq 'RAPR_AI_Setup.exe' }
+          if (-not $a) { throw 'RAPR_AI_Setup.exe not found on the release after upload.' }
+          $line = "$($a.name): $([math]::Round($a.size / 1MB, 1)) MB, updated $($a.updatedAt)"
+          "Published: $line"
+          "### Published to rapr-releases v1.0.0`n$line" >> $env:GITHUB_STEP_SUMMARY
