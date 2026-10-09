@@ -54,7 +54,7 @@ if errorlevel 1 (
         pause
         exit /b 1
     )
-    :: Refresh PATH so the newly installed Python is visible
+    rem Refresh PATH so the newly installed Python is visible
     for /f "tokens=*" %%i in ('where python 2^>nul') do set "PYTHON_PATH=%%i"
     if "!PYTHON_PATH!"=="" (
         echo.
@@ -87,11 +87,11 @@ if errorlevel 1 (
         echo   │                                                               │
         echo   │  1. Visit: https://nodejs.org/en/download/                   │
         echo   │  2. Download the LTS installer for Windows                   │
-        echo   │  3. Run the installer (default options are fine)             │
+        echo   │  3. Run the installer ^(default options are fine^)             │
         echo   │  4. Reopen this window and run setup.bat again               │
         echo   └──────────────────────────────────────────────────────────────┘
         echo.
-        echo   NOTE: Node.js is needed for Word (.docx) and PowerPoint (.pptx)
+        echo   NOTE: Node.js is needed for Word ^(.docx^) and PowerPoint ^(.pptx^)
         echo   file creation.  RAPR AI will still run without it, but those
         echo   features will not work until Node.js is installed.
         echo.
@@ -102,7 +102,7 @@ if errorlevel 1 (
         )
         set "NODE_MISSING=1"
     ) else (
-        :: Give Node a moment to register in PATH, then recheck
+        rem Give Node a moment to register in PATH, then recheck
         timeout /t 2 /nobreak >nul
         node --version >nul 2>&1
         if errorlevel 1 (
@@ -133,7 +133,7 @@ if errorlevel 1 (
         echo.
         echo   Pandoc could not be installed automatically.
         echo   It is optional — install it later from https://pandoc.org/installing.html
-        echo   (only needed for reading existing .docx files)
+        echo   ^(only needed for reading existing .docx files^)
     ) else (
         echo   Pandoc installed.
     )
