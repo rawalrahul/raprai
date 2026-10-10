@@ -86,9 +86,9 @@ def test_kelvin_status_counts_running_pipelines_and_approvals_as_active():
     assert k.active()
 
 
-def test_noop_off_windows():
-    if sys.platform != "win32":
-        assert ka._default_setter(True) is False
+def test_noop_off_windows_and_mac(monkeypatch):
+    monkeypatch.setattr(ka.sys, "platform", "linux")
+    assert ka._default_setter(True) is False
 
 
 def test_macos_uses_caffeinate(monkeypatch):

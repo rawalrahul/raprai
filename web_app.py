@@ -686,8 +686,9 @@ def main():
             from helm.resilience import graceful_shutdown
             loop.run_until_complete(graceful_shutdown())
             loop.close()
-        except Exception:
-            # Fallback: at least close DB connections
+        except (Exception, asyncio.CancelledError):
+            # Fallback: at least close DB connections. (A task left over from the
+            # stopped server loop can surface as CancelledError here.)
             try:
                 from helm.db import close_all
                 close_all()
