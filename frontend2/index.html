@@ -19,6 +19,7 @@
 <link rel="stylesheet" href="/css/overhaul.css?v=1">
 <link rel="stylesheet" href="/css/impeccable.css?v=3">
 <link rel="stylesheet" href="/css/kelvin.css?v=3">
+<link rel="stylesheet" href="/css/groupchat.css?v=1">
 </head>
 <body>
 <div id="app" class="main-layout">
@@ -215,6 +216,18 @@
       </div>
     </div>
 
+    <div class="sb-section" data-section="groups" id="sb-section-groups">
+      <div class="sb-section-header" onclick="toggleSbSection(this)" role="button" aria-expanded="false" aria-controls="sb-panel-groups">
+        <span class="sb-section-arrow" aria-hidden="true">▶</span>
+        <span class="sb-section-label">Group Chats</span>
+        <button onclick="event.stopPropagation();openGroupSection();openGroupModal(null)" class="sb-section-action" title="New group chat" aria-label="New group chat">+</button>
+        <button onclick="event.stopPropagation();openGroupSection()" class="sb-section-action" title="Open Group Chats" aria-label="Open Group Chats">👥</button>
+      </div>
+      <div class="sb-section-body" id="sb-panel-groups">
+        <div class="sb-empty">Loading...</div>
+      </div>
+    </div>
+
     <div class="sb-section" data-section="council" id="sb-section-council">
       <div class="sb-section-header" onclick="openCouncilSection()" role="button" aria-expanded="false" aria-controls="council-wrapper">
         <span class="sb-section-arrow" aria-hidden="true">▶</span>
@@ -324,6 +337,7 @@
     <button class="hdr-btn" id="notify-toggle-btn" onclick="toggleNotifications()" title="Toggle notifications" aria-label="Toggle Notifications">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
     </button>
+    <button class="hdr-btn" id="group-nav-btn" onclick="openGroupSection()" title="Group Chats" aria-label="Open Group Chats">👥</button>
     <button class="hdr-btn" id="council-nav-btn" onclick="openCouncilSection()" title="AI Council" aria-label="Open AI Council">🏛️</button>
     <button class="hdr-btn" onclick="showHelpTour()" title="Help & tour" aria-label="Show Help and Tour">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg>
@@ -1380,7 +1394,7 @@ Example:
 .agent-slider-wrapper.open {
   visibility: visible;
 }
-#agent-builder-overlay, #agent-run-overlay, #council-overlay {
+#agent-builder-overlay, #agent-run-overlay, #council-overlay, #group-overlay {
   display:flex; position:absolute; top:12px; right:12px; bottom:12px;
   width: min(1500px, calc(100% - 64px));
   background:var(--bg-deep); flex-direction:column;
@@ -1394,7 +1408,8 @@ Example:
 }
 .agent-slider-wrapper.open #agent-builder-overlay,
 .agent-slider-wrapper.open #agent-run-overlay,
-.agent-slider-wrapper.open #council-overlay {
+.agent-slider-wrapper.open #council-overlay,
+.agent-slider-wrapper.open #group-overlay {
   transform: translateX(0);
 }
 #agent-toolbar {
@@ -1507,14 +1522,32 @@ Example:
   </div>
 </div>
 
+<!-- --- Group Chats Overlay --- -->
+<div id="group-wrapper" class="agent-slider-wrapper" aria-label="Group Chats">
+  <div id="group-overlay" role="dialog" aria-labelledby="group-overlay-title" style="display:flex;flex-direction:column;height:100%;background:var(--bg-surface,#1e1e2e);overflow:hidden">
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid oklch(24% 0.01 264);flex-shrink:0;background:var(--bg-surface,#1e1e2e)">
+      <button onclick="closeGroupSection()" style="background:none;border:none;color:var(--text-dim,#888);font-size:16px;cursor:pointer;padding:0 4px;line-height:1;opacity:0.6" aria-label="Close group chats">&#8592;</button>
+      <span id="group-overlay-title" style="font-size:12px;font-weight:700;color:var(--text-main,#eee);letter-spacing:-0.01em">Group Chats</span>
+      <span style="font-size:11px;color:var(--text-dim,#888)">Several AIs, one conversation</span>
+      <div style="flex:1"></div>
+      <button onclick="openGroupModal(null)" style="background:oklch(21% 0.01 264);border:1px solid oklch(30% 0.01 264);color:oklch(56% 0.008 264);font-size:11px;padding:4px 10px;border-radius:5px;cursor:pointer;font-weight:600" title="New group chat">+ New</button>
+    </div>
+    <div class="group-layout">
+      <div class="group-sidebar"><div id="group-list" role="list"></div></div>
+      <div id="group-conversation"></div>
+    </div>
+  </div>
+</div>
+
 <script src="/js/kelvin.js?v=3"></script>
-<script src="/js/complete.js?v=9"></script>
+<script src="/js/complete.js?v=10"></script>
 <script src="/js/packages.js?v=4"></script>
 <script src="/js/memory.js?v=2"></script>
 <script src="/js/custom_ai.js?v=3"></script>
 <script src="/js/backup.js?v=2"></script>
 <script src="/js/agents.js?v=12"></script>
 <script src="/js/council.js?v=10"></script>
+<script src="/js/groupchat.js?v=1"></script>
 <script src="/js/demos.js?v=2"></script>
 <script>
 // Register PWA service worker

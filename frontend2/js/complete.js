@@ -178,6 +178,10 @@ function connect(){
     else if(d.type==='agent_run_update' && typeof handleAgentRunUpdate==='function') handleAgentRunUpdate(d.run);
     else if(d.type==='agent_run_stream' && typeof handleAgentRunStream==='function') handleAgentRunStream(d.run_id, d.node_id, d.chunk);
     else if(d.type==='agent_run_waiting_input' && typeof handleAgentRunWaitingInput==='function') handleAgentRunWaitingInput(d);
+    else if(d.type==='group_message' && typeof groupOnMessage==='function') groupOnMessage(d);
+    else if(d.type==='group_status' && typeof groupOnStatus==='function') groupOnStatus(d);
+    else if(d.type==='group_updated' && typeof groupOnUpdated==='function') groupOnUpdated(d);
+    else if(d.type==='group_deleted' && typeof groupOnDeleted==='function') groupOnDeleted(d);
   };
 }
 
@@ -568,6 +572,7 @@ const _thinkingMessages = [
   "💡 Tip: Build custom Agents — chain steps visually in the Agent Builder",
   "💡 Tip: Import and export Agents as JSON to share them",
   "💡 Tip: Check Agent run statistics from the Agents panel",
+  "💡 New: Group Chats 👥 — put several AIs in one chat and @mention who should answer",
   "💡 Tip: Open AI Council ⚖️ — multiple AIs debate your question and agree on an answer",
   "💡 Tip: Click the mic 🎤 to send a voice message instead of typing",
   "💡 Tip: Upload a video demo — AI analyzes it and replicates the workflow",

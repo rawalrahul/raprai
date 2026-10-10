@@ -19,6 +19,7 @@ Telegram App (your phone)        ←── Bot API  ────┘             
 
 - **Multi-session** — run Claude Code, Gemini, Codex, Ollama, custom AIs, and a raw shell at the same time, each with its own directory and history
 - **Focused session** — Telegram always routes to the session you last tapped. Switch focus with one button tap
+- **Group chats** — put several AIs (Claude, Gemini, Codex, Ollama, …) in one conversation. Ask once and they all answer, reading and building on each other's replies; `@mention` a member to choose who answers, and any member can pull another in with an @mention
 - **Web UI** — chat bubbles, session picker chip, directory bar, per-session badges, thinking indicator
 - **Full sync** — web messages forwarded to Telegram, Telegram messages shown in browser, both always in sync
 - **File auto-send** — any AI-generated file (PDF, image, video, code) sent to Telegram as a proper attachment the moment it's created
