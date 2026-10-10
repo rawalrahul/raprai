@@ -580,6 +580,13 @@ async def _main():
     except Exception as exc:
         logger.warning("WhatsApp autostart failed: %s", exc)
 
+    # Discord and Slack bots, when their tokens are set (see .env.example).
+    try:
+        from helm.chat_adapters.startup import start_configured as _start_chat_apps
+        _start_chat_apps()
+    except Exception as exc:
+        logger.warning("Chat apps not started: %s", exc)
+
     # Start cloud backup scheduler (checks every 5 min for due backups)
     try:
         from helm.cloud_backup.scheduler import start_scheduler
