@@ -442,11 +442,9 @@ async function deleteGroup(id) {
 
 async function openGroupModal(group) {
   document.getElementById('group-modal')?.remove();
-  let sessions = (typeof State !== 'undefined' ? State.sessions : []) || [];
-  if (!sessions.length) {
-    try { sessions = (await _gFetch('/api/sessions')).sessions || []; } catch (_) {}
-  }
+  const sessions = await liveSessionsFresh();
   const aiSessions = sessions.filter(s => s.ai);
+  const ais = group ? [] : await availableAis();
   const memberSids = new Set((group?.members || []).map(m => m.session_id));
 
   const overlay = _g('div', 'modal-overlay open');
@@ -518,7 +516,34 @@ async function openGroupModal(group) {
   }
 
   const memWrap = _g('div');
-  memWrap.appendChild(_g('label', 'council-modal-label', 'Members (your open AI sessions)'));
+  if (!group) {
+    // New group: pick AIs. An open session of that AI is used; otherwise one is started.
+    memWrap.appendChild(_g('label', 'council-modal-label', 'Who is in the group'));
+    const aiList = _g('div', 'council-modal-sessions');
+    aiList.style.maxHeight = '220px';
+    if (!ais.length) {
+      const none = _g('div', null, 'No AI is ready yet. Install one (Claude Code, Gemini CLI, Codex, Ollama…) or add it in Settings.');
+      none.style.cssText = 'color:var(--muted);font-size:12px';
+      aiList.appendChild(none);
+    }
+    ais.forEach(a => {
+      const lbl = _g('label', 'council-modal-session-label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.name = 'group-ai'; cb.value = a.key;
+      const dot = _g('span', 'council-dot');
+      dot.style.background = a.color || '#6b7280';
+      const nm = _g('span');
+      nm.appendChild(document.createTextNode(' ' + (a.emoji ? a.emoji + ' ' : '') + a.name + ' '));
+      const small = _g('small', null, a.session ? '(uses ' + a.session + ')' : '(starts a new session)');
+      small.style.color = 'var(--muted)';
+      nm.appendChild(small);
+      lbl.append(cb, dot, nm);
+      aiList.appendChild(lbl);
+    });
+    memWrap.appendChild(aiList);
+    body.appendChild(memWrap);
+  }
+  if (group) memWrap.appendChild(_g('label', 'council-modal-label', 'Members (your open AI sessions)'));
   const list = _g('div', 'council-modal-sessions');
   // Members whose session is closed stay selectable so editing doesn't drop them.
   const rows = aiSessions.map(s => ({ id: s.id, name: s.name || s.id, ai: s.ai_name || s.ai, color: s.color }));
@@ -549,8 +574,10 @@ async function openGroupModal(group) {
     lbl.appendChild(cb); lbl.appendChild(dot); lbl.appendChild(nm);
     list.appendChild(lbl);
   });
-  memWrap.appendChild(list);
-  body.appendChild(memWrap);
+  if (group) {
+    memWrap.appendChild(list);
+    body.appendChild(memWrap);
+  }
 
   const submit = _g('button', 'council-btn-primary', group ? 'Save' : 'Create Group');
   submit.style.width = '100%';
@@ -565,11 +592,13 @@ async function openGroupModal(group) {
 
 async function submitGroupModal(group) {
   const ids = [...document.querySelectorAll('input[name="group-member"]:checked')].map(c => c.value);
-  if (!ids.length) { _gToast('warning', 'Pick at least one AI session'); return; }
+  const aiKeys = [...document.querySelectorAll('input[name="group-ai"]:checked')].map(c => c.value);
+  if (!ids.length && !aiKeys.length) { _gToast('warning', 'Pick at least one AI'); return; }
   const payload = {
     name: (document.getElementById('group-name')?.value || '').trim(),
     about: (document.getElementById('group-about')?.value || '').trim(),
     member_session_ids: ids,
+    member_ais: aiKeys,
   };
   const crewId = document.getElementById('group-crew')?.value || '';
   try {
@@ -577,7 +606,7 @@ async function submitGroupModal(group) {
     if (group) {
       d = await _gFetch('/api/groups/' + encodeURIComponent(group.id), { method: 'PATCH', body: JSON.stringify(payload) });
     } else if (crewId) {
-      d = await _gFetch('/api/groups/from-crew', { method: 'POST', body: JSON.stringify({ crew_id: crewId, session_ids: ids, name: payload.name }) });
+      d = await _gFetch('/api/groups/from-crew', { method: 'POST', body: JSON.stringify({ crew_id: crewId, session_ids: ids, member_ais: aiKeys, name: payload.name }) });
     } else {
       d = await _gFetch('/api/groups', { method: 'POST', body: JSON.stringify(payload) });
     }

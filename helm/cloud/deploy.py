@@ -45,6 +45,12 @@ def _sudo(runner: Runner, user: str) -> str:
     return "" if user == "root" else "sudo -n "
 
 
+def _compose(sudo: str, d: str) -> str:
+    """docker compose for the RAPR folder. The folder is root-only (it holds the
+    settings), so commands never cd into it; Compose is pointed at it instead."""
+    return f"{sudo}docker compose --project-directory {d} -f {d}/docker-compose.yml"
+
+
 def deploy(job: Job, opts: plan.CloudOptions, connect: Callable[[], Runner],
            sleep: Callable[[float], None] = time.sleep) -> Job:
     """Run every step. Returns the job (status done or failed)."""
@@ -79,13 +85,13 @@ class _Stop(Exception):
     pass
 
 
-def _check(job: Job, step: str, ok: bool, detail: str = "") -> None:
+def _check(job: Job, step: str, ok: bool, detail: str = "", ok_detail: str = "") -> None:
     if not ok:
         job.log(step, "fail", detail)
         job.status = "failed"
         job.error = detail or step
         raise _Stop()
-    job.log(step)
+    job.log(step, "ok", ok_detail)
 
 
 def _run_steps(job: Job, opts: plan.CloudOptions, r: Runner, sleep: Callable[[float], None]) -> None:
@@ -124,20 +130,22 @@ def _run_steps(job: Job, opts: plan.CloudOptions, r: Runner, sleep: Callable[[fl
     r.put(f"/tmp/rapr-{opts.name}.env", plan.server_env(opts), 0o600)
     r.put(f"/tmp/rapr-{opts.name}.yml", plan.compose_file(opts), 0o644)
     code, _, err = r.run(
-        f"{sudo}mv /tmp/rapr-{opts.name}.env {d}/.env && {sudo}mv /tmp/rapr-{opts.name}.yml {d}/docker-compose.yml"
-        f" && {sudo}chmod 600 {d}/.env", timeout=60)
-    _check(job, "write the settings", code == 0, err[-300:])
-    job.log("write the settings", "ok", "your PIN is stored as a hash only")
+        f"{sudo}mv /tmp/rapr-{opts.name}.env {d}/rapr.env && {sudo}mv /tmp/rapr-{opts.name}.yml {d}/docker-compose.yml"
+        # Owner-only, owned by the container's user (uid 1000) so RAPR can read and save it.
+        f" && {sudo}chown {plan.CONTAINER_UID}:{plan.CONTAINER_UID} {d}/rapr.env && {sudo}chmod 600 {d}/rapr.env",
+        timeout=60)
+    _check(job, "write the settings", code == 0, err[-300:], ok_detail="your PIN is stored as a hash only")
 
-    code, out, err = r.run(f"cd {d} && {sudo}docker compose pull", timeout=1200)
-    _check(job, "download RAPR (first time takes a few minutes)", code == 0,
+    # Downloads only what's missing (first deploy), then starts both containers.
+    code, out, err = r.run(f"{_compose(sudo, d)} up -d --pull missing", timeout=1500)
+    _check(job, "download and start RAPR (the first time takes a few minutes)", code == 0,
            (err or out)[-400:] + " If this is the first deploy, RAPR's image may not be published yet.")
-    code, out, err = r.run(f"cd {d} && {sudo}docker compose up -d", timeout=300)
-    _check(job, "start RAPR", code == 0, (err or out)[-400:])
 
     healthy = False
     for _ in range(HEALTH_ATTEMPTS):
-        code, _, _ = r.run(f"cd {d} && {sudo}docker compose exec -T rapr curl -fsS http://127.0.0.1:8000/health", timeout=30)
+        code, _, _ = r.run(f"{_compose(sudo, d)} exec -T rapr python -c "
+                           "\"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)\"",
+                           timeout=30)
         if code == 0:
             healthy = True
             break
@@ -152,15 +160,15 @@ def _run_steps(job: Job, opts: plan.CloudOptions, r: Runner, sleep: Callable[[fl
 
 
 def find_url(r: Runner, d: str, sudo: str) -> str:
-    code, out, err = r.run(f"cd {d} && {sudo}docker compose logs tunnel --no-color 2>&1 | tail -200", timeout=60)
-    m = plan.TUNNEL_URL.search(out + err)
-    return m.group(0) if m else ""
+    code, out, err = r.run(f"{_compose(sudo, d)} logs tunnel --no-color 2>&1 | tail -200", timeout=60)
+    found = plan.TUNNEL_URL.findall(out + err)
+    return found[-1] if found else ""   # the newest one: each restart gets a new address
 
 
 def status(r: Runner, name: str, user: str) -> dict:
     sudo = _sudo(r, user)
     d = plan.DEFAULT_DIR + "/" + name
-    _, ps, _ = r.run(f"cd {d} && {sudo}docker compose ps --format '{{{{.Service}}}} {{{{.State}}}} {{{{.Status}}}}' 2>&1", timeout=60)
+    _, ps, _ = r.run(f"{_compose(sudo, d)} ps --format '{{{{.Service}}}} {{{{.State}}}} {{{{.Status}}}}' 2>&1", timeout=60)
     return {"containers": ps.strip().splitlines(), "url": find_url(r, d, sudo)}
 
 
@@ -169,10 +177,10 @@ def action(r: Runner, name: str, user: str, what: str) -> str:
     sudo = _sudo(r, user)
     d = plan.DEFAULT_DIR + "/" + name
     commands = {
-        "update": f"cd {d} && {sudo}docker compose pull && {sudo}docker compose up -d",
-        "restart": f"cd {d} && {sudo}docker compose restart",
-        "logs": f"cd {d} && {sudo}docker compose logs rapr --tail 120 --no-color",
-        "remove": f"cd {d} && {sudo}docker compose down -v && {sudo}rm -rf {d}",
+        "update": f"{_compose(sudo, d)} pull && {_compose(sudo, d)} up -d",
+        "restart": f"{_compose(sudo, d)} restart",
+        "logs": f"{_compose(sudo, d)} logs rapr --tail 120 --no-color 2>&1",
+        "remove": f"{_compose(sudo, d)} down -v && {sudo}rm -rf {d}",
     }
     if what not in commands:
         raise ValueError("unknown action")

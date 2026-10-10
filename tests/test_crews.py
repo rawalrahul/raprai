@@ -14,7 +14,7 @@ import helm.state as _st
 
 def sess(sid, ai):
     return {"id": sid, "ai": ai, "name": f"{ai} #{sid}", "cwd": "/tmp", "model": None,
-            "emoji": "🤖", "color": "#123"}
+            "emoji": "🤖", "color": "#123", "status": "idle"}
 
 
 def test_every_crew_is_well_formed():
@@ -89,4 +89,4 @@ def test_crew_endpoint_creates_a_group(env, monkeypatch):
     r = client.post("/api/groups/from-crew", json={"crew_id": "nope", "session_ids": ["1"]})
     assert "error" in r.json()
     r = client.post("/api/groups/from-crew", json={"crew_id": "launch", "session_ids": ["1"]})
-    assert "needs 3 AI sessions" in r.json()["error"]
+    assert "needs 3 AIs" in r.json()["error"]

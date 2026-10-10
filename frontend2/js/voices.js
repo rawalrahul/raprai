@@ -43,7 +43,7 @@ function toggleGroupSpeak(on) {
 try { window._groupSpeak = localStorage.getItem('rapr_group_speak') === '1'; } catch (_) {}
 
 /** Settings panel: one voice choice per AI that has a session. Built from the live list. */
-function renderVoiceSettings() {
+async function renderVoiceSettings() {
   const box = document.getElementById('voice-settings');
   if (!box) return;
   box.textContent = '';
@@ -52,8 +52,8 @@ function renderVoiceSettings() {
     box.textContent = 'No voices found on this device yet. Install a system voice, or try again after the page loads.';
     return;
   }
-  const ais = [...new Set(((typeof State !== 'undefined' && State.sessions) || []).map(s => s.ai).filter(Boolean))];
-  if (!ais.length) { box.textContent = 'Start an AI session to pick its voice.'; return; }
+  const ais = (typeof availableAis === 'function' ? await availableAis() : []).map(a => a.key);
+  if (!ais.length) { box.textContent = 'Install an AI to pick its voice.'; return; }
   ais.forEach(ai => {
     const row = document.createElement('div');
     row.style.cssText = 'display:grid;grid-template-columns:110px 1fr;gap:6px;align-items:center;font-size:12px;padding:2px 0';
