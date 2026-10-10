@@ -15,7 +15,10 @@ router = APIRouter()
 class CreateGroupRequest(BaseModel):
     name: str = ""
     about: str = ""
-    member_session_ids: list[str]
+    member_session_ids: list[str] = []
+    # AIs to add even if no session is open for them (e.g. "claude", "gemini");
+    # an open session of that AI is reused, otherwise one is started.
+    member_ais: list[str] = []
 
 
 class UpdateGroupRequest(BaseModel):
@@ -32,7 +35,48 @@ def _err(msg: str, code: int = 400) -> JSONResponse:
     return JSONResponse({"error": msg}, status_code=code)
 
 
-def _member_sessions(session_ids: list[str]) -> tuple[list[dict], Optional[str]]:
+def _known_ai(ai: str) -> bool:
+    if ai == "claude" or ai in _st.integrations:
+        return True
+    if ai.startswith("acp:"):
+        from helm import acp_agents
+        return acp_agents.get(ai[4:]) is not None
+    return False
+
+
+def _sessions_for_ais(ais: list[str], taken: set[str]) -> tuple[list[dict], Optional[str]]:
+    """One session per AI: reuse an open one not already picked, else start a new one."""
+    from helm.session_mgr import make_session, session_cwd
+    out = []
+    for ai in dict.fromkeys(a.strip() for a in ais if a and a.strip()):
+        if not _known_ai(ai):
+            return [], f"{ai} isn't installed in RAPR"
+        sess = next((s for s in _st.sessions.values()
+                     if s.get("ai") == ai and s.get("status") != "stopped" and s["id"] not in taken), None)
+        if sess is None:
+            sess = make_session(ai, cwd=session_cwd())
+        taken.add(sess["id"])
+        out.append(sess)
+    return out, None
+
+
+def _resolve_members(session_ids: list[str], ais: list[str]) -> tuple[list[dict], Optional[str]]:
+    """Sessions picked directly, plus a session for each AI picked."""
+    picked, err = _member_sessions(session_ids, allow_empty=True)
+    if err:
+        return [], err
+    more, err = _sessions_for_ais(ais, {s["id"] for s in picked})
+    if err:
+        return [], err
+    members = picked + more
+    if not members:
+        return [], "Pick at least one AI"
+    if len(members) > gc.MAX_MEMBERS:
+        return [], f"A group can have at most {gc.MAX_MEMBERS} members"
+    return members, None
+
+
+def _member_sessions(session_ids: list[str], allow_empty: bool = False) -> tuple[list[dict], Optional[str]]:
     """Resolve and validate session ids for group membership."""
     seen, out = set(), []
     for sid in session_ids:
@@ -45,7 +89,7 @@ def _member_sessions(session_ids: list[str]) -> tuple[list[dict], Optional[str]]
         if not sess.get("ai"):
             return [], f"{sess.get('name', sid)} is a shell session; only AI sessions can join a group"
         out.append(sess)
-    if not out:
+    if not out and not allow_empty:
         return [], "Pick at least one AI session"
     if len(out) > gc.MAX_MEMBERS:
         return [], f"A group can have at most {gc.MAX_MEMBERS} members"
@@ -81,10 +125,12 @@ async def get_group(group_id: str):
 @router.post("/api/groups")
 async def create_group(req: CreateGroupRequest):
     gc.load_groups()
-    sessions, err = _member_sessions(req.member_session_ids)
+    sessions, err = _resolve_members(req.member_session_ids, req.member_ais)
     if err:
         return _err(err)
     group = gc.make_group(req.name, req.about, sessions)
+    from helm.broadcast import push_state
+    await push_state()   # sessions started for the group show up in the sidebar
     gc.save_groups()
     await gc.broadcast_group(group)
     return JSONResponse({"group": gc._public(group)})
@@ -183,7 +229,8 @@ async def clear_group(group_id: str):
 
 class CrewGroupRequest(BaseModel):
     crew_id: str
-    session_ids: list[str]
+    session_ids: list[str] = []
+    member_ais: list[str] = []
     name: str = ""
 
 
@@ -200,13 +247,18 @@ async def create_group_from_crew(req: CrewGroupRequest):
     crew = crews.get(req.crew_id)
     if not crew:
         return _err("Unknown crew")
-    sessions, err = _member_sessions(req.session_ids)
+    picked = len(set(req.session_ids)) + len(set(req.member_ais))
+    if picked < len(crew["roles"]):
+        return _err(f"the {crew['name']} crew needs {len(crew['roles'])} AIs, you picked {picked}")
+    sessions, err = _resolve_members(req.session_ids, req.member_ais)
     if err:
         return _err(err)
     try:
         pairs = crews.assign(crew, sessions)
     except ValueError as exc:
         return _err(str(exc))
+    from helm.broadcast import push_state
+    await push_state()
     group = gc.make_group(req.name.strip() or crew["name"], crew["about"],
                           [s for _, s in pairs],
                           roles=[(r["name"], r["prompt"]) for r, _ in pairs])

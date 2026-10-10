@@ -23,10 +23,9 @@ function _toast(kind, msg) { if (typeof Toast !== 'undefined' && Toast[kind]) To
 
 let _bakeTimer = null;
 
-function openBakeoffModal() {
+async function openBakeoffModal() {
   document.getElementById('bakeoff-modal')?.remove();
-  const sessions = (typeof State !== 'undefined' && State.sessions) || [];
-  const ais = [...new Set(sessions.map(s => s.ai).filter(Boolean))];
+  const ais = (typeof availableAis === 'function' ? await availableAis() : []).map(a => a.key);
   const overlay = _el('div', 'modal-overlay open');
   overlay.id = 'bakeoff-modal';
   overlay.style.zIndex = '1300';
@@ -47,7 +46,8 @@ function openBakeoffModal() {
   const repo = document.createElement('input');
   repo.className = 'council-modal-select'; repo.id = 'bake-repo';
   repo.placeholder = 'Project folder, e.g. C:\\projects\\app';
-  repo.value = (typeof State !== 'undefined' && State.focusedCwd) || '';
+  const shownCwd = (document.getElementById('cwd-display')?.textContent || '').trim();
+  repo.value = shownCwd && shownCwd !== '—' ? shownCwd : '';
   field('Project folder', repo);
 
   const task = document.createElement('textarea');
@@ -56,7 +56,7 @@ function openBakeoffModal() {
   field('Task', task);
 
   const list = _el('div', 'council-modal-sessions');
-  if (!ais.length) list.appendChild(_el('div', null, 'Open at least two AI sessions first.'));
+  if (ais.length < 2) list.appendChild(_el('div', null, 'A bake-off needs at least two AIs installed (Claude Code, Gemini CLI, Codex, Ollama…).'));
   ais.forEach(ai => {
     const lbl = _el('label', 'council-modal-session-label');
     const cb = document.createElement('input');

@@ -9,7 +9,7 @@ Two containers:
 
 Secrets: the PIN is stored only as a hash (computed here, on your computer).
 The AI keys and chat-app tokens you choose to copy are written to the server's
-.env with permission 600 and never leave your server.
+settings file (rapr.env) with permission 600 and never leave your server.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 IMAGE = "ghcr.io/rawalrahul/raprai:latest"
 TUNNEL_IMAGE = "cloudflare/cloudflared:latest"
 DEFAULT_DIR = "/opt/rapr"
+CONTAINER_UID = 1000     # the "rapr" user inside the image (see Dockerfile)
 
 # Settings that may be copied to the server (AI keys and chat apps). Nothing else.
 COPYABLE = (
@@ -58,7 +59,7 @@ def validate(opts: CloudOptions) -> None:
 
 
 def server_env(opts: CloudOptions) -> str:
-    """The .env written on the server (no secrets beyond the chosen ones)."""
+    """The settings file written on the server (no secrets beyond the chosen ones)."""
     lines = [
         "# Written by RAPR AI cloud setup. Keep this file private (chmod 600).",
         "RAPR_HEADLESS=1",
@@ -81,14 +82,15 @@ services:
   rapr:
     image: {IMAGE}
     restart: unless-stopped
-    env_file: .env
     volumes:
       - rapr-data:/data
       # The app reads and writes /data/.env (setup, PIN, settings); this is the
       # same file, so changes made in the server's Settings are kept on the server.
-      - ./.env:/data/.env
+      # It isn't named .env here: Compose would read that file itself and treat
+      # the "$" in the PIN hash as a variable.
+      - ./rapr.env:/data/.env
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -105,4 +107,6 @@ volumes:
 """
 
 
-TUNNEL_URL = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
+# A quick tunnel's address. api.trycloudflare.com is Cloudflare's own API, which
+# shows up in the tunnel's error lines, so it never counts.
+TUNNEL_URL = re.compile(r"https://(?!api\.)[a-z0-9-]+\.trycloudflare\.com")

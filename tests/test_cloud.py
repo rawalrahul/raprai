@@ -16,8 +16,8 @@ GOOD_HOST = {
     "df -BG": (0, "30\n", ""),
     "docker --version": (0, "Docker version 27\n", ""),
     "docker compose version": (0, "v2\n", ""),
-    "docker compose exec": (0, "{}", ""),
-    "docker compose logs tunnel": (0, "https://quiet-river-1234.trycloudflare.com\n", ""),
+    "docker-compose.yml exec": (0, "{}", ""),
+    "docker-compose.yml logs tunnel": (0, "https://quiet-river-1234.trycloudflare.com\n", ""),
 }
 
 
@@ -40,9 +40,9 @@ def test_happy_path_deploys_and_reports_the_address():
     job, r = run_deploy()
     assert job.status == "done", job.error
     assert job.url == "https://quiet-river-1234.trycloudflare.com"
-    assert any("docker compose up -d" in c for c in r.commands)
+    assert any("up -d --pull missing" in c for c in r.commands)
     assert r.files["/tmp/rapr-rapr.env"][1] == 0o600          # settings: owner-only
-    assert any("mv /tmp/rapr-rapr.env /opt/rapr/rapr/.env" in c for c in r.commands)
+    assert any("mv /tmp/rapr-rapr.env /opt/rapr/rapr/rapr.env" in c for c in r.commands)
 
 
 def test_only_chosen_and_allowed_settings_are_copied():
@@ -75,9 +75,10 @@ def test_docker_is_installed_when_missing():
     assert any("get.docker.com" in c for c in r.commands)
 
 
-def test_non_root_user_uses_sudo():
+def test_non_root_user_uses_sudo_and_never_cds_into_the_private_folder():
     job, r = run_deploy(o=opts(user="ubuntu"))
-    assert any(c.startswith("cd /opt/rapr/rapr && sudo -n docker compose") or " sudo -n docker compose" in c for c in r.commands)
+    assert any(c.startswith("sudo -n docker compose --project-directory /opt/rapr/rapr") for c in r.commands)
+    assert not any(c.startswith("cd /opt/rapr") for c in r.commands)   # the folder is root-only
 
 
 def test_root_does_not_use_sudo():
@@ -86,7 +87,7 @@ def test_root_does_not_use_sudo():
 
 
 def test_unhealthy_rapr_reports_logs_hint():
-    job, _ = run_deploy({"docker compose exec": (1, "", "refused")})
+    job, _ = run_deploy({"docker-compose.yml exec": (1, "", "refused")})
     assert job.status == "failed" and "View logs" in job.error
 
 
@@ -110,12 +111,12 @@ def test_connect_failure_is_explained():
 
 
 def test_day_two_actions():
-    r = FakeRunner({"docker compose ps": (0, "rapr running Up 2 hours\n", ""),
-                    "docker compose logs tunnel": (0, "https://a-b-c.trycloudflare.com", "")})
+    r = FakeRunner({"docker-compose.yml ps": (0, "rapr running Up 2 hours\n", ""),
+                    "docker-compose.yml logs tunnel": (0, "https://a-b-c.trycloudflare.com", "")})
     st = dep.status(r, "rapr", "ubuntu")
     assert st["containers"] == ["rapr running Up 2 hours"] and st["url"].endswith("trycloudflare.com")
-    assert "pull" in dep.action(r, "rapr", "ubuntu", "update") or True
-    assert any("docker compose pull" in c for c in r.commands)
+    dep.action(r, "rapr", "ubuntu", "update")
+    assert any("docker-compose.yml pull" in c for c in r.commands)
     with pytest.raises(ValueError):
         dep.action(r, "rapr", "ubuntu", "explode")
     dep.action(r, "rapr", "ubuntu", "remove")
@@ -133,5 +134,15 @@ def test_dockerfile_and_requirements_are_headless():
 
 def test_settings_file_is_mounted_where_the_app_reads_it():
     text = plan.compose_file(opts())
-    assert "./.env:/data/.env" in text   # without this the app shows its setup wizard
+    assert "./rapr.env:/data/.env" in text   # without this the app shows its setup wizard
+    assert "env_file" not in text           # Compose would mangle the "$" in the PIN hash
     assert "RAPR_DATA_DIR=/data" in plan.server_env(opts())
+
+
+def test_tunnel_address_skips_cloudflare_api_and_takes_newest():
+    logs = ('failed to request quick Tunnel: Post "https://api.trycloudflare.com/tunnel"\n'
+            "https://old-one.trycloudflare.com\nhttps://new-one.trycloudflare.com\n")
+    r = FakeRunner({"docker-compose.yml logs tunnel": (0, logs, "")})
+    assert dep.find_url(r, "/opt/rapr/rapr", "") == "https://new-one.trycloudflare.com"
+    r = FakeRunner({"docker-compose.yml logs tunnel": (0, 'Post "https://api.trycloudflare.com/tunnel"', "")})
+    assert dep.find_url(r, "/opt/rapr/rapr", "") == ""
