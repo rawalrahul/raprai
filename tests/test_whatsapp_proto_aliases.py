@@ -14,9 +14,14 @@ import textwrap
 
 import pytest
 
-neonize = pytest.importorskip("neonize")
-
 ROOT = os.path.join(os.path.dirname(__file__), "..")
+sys.path.insert(0, os.path.abspath(ROOT))
+
+# neonize imports python-magic, which needs libmagic; Macs and Windows usually
+# lack it. RAPR swaps in a stand-in first (as the app does) so the import works.
+from helm import whatsapp_bridge as _wb  # noqa: E402
+_wb._ensure_magic()
+neonize = pytest.importorskip("neonize")
 
 EMULATE = textwrap.dedent('''
     import importlib.machinery, importlib.util, os, sys
