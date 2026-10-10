@@ -1,4 +1,7 @@
 /* ── Group Chats ─────────────────────────────────────────────── */
+/* impeccable.css forces `display` on every button with !important, so hidden
+   buttons here need an equally strong (and more specific) rule. */
+#group-overlay [hidden], #wa-section [hidden] { display: none !important; }
 #group-wrapper { z-index: 900; }
 #group-overlay { position: relative; }
 

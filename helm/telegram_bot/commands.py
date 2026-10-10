@@ -725,6 +725,11 @@ async def tg_text(update, context):
     text = (update.message.text or "").strip()
     low = text.lower()
 
+    # --- In a group chat: the message goes to the whole group ---
+    from .groups import handle_group_text
+    if await handle_group_text(update, text):
+        return
+
     # --- Natural language shortcuts ---
     if low in ("menu", "help", "options", "?"):
         await tg_menu.__wrapped__(update, context)
@@ -990,6 +995,10 @@ async def tg_voice(update, context):
         # Show the transcript to the user
         fs = focused_session()
         label = f"{fs['emoji']} {fs['name']}" if fs else "session"
+        import helm.groupchat as _gc
+        _grp = _gc.active_group("telegram")
+        if _grp:
+            label = f"👥 {_grp['name']}"
         await update.message.reply_text(
             f"🎤 *Transcript:* {transcript}\n\nThinking... [{label}]",
             parse_mode="Markdown",
@@ -1007,6 +1016,11 @@ async def tg_voice(update, context):
                 return
         except Exception as exc:
             logger.warning("Could not resume agent input from Telegram voice: %s", exc)
+
+        # In a group chat the transcript goes to the group, like typed text.
+        from .groups import handle_group_text
+        if await handle_group_text(update, transcript):
+            return
 
         # Forward transcript to the active AI — same flow as tg_text
         async def _tg_voice_fire(

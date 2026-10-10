@@ -58,6 +58,8 @@ def kelvin_report(now: Optional[float] = None) -> str:
     work = []
     if c["busy"]:
         work.append(f"{c['busy']} session{'s' if c['busy'] != 1 else ''} working")
+    if c.get("groups"):
+        work.append(f"{c['groups']} group chat{'s' if c['groups'] != 1 else ''} answering")
     if c["pipelines"]:
         work.append(f"{c['pipelines']} pipeline{'s' if c['pipelines'] != 1 else ''} running")
     lines.append("⚙️ " + (", ".join(work) if work else "Nothing running right now."))

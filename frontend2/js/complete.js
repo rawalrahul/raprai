@@ -182,6 +182,7 @@ function connect(){
     else if(d.type==='group_status' && typeof groupOnStatus==='function') groupOnStatus(d);
     else if(d.type==='group_updated' && typeof groupOnUpdated==='function') groupOnUpdated(d);
     else if(d.type==='group_deleted' && typeof groupOnDeleted==='function') groupOnDeleted(d);
+    else if(d.type==='whatsapp_status' && typeof waRender==='function') waRender(d);
   };
 }
 

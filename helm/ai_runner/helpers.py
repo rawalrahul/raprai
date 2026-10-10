@@ -129,7 +129,8 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
 
     running = [s for s in _st.sessions.values() if s["status"] == "running"]
     multi   = len(running) >= 2
-    web_src = source == "web"
+    # WhatsApp is mirrored to Telegram like the web UI is.
+    web_src = source in ("web", "whatsapp")
 
     if not multi and not web_src:
         return  # single session via Telegram — reply already serves as notification
@@ -142,7 +143,8 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
             try:
                 await _st.telegram_app.bot.send_message(
                     chat_id=_st.telegram_chat_id,
-                    text=f"🖥️ You (web): {prompt_text}",
+                    text=(f"📱 You (WhatsApp): {prompt_text}" if source == "whatsapp"
+                          else f"🖥️ You (web): {prompt_text}"),
                 )
             except Exception:
                 pass

@@ -11,6 +11,11 @@ on:
     tags: ['v*']
     branches: ['ci/windows-build', 'ccr-a9f017b0-ywqde2']
 
+# A newer push supersedes a build still running for the same branch.
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: windows-latest
@@ -78,10 +83,26 @@ jobs:
             } catch {}
             if ($p.HasExited) { break }
           }
+          # WhatsApp: the bundled neonize library must load and reach the QR step.
+          $wa = $null
+          if ($ok) {
+            try {
+              $wa = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/whatsapp/connect -TimeoutSec 30
+              foreach ($i in 1..30) {
+                if ($wa.status -ne 'starting') { break }
+                Start-Sleep -Seconds 2
+                $wa = Invoke-RestMethod -Uri http://127.0.0.1:8000/api/whatsapp/status -TimeoutSec 10
+              }
+            } catch { $wa = @{ status = 'request-failed'; error = "$_" } }
+            "WhatsApp status: $($wa.status) $($wa.error)"
+          }
           if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
           Get-ChildItem web_app.dist\logs -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName -Tail 40 }
           if (-not $ok) { throw 'web_app.exe did not serve /setup within 2 minutes.' }
           'Smoke test passed: /setup returned 200.'
+          if ($wa.available -eq $false -or $wa.status -eq 'request-failed') { throw "WhatsApp support is broken in the build: $($wa.error)" }
+          if ($wa.status -eq 'qr') { 'Smoke test passed: WhatsApp produced a link QR code.' }
+          else { Write-Output "::warning title=WhatsApp::No QR within 60s (status $($wa.status)). The library loaded; the runner may not reach WhatsApp." }
 
       - uses: actions/upload-artifact@v4
         with:

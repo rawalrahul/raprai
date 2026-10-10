@@ -37,6 +37,7 @@ from .device_routes import router as device_router
 from .agent_routes import router as agent_router
 from .council_routes import router as council_router
 from .groupchat_routes import router as groupchat_router
+from .whatsapp_routes import router as whatsapp_router
 from .learning_routes import router as learning_router
 from .demo_routes import router as demo_router
 
@@ -63,6 +64,7 @@ app.include_router(device_router)
 app.include_router(agent_router)
 app.include_router(council_router)
 app.include_router(groupchat_router)
+app.include_router(whatsapp_router)
 app.include_router(learning_router)
 app.include_router(demo_router)
 

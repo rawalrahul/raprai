@@ -281,7 +281,8 @@ function _renderTyping() {
 
 function _renderGroupHeaderState() {
   const stop = document.getElementById('group-stop-btn');
-  if (stop) stop.style.display = groupState.active && groupState.active.status === 'running' ? '' : 'none';
+  // `hidden`, not style.display: a global rule forces display on every button.
+  if (stop) stop.hidden = !(groupState.active && groupState.active.status === 'running');
 }
 
 function renderGroupConversation(scrollToEnd) {

@@ -19,7 +19,7 @@
 <link rel="stylesheet" href="/css/overhaul.css?v=1">
 <link rel="stylesheet" href="/css/impeccable.css?v=3">
 <link rel="stylesheet" href="/css/kelvin.css?v=3">
-<link rel="stylesheet" href="/css/groupchat.css?v=1">
+<link rel="stylesheet" href="/css/groupchat.css?v=3">
 </head>
 <body>
 <div id="app" class="main-layout">
@@ -640,6 +640,33 @@ Example:
       </div>
 
       <!-- Custom Instructions -->
+      <!-- WhatsApp -->
+      <div class="settings-section" id="wa-section">
+        <div class="settings-section-title">WhatsApp</div>
+        <div class="settings-row">
+          <label>Control RAPR from WhatsApp
+            <small>Free, no Business API: RAPR joins your WhatsApp as a linked device, like WhatsApp Web. Talk to it from your "Message yourself" chat: type to reach your focused session, /group for group chats, /help for more.</small>
+          </label>
+          <span id="wa-status" style="font-size:11px;color:var(--muted);white-space:nowrap">—</span>
+        </div>
+        <div id="wa-qr-wrap" style="display:none;padding:6px 0 10px;text-align:center">
+          <img id="wa-qr" alt="WhatsApp link QR code" style="width:220px;height:220px;background:#fff;border-radius:8px;padding:6px">
+          <div style="font-size:11px;color:var(--muted);margin-top:6px">On your phone: WhatsApp → Settings → Linked devices → Link a device, then scan this code.</div>
+        </div>
+        <div class="settings-row">
+          <label for="wa-allowed">Also accept messages from
+            <small>Optional. Phone numbers with country code, comma-separated (e.g. 919812345678). Use this when RAPR is linked to a spare number and you message it from your own.</small>
+          </label>
+          <input class="settings-input wide" type="text" id="wa-allowed" placeholder="919812345678" autocomplete="off">
+        </div>
+        <div style="padding:8px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="settings-save-btn" id="wa-connect-btn" onclick="waConnect()" style="font-size:11px;padding:4px 12px">Link WhatsApp</button>
+          <button class="settings-save-btn" id="wa-unlink-btn" onclick="waUnlink()" style="font-size:11px;padding:4px 12px" hidden>Unlink</button>
+          <button class="settings-save-btn" onclick="waSaveAllowed()" style="font-size:11px;padding:4px 12px">Save numbers</button>
+          <span id="wa-msg" style="font-size:11px;color:var(--accent)"></span>
+        </div>
+      </div>
+
       <div class="settings-section">
         <div class="settings-section-title">Custom Instructions
           <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:9px">(applied to all AIs)</span>
@@ -1539,15 +1566,16 @@ Example:
   </div>
 </div>
 
-<script src="/js/kelvin.js?v=3"></script>
-<script src="/js/complete.js?v=10"></script>
+<script src="/js/kelvin.js?v=4"></script>
+<script src="/js/complete.js?v=11"></script>
 <script src="/js/packages.js?v=4"></script>
 <script src="/js/memory.js?v=2"></script>
 <script src="/js/custom_ai.js?v=3"></script>
 <script src="/js/backup.js?v=2"></script>
 <script src="/js/agents.js?v=12"></script>
 <script src="/js/council.js?v=10"></script>
-<script src="/js/groupchat.js?v=1"></script>
+<script src="/js/groupchat.js?v=3"></script>
+<script src="/js/whatsapp.js?v=2"></script>
 <script src="/js/demos.js?v=2"></script>
 <script>
 // Register PWA service worker

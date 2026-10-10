@@ -291,6 +291,8 @@ async def _main():
             tg_start, tg_status, tg_kelvin, tg_stop, tg_stop_ai, tg_text, tg_timeout,
             tg_voice, tg_file,
         )
+        from helm.telegram_bot.groups import tg_group, group_callback, register as _register_tg_groups
+        _register_tg_groups()
 
         _st.telegram_app = (
             Application.builder().token(BOT_TOKEN).concurrent_updates(True).build()
@@ -323,11 +325,13 @@ async def _main():
         tg.add_handler(CommandHandler("schedule",      tg_schedule))
         tg.add_handler(CommandHandler("pipeline",      tg_pipeline))
         tg.add_handler(CommandHandler("agent",         tg_agent))
+        tg.add_handler(CommandHandler("group",         tg_group))
         # Inline keyboard callbacks — action/ms: buttons BEFORE browse_callback
         tg.add_handler(CallbackQueryHandler(action_callback, pattern=r"^(action:|ms:)"))
         tg.add_handler(CallbackQueryHandler(pipeline_callback, pattern=r"^pl:"))
         tg.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^appr:"))
         tg.add_handler(CallbackQueryHandler(agent_callback, pattern=r"^ag:"))
+        tg.add_handler(CallbackQueryHandler(group_callback, pattern=r"^gc:"))
         tg.add_handler(CallbackQueryHandler(heartbeat_callback, pattern=r"^heartbeat:"))
         tg.add_handler(CallbackQueryHandler(browse_callback))
         # Voice / audio messages
@@ -384,6 +388,8 @@ async def _main():
                 tg_start, tg_status, tg_kelvin, tg_stop, tg_stop_ai, tg_text, tg_timeout,
                 tg_voice, tg_file,
             )
+            from helm.telegram_bot.groups import tg_group, group_callback, register as _register_tg_groups
+            _register_tg_groups()
             _st.telegram_app = (
                 Application.builder().token(token).concurrent_updates(True).build()
             )
@@ -410,10 +416,12 @@ async def _main():
             tg.add_handler(CommandHandler("schedule",      tg_schedule))
             tg.add_handler(CommandHandler("pipeline",      tg_pipeline))
             tg.add_handler(CommandHandler("agent",         tg_agent))
+            tg.add_handler(CommandHandler("group",         tg_group))
             tg.add_handler(CallbackQueryHandler(action_callback, pattern=r"^(action:|ms:)"))
             tg.add_handler(CallbackQueryHandler(pipeline_callback, pattern=r"^pl:"))
             tg.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^appr:"))
             tg.add_handler(CallbackQueryHandler(agent_callback, pattern=r"^ag:"))
+            tg.add_handler(CallbackQueryHandler(group_callback, pattern=r"^gc:"))
             tg.add_handler(CallbackQueryHandler(heartbeat_callback, pattern=r"^heartbeat:"))
             tg.add_handler(CallbackQueryHandler(browse_callback))
             tg.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, tg_voice))
@@ -560,6 +568,13 @@ async def _main():
     asyncio.create_task(daily_checkin_loop())
     asyncio.create_task(heartbeat_runner())
     asyncio.create_task(_open_browser())
+
+    # WhatsApp: reconnect if it was linked before (QR scanned in Settings).
+    try:
+        from helm.whatsapp_bridge import autostart as _wa_autostart
+        asyncio.create_task(_wa_autostart())
+    except Exception as exc:
+        logger.warning("WhatsApp autostart failed: %s", exc)
 
     # Start cloud backup scheduler (checks every 5 min for due backups)
     try:

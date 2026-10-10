@@ -115,6 +115,10 @@ async def action_callback(update, context):
                 else:
                     _st.focused_id = sid
                     await push_state()
+                    # Picking a session leaves group-chat mode on Telegram.
+                    import helm.groupchat as _gc
+                    if _gc.active_group("telegram"):
+                        _gc.set_active_group("telegram", None)
                     fs = _st.sessions[sid]
                     ai_lbl = fs["emoji"] + " " + (fs["ai"] or "Shell")
                     await query.edit_message_text(

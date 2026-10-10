@@ -47,6 +47,12 @@ PASS_RE = re.compile(r"^\s*\(?\s*pass\s*\)?\s*\.?\s*$", re.IGNORECASE)
 _ANSI_ESC_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 groups: dict[str, dict] = {}   # group_id -> group
+# Channel ("telegram", "whatsapp") -> id of the group that channel is talking to.
+# While set, plain messages from that channel go to the group, and the group's
+# messages are relayed back to it.
+active_groups: dict[str, str] = {}
+# Channel -> async fn(group, text) that delivers a relayed group message.
+_channel_senders: dict = {}
 _loaded = False
 _save_lock = threading.Lock()
 
@@ -78,6 +84,9 @@ def load_groups() -> None:
                 g["status"] = "idle"
                 g["speaking"] = None
                 groups[g["id"]] = g
+            for ch, gid in (data.get("active") or {}).items():
+                if gid in groups:
+                    active_groups[ch] = gid
     except Exception as exc:
         logger.warning("groupchat: could not load groups: %s", exc)
 
@@ -85,7 +94,8 @@ def load_groups() -> None:
 def save_groups() -> None:
     try:
         path = _store_path()
-        payload = {"groups": [_public(g) for g in groups.values()]}
+        payload = {"groups": [_public(g) for g in groups.values()],
+                   "active": dict(active_groups)}
         tmp = path.with_suffix(".tmp")
         with _save_lock:
             tmp.write_text(json.dumps(payload, ensure_ascii=False, default=str), encoding="utf-8")
@@ -132,13 +142,16 @@ def make_group(name: str, about: str, sessions: list[dict]) -> dict:
     return group
 
 
-def make_message(role: str, content: str, member: Optional[dict] = None) -> dict:
+def make_message(role: str, content: str, member: Optional[dict] = None,
+                 source: str = "web") -> dict:
     msg = {
         "id": f"gm-{uuid4().hex[:8]}",
         "role": role,                 # user | member | system
         "content": content,
         "timestamp": _now(),
     }
+    if role == "user":
+        msg["source"] = source        # web | telegram | whatsapp
     if member:
         msg["author"] = member["id"]
         msg["author_name"] = member["name"]
@@ -332,8 +345,58 @@ async def broadcast_group(group: dict) -> None:
 async def _set_status(group: dict, status: str, speaking: Optional[str] = None) -> None:
     group["status"] = status
     group["speaking"] = speaking
+    # Name and roster ride along so Kelvin can show the group's crew without a fetch.
     await _broadcast({"type": "group_status", "group_id": group["id"],
-                      "status": status, "speaking": speaking})
+                      "status": status, "speaking": speaking, "name": group["name"],
+                      "members": [{"id": m["id"], "name": m["name"], "ai": m["ai"],
+                                   "emoji": m["emoji"], "color": m["color"]}
+                                  for m in group["members"]]})
+
+
+# ---------------------------------------------------------------------------
+# Channels (Telegram, WhatsApp): relay a group's messages to the chat apps
+# that are currently talking to it
+# ---------------------------------------------------------------------------
+
+def register_channel(name: str, sender) -> None:
+    """sender: async fn(group, text) that posts text to that chat app."""
+    _channel_senders[name] = sender
+
+
+def set_active_group(channel: str, group_id: Optional[str]) -> None:
+    if group_id:
+        active_groups[channel] = group_id
+    else:
+        active_groups.pop(channel, None)
+    save_groups()
+
+
+def active_group(channel: str) -> Optional[dict]:
+    load_groups()
+    gid = active_groups.get(channel)
+    return groups.get(gid) if gid else None
+
+
+def format_for_channel(msg: dict) -> str:
+    if msg["role"] == "member":
+        return f"{msg.get('author_emoji') or '🤖'} {msg.get('author_name') or 'AI'}:\n{msg['content']}"
+    if msg["role"] == "user":
+        where = {"web": "web", "telegram": "Telegram", "whatsapp": "WhatsApp"}.get(msg.get("source"), "web")
+        return f"🧑 You (from {where}):\n{msg['content']}"
+    return msg["content"]
+
+
+async def _relay(group: dict, msg: dict) -> None:
+    for channel, gid in list(active_groups.items()):
+        if gid != group["id"] or channel == msg.get("source"):
+            continue
+        sender = _channel_senders.get(channel)
+        if not sender:
+            continue
+        try:
+            await sender(group, format_for_channel(msg))
+        except Exception as exc:
+            logger.warning("groupchat: relay to %s failed: %s", channel, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +426,8 @@ async def run_room_turn(group_id: str, token: str) -> None:
         return group.get("_turn") != token
 
     replies = 0
+    started = time.time()
+    last_reply = ""
     try:
         for rnd in range(MAX_ROUNDS):
             mentioned = _mentioned_since_user(group)
@@ -392,7 +457,9 @@ async def run_room_turn(group_id: str, token: str) -> None:
                 append_message(group, msg)
                 replies += 1
                 spoke += 1
+                last_reply = reply
                 await _broadcast({"type": "group_message", "group_id": group_id, "message": msg})
+                await _relay(group, msg)
             if spoke == 0:
                 break
     finally:
@@ -400,14 +467,22 @@ async def run_room_turn(group_id: str, token: str) -> None:
             group.pop("_turn", None)
             await _set_status(group, "idle", None)
             save_groups()
+            if replies:
+                # Same rule as single sessions: a sticker only for long turns.
+                try:
+                    from helm.kelvin_stickers import done_sticker_for_task
+                    done_sticker_for_task(time.time() - started, last_reply, source="group")
+                except Exception:
+                    pass
 
 
-async def send_user_message(group: dict, text: str) -> dict:
+async def send_user_message(group: dict, text: str, source: str = "web") -> dict:
     """Post the user's message and start a new room turn (ending any running one)."""
     _kill_running(group)
-    msg = make_message("user", text)
+    msg = make_message("user", text, source=source)
     append_message(group, msg)
     await _broadcast({"type": "group_message", "group_id": group["id"], "message": msg})
+    await _relay(group, msg)
     token = uuid4().hex
     group["_turn"] = token
     save_groups()

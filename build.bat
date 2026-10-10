@@ -53,6 +53,14 @@ set "VEC_FLAGS="
 python -c "import fastembed, onnxruntime" 2>nul && set "VEC_FLAGS=--include-package=fastembed --include-package=onnxruntime --include-package=tokenizers --include-package=numpy --include-package=huggingface_hub --include-package-data=onnxruntime --include-package-data=fastembed"
 if defined VEC_FLAGS (echo  Semantic vector memory: ENABLED in this build) else (echo  Semantic vector memory: NOT bundled - keyword/FTS only)
 
+:: -- WhatsApp (neonize): bundle the package and its native library. Nuitka does not
+::    copy DLLs as package data, so the DLL is added explicitly next to the package.
+set "WA_FLAGS="
+set "NEONIZE_DIR="
+for /f "delims=" %%i in ('python -c "import importlib.util,os;s=importlib.util.find_spec('neonize');print(os.path.dirname(s.origin) if s else '')" 2^>nul') do set "NEONIZE_DIR=%%i"
+if defined NEONIZE_DIR if exist "%NEONIZE_DIR%\neonize-windows-amd64.dll" set "WA_FLAGS=--include-package=neonize --include-package=segno --include-data-files=%NEONIZE_DIR%\neonize-windows-amd64.dll=neonize\neonize-windows-amd64.dll"
+if defined WA_FLAGS (echo  WhatsApp support: ENABLED in this build) else (echo  WhatsApp support: NOT bundled - pip install neonize)
+
 :: --assume-yes-for-downloads: Nuitka otherwise stops to ask before fetching its
 :: C compiler / dependency tools, which hangs unattended (CI) builds.
 python -m nuitka --standalone --assume-yes-for-downloads --enable-plugin=tk-inter ^
@@ -74,6 +82,7 @@ python -m nuitka --standalone --assume-yes-for-downloads --enable-plugin=tk-inte
     --include-module=helm.mcp.composio_mcp ^
     --include-module=helm.mcp.zapier_mcp ^
     %VEC_FLAGS% ^
+    %WA_FLAGS% ^
     %NUITKA_EXTRA% ^
     web_app.py
 

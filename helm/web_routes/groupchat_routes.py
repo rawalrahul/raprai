@@ -137,6 +137,9 @@ async def delete_group(group_id: str):
         return _err("Group not found", 404)
     await gc.stop_group(g)
     gc.groups.pop(group_id, None)
+    for channel, gid in list(gc.active_groups.items()):
+        if gid == group_id:
+            gc.active_groups.pop(channel, None)
     gc.save_groups()
     await gc._broadcast({"type": "group_deleted", "group_id": group_id})
     return JSONResponse({"ok": True})
