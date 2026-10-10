@@ -51,11 +51,13 @@ def test_whatsapp_kelvin_command(monkeypatch):
     assert "/kelvin" in wa.HELP
 
 
-def test_whatsapp_approvals(monkeypatch):
+def test_whatsapp_approvals(monkeypatch, tmp_path):
     import helm.whatsapp_bridge as wa
     import helm.approval as appr
+    import helm.audit as audit
     import helm.state as _st
     monkeypatch.setattr(_st, "approval_queue", {}, raising=False)
+    monkeypatch.setattr(audit, "_path", lambda: tmp_path / "audit.jsonl")
     req = appr.create_request("s1", "pipeline_step", "Run git push to main", details=["git push origin main"])
     rid = req["id"]
     assert rid in wa.approval_text(req) and "/approve" in wa.approval_text(req)
