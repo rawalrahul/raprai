@@ -61,6 +61,22 @@ def create_request(
     }
     _st.approval_queue[req_id] = req
     logger.info("Approval request created: %s — %s", req_id, description)
+
+    # Your own rules can decide without asking (deny / allow); "ask" is the default.
+    from helm import approval_rules, audit
+    rule = approval_rules.evaluate(f"{description} {' '.join(req['details'])}")
+    if rule and rule["action"] in ("deny", "allow"):
+        req["status"] = "denied" if rule["action"] == "deny" else "approved"
+        req["resolved_at"] = time.time()
+        req["resolved_by"] = f"rule:{rule['id']}"
+        req["_event"].set()
+        audit.record("rule_applied", id=req_id, action=req["status"], description=description,
+                     rule=rule["id"], session_id=session_id)
+        logger.info("Approval %s decided by rule %s: %s", req_id, rule["id"], req["status"])
+        return req
+
+    audit.record("approval_requested", id=req_id, action=action, description=description,
+                 session_id=session_id)
     return req
 
 
@@ -74,6 +90,9 @@ def resolve(req_id: str, status: str, source: str = "web") -> bool:
     req["resolved_by"] = source
     req["_event"].set()
     logger.info("Approval %s %s (via %s)", req_id, status, source)
+    from helm import audit
+    audit.record("approval_resolved", id=req_id, action=status, description=req.get("description"),
+                 source=source, session_id=req.get("session_id"))
     return True
 
 
@@ -123,6 +142,8 @@ def cleanup(max_age: float = 3600.0) -> int:
 async def broadcast_approval(req: dict):
     """Send an approval request to both Web UI (WebSocket) and Telegram."""
     from helm.broadcast import broadcast
+    if req.get("status") != "pending":
+        return  # decided by one of your rules; nothing to ask
 
     await broadcast({
         "type": "approval_request",
@@ -134,6 +155,20 @@ async def broadcast_approval(req: dict):
         await _send_approval_to_telegram(req)
     except Exception as exc:
         logger.debug("Could not send approval to Telegram: %s", exc)
+
+    # ... and to your phone (Web Push), if you've turned on phone notifications
+    try:
+        from helm import push
+        await asyncio.to_thread(push.notify_approval, req["description"][:160], req["id"])
+    except Exception as exc:
+        logger.debug("Could not send approval to phones: %s", exc)
+
+    # ... and to WhatsApp, as text commands (when it's linked and connected)
+    try:
+        from helm.whatsapp_bridge import notify_approval
+        await notify_approval(req)
+    except Exception as exc:
+        logger.debug("Could not send approval to WhatsApp: %s", exc)
 
 
 async def broadcast_resolution(req: dict):

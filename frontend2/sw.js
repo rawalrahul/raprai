@@ -73,3 +73,22 @@ self.addEventListener('fetch', (event) => {
       })
   );
 });
+
+// Phone notifications (Web Push): show the message, and focus or open RAPR on tap.
+self.addEventListener('push', (event) => {
+  let data = { title: 'RAPR AI', body: '', tag: 'rapr', url: '/' };
+  try { data = Object.assign(data, event.data ? event.data.json() : {}); } catch (e) {}
+  event.waitUntil(self.registration.showNotification(data.title, {
+    body: data.body, tag: data.tag, renotify: true, icon: '/static/rapr-logo.png', data: { url: data.url },
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    for (const c of list) { if ('focus' in c) { c.navigate && c.navigate(url); return c.focus(); } }
+    return self.clients.openWindow(url);
+  }));
+});
+

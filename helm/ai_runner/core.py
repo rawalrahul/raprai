@@ -1801,6 +1801,13 @@ async def _dispatch_with_recovery(ai: str, sess: dict, text: str, safe_text: str
 
     Returns (output, actual_ai_used).
     """
+    from helm.acp_session import is_acp, run_turn as _acp_turn
+    if is_acp(ai):
+        # An ACP agent: its reply is the output; permission questions go to approvals.
+        output = await _acp_turn(sess, safe_text, sid, sess.get("name", ai))
+        await push_message("assistant", output, ai=ai, source=source, session_id=sid)
+        return output, ai
+
     # Shell mode — no recovery needed
     if ai not in ("claude", "ollama") and ai not in _st.integrations:
         output = await _run_single_ai(

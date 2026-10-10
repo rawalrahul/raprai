@@ -48,6 +48,8 @@ HELP = (
     "/new <ai> — start a session (claude, gemini, codex, ollama…)\n"
     "/group — group chats with several AIs (/group help)\n"
     "/status — what's running\n"
+    "/kelvin — is RAPR on? Kelvin's report, same as on Telegram\n"
+    "/approvals — actions waiting for your OK; /approve <id> or /deny <id>\n"
     "/help — this message"
 )
 
@@ -156,59 +158,9 @@ def status_text() -> str:
 
 
 async def handle_text(text: str) -> list[str]:
-    """Process one message from WhatsApp. Returns the replies to send."""
-    import helm.groupchat as gc
-    import helm.groupchat_channels as gch
-    from helm.broadcast import push_state
-
-    text = (text or "").strip()
-    if not text:
-        return []
-    low = text.lower()
-
-    if low in ("/help", "help", "/start", "menu", "/menu"):
-        return [HELP]
-    if low.startswith("/group"):
-        return [await gch.handle_command(CHANNEL, text[6:])]
-    if low in ("/status", "status"):
-        return [status_text()]
-    if low in ("/sessions", "sessions"):
-        return [sessions_text()]
-    if low.startswith("/use"):
-        arg = text[4:].strip()
-        items = sorted(_st.sessions.values(), key=lambda s: s.get("created", 0))
-        if not arg.isdigit() or not (0 < int(arg) <= len(items)):
-            return [sessions_text()]
-        sess = items[int(arg) - 1]
-        _st.focused_id = sess["id"]
-        await push_state()
-        left = ""
-        if gc.active_group(CHANNEL):
-            gc.set_active_group(CHANNEL, None)
-            left = " (left the group chat)"
-        return [f"✅ Now talking to {sess.get('emoji', '🤖')} {sess['name']}{left}. Just type."]
-    if low.startswith("/new"):
-        from helm.session_mgr import make_session, session_cwd
-        ai = text[4:].strip().lower() or "claude"
-        if ai != "claude" and ai not in _st.integrations:
-            names = ", ".join(["claude", *sorted(_st.integrations)])
-            return [f"Unknown AI \"{ai}\". Try one of: {names}"]
-        sess = make_session(ai, cwd=session_cwd())
-        _st.focused_id = sess["id"]
-        await push_state()
-        return [f"✨ {sess['name']} created. Just type your task."]
-
-    # In a group chat: the message goes to the whole group; replies are relayed.
-    if await gch.send_to_active_group(CHANNEL, text):
-        return []
-    if low in ("/stop", "stop"):
-        return ["Nothing to stop here. In a group, /group stop stops the replies."]
-
-    if not _st.focused_id or _st.focused_id not in _st.sessions:
-        return ["No session is focused.\n\n" + sessions_text()]
-    from helm.ai_runner import process_message
-    reply = await process_message(text, source=CHANNEL)
-    return [reply or "(no output)"]
+    """Process one WhatsApp message (the shared commands live in chat_router)."""
+    from helm.chat_router import handle
+    return await handle(CHANNEL, text)
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +180,19 @@ def _ensure_magic() -> None:
         stub.from_buffer = lambda buf, mime=False: "application/octet-stream" if mime else "data"
         stub.from_file = lambda path, mime=False: "application/octet-stream" if mime else "data"
         sys.modules["magic"] = stub
+
+
+def approval_text(req: dict) -> str:
+    details = "".join(f"\n  • {str(d)[:100]}" for d in (req.get("details") or [])[:5])
+    return (f"⚠️ Approval needed\n{req.get('description', '')}{details}\n\n"
+            f"Reply /approve {req['id']} or /deny {req['id']}")
+
+
+async def notify_approval(req: dict) -> None:
+    """Tell the WhatsApp chat that an action is waiting for approval."""
+    if state["status"] != "connected":
+        return
+    await send_text(approval_text(req))
 
 
 def _qr_data_uri(data: bytes) -> str:

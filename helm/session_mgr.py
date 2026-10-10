@@ -33,6 +33,10 @@ def make_session(ai: Optional[str], cwd: Optional[str] = None,
 
     if ai == "claude":
         name = f"Claude #{_st.session_counter}"; emoji = "🤖"; color = "#f59e0b"
+    elif ai and ai.startswith("acp:"):
+        from helm import acp_agents
+        agent = acp_agents.get(ai[4:]) or {"name": ai[4:], "emoji": "🧩"}
+        name = f"{agent['name']} #{_st.session_counter}"; emoji = agent.get("emoji", "🧩"); color = "#a855f7"
     elif ai and ai in _st.integrations:
         info  = _st.integrations[ai]
         name  = f"{info['name']} #{_st.session_counter}"; emoji = info["emoji"]; color = info["color"]

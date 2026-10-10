@@ -38,6 +38,13 @@ from .agent_routes import router as agent_router
 from .council_routes import router as council_router
 from .groupchat_routes import router as groupchat_router
 from .whatsapp_routes import router as whatsapp_router
+from .routing_routes import router as routing_router
+from .safety_routes import router as safety_router
+from .playbook_routes import router as playbook_router
+from .bakeoff_routes import router as bakeoff_router
+from .push_routes import router as push_router
+from .acp_routes import router as acp_router
+from .cloud_routes import router as cloud_router
 from .learning_routes import router as learning_router
 from .demo_routes import router as demo_router
 
@@ -65,6 +72,13 @@ app.include_router(agent_router)
 app.include_router(council_router)
 app.include_router(groupchat_router)
 app.include_router(whatsapp_router)
+app.include_router(routing_router)
+app.include_router(safety_router)
+app.include_router(playbook_router)
+app.include_router(bakeoff_router)
+app.include_router(push_router)
+app.include_router(acp_router)
+app.include_router(cloud_router)
 app.include_router(learning_router)
 app.include_router(demo_router)
 

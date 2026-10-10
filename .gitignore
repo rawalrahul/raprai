@@ -135,3 +135,17 @@ helm/learning/task_logs/
 helm/learning/user_context.json
 helm/learning/routing_table.json
 helm/learning/playbooks/20*/
+
+# RAPR runtime data (written next to the app in development). Never commit these.
+audit.jsonl
+approval_rules.json
+acp_agents.json
+cloud.json
+push_keys.json
+push_subscriptions.json
+group_chats.json
+kelvin_desktop.json
+kelvin_tips.json
+helmhq.db*
+helm/learning/routing_table.json
+

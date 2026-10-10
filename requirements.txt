@@ -90,3 +90,13 @@ fastembed>=0.3.6 ; python_version < "3.13"
 # a tiny fallback when libmagic isn't installed.)
 # ─────────────────────────────────────────────────────────
 neonize==0.5.2
+
+# ─────────────────────────────────────────────────────────
+# Optional chat apps. Install only the ones you use; RAPR starts a
+# chat app when its token is set in .env (see .env.example).
+# ─────────────────────────────────────────────────────────
+# discord.py>=2.3
+# slack-bolt>=1.18
+
+# Phone notifications (Settings → Approvals & audit → Phone notifications), free Web Push
+pywebpush>=2.0

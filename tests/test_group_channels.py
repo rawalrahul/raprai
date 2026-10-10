@@ -250,7 +250,7 @@ def test_whatsapp_commands(env, monkeypatch):
         pass
     monkeypatch.setattr(bc, "push_state", noop)
 
-    assert "RAPR AI on WhatsApp" in run(wa.handle_text("/help"))[0]
+    assert "RAPR AI" in run(wa.handle_text("/help"))[0]
     assert "1. 🤖 Claude #1" in run(wa.handle_text("/sessions"))[0]
     assert "No session is focused" in run(wa.handle_text("hello"))[0]
     assert "Now talking to 🤖 Gemini #2" in run(wa.handle_text("/use 2"))[0]
