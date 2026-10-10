@@ -146,3 +146,21 @@ def test_tunnel_address_skips_cloudflare_api_and_takes_newest():
     assert dep.find_url(r, "/opt/rapr/rapr", "") == "https://new-one.trycloudflare.com"
     r = FakeRunner({"docker-compose.yml logs tunnel": (0, 'Post "https://api.trycloudflare.com/tunnel"', "")})
     assert dep.find_url(r, "/opt/rapr/rapr", "") == ""
+
+
+def test_server_files_writes_same_setup_as_the_app(tmp_path, monkeypatch):
+    """scripts/install-server.sh: settings and compose file made on the server itself."""
+    from helm import auth
+    from helm.cloud import server_files
+    server_files.write(tmp_path, "rapr", "4321")
+    env = (tmp_path / "rapr.env").read_text()
+    assert oct((tmp_path / "rapr.env").stat().st_mode & 0o777) == "0o600"
+    assert "4321" not in env and "RAPR_HEADLESS=1" in env
+    vals = dict(l.split("=", 1) for l in env.splitlines() if "=" in l and not l.startswith("#"))
+    monkeypatch.setenv("PIN_SALT", vals["PIN_SALT"])
+    monkeypatch.setenv("PIN_HASH", vals["PIN_HASH"])
+    assert auth.verify_pin("4321") and not auth.verify_pin("0000")
+    assert (tmp_path / "docker-compose.yml").read_text() == plan.compose_file(
+        plan.CloudOptions(host="localhost", name="rapr", pin_salt="x", pin_hash="y"))
+    with pytest.raises(ValueError):
+        server_files.write(tmp_path, "rapr", "12")

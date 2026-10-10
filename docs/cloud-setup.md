@@ -43,6 +43,31 @@ work. Pick Ubuntu 22.04 or 24.04, add your SSH key, and note the IP address.
 6. When it finishes, the **Open RAPR on your server** link appears. Open it and
    enter your PIN.
 
+## No laptop? Set it up from the server
+
+You don't need RAPR installed anywhere else. Log in to your server (from a
+terminal, Oracle's **Cloud Shell** in the browser, or an SSH app on your phone
+such as Termius) and paste:
+
+```
+curl -fsSL https://raw.githubusercontent.com/rawalrahul/raprai/main/scripts/install-server.sh | bash
+```
+
+It installs Docker if needed, asks you to choose a PIN (only its hash is
+saved), starts RAPR and prints the address to open. It's the same setup as
+**Deploy from RAPR** above. Afterwards the `rapr` command on the server helps:
+
+| Command | What it does |
+| --- | --- |
+| `rapr url` | Shows the current address (it changes when the server restarts) |
+| `rapr status` | Shows whether RAPR is running |
+| `rapr logs` | Shows RAPR's recent log |
+| `rapr update` | Downloads the newest RAPR and restarts it (also: run the install command again) |
+| `rapr restart` | Restarts RAPR |
+| `rapr remove` | Removes RAPR and its data from the server |
+
+AI keys and chat-app tokens are then added in the server's own RAPR, under Settings.
+
 ## Things to know
 
 - **The address can change.** The free Cloudflare tunnel gives a new
