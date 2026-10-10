@@ -115,22 +115,35 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # Publish: replace RAPR_AI_Setup.exe in the existing rapr-releases v1.0.0
-      # release (raprai.com/download links to that exact URL, so it never
-      # changes). Runs only after the smoke test passed, and only when the
+      # Publish: create the release for the app version in helm/version.py
+      # (e.g. v2.0.0) on rawalrahul/rapr-releases if it doesn't exist yet, and
+      # attach RAPR_AI_Setup.exe. Older releases (v1.0.0) are not touched.
+      # Runs only after the smoke test passed, and only when the
       # RELEASES_TOKEN secret (fine-grained PAT, Contents: read/write on
       # rawalrahul/rapr-releases) is configured; otherwise it is skipped.
-      - name: Publish to rapr-releases (replace RAPR_AI_Setup.exe in v1.0.0)
+      - name: Publish to rapr-releases
         if: ${{ env.HAS_RELEASES_TOKEN == 'true' }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: |
-          gh release upload v1.0.0 installer_output\RAPR_AI_Setup.exe --clobber --repo rawalrahul/rapr-releases
-          if ($LASTEXITCODE -ne 0) { throw 'Upload to rapr-releases failed.' }
-          $rel = gh release view v1.0.0 --repo rawalrahul/rapr-releases --json assets | ConvertFrom-Json
+          $ver = [regex]::Match((Get-Content helm\version.py -Raw), 'APP_VERSION = "([^"]+)"').Groups[1].Value
+          if (-not $ver) { throw 'Could not read APP_VERSION from helm/version.py' }
+          $tag = "v$ver"
+          $notes = "release-notes\$tag.md"
+          gh release view $tag --repo rawalrahul/rapr-releases *> $null
+          if ($LASTEXITCODE -ne 0) {
+            $args = @('release', 'create', $tag, '--repo', 'rawalrahul/rapr-releases', '--title', "RAPR AI $tag", '--latest')
+            if (Test-Path $notes) { $args += @('--notes-file', $notes) } else { $args += @('--notes', "RAPR AI $tag") }
+            gh @args
+            if ($LASTEXITCODE -ne 0) { throw "Could not create release $tag." }
+          }
+          gh release upload $tag installer_output\RAPR_AI_Setup.exe --clobber --repo rawalrahul/rapr-releases
+          if ($LASTEXITCODE -ne 0) { throw "Upload to $tag failed." }
+          $rel = gh release view $tag --repo rawalrahul/rapr-releases --json assets | ConvertFrom-Json
           $a = $rel.assets | Where-Object { $_.name -eq 'RAPR_AI_Setup.exe' }
           if (-not $a) { throw 'RAPR_AI_Setup.exe not found on the release after upload.' }
           $line = "$($a.name): $([math]::Round($a.size / 1MB, 1)) MB, updated $($a.updatedAt)"
           "Published: $line"
-          "### Published to rapr-releases v1.0.0`n$line" >> $env:GITHUB_STEP_SUMMARY
+          "### Published to rapr-releases $tag`
+$line" >> $env:GITHUB_STEP_SUMMARY
