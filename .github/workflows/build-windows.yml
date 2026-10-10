@@ -18,6 +18,10 @@ concurrency:
 
 jobs:
   build:
+    # Builds only when started by hand (Actions -> Run workflow) or from a v* tag.
+    # A push still creates a run, which (via concurrency above) cancels any build
+    # in progress for the branch, but this job is skipped.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     runs-on: windows-latest
     timeout-minutes: 300
     env:
