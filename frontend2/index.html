@@ -665,6 +665,17 @@ Example:
             <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="saveRules()">Save rules</button>
             <span id="rules-msg" style="font-size:11px;color:var(--accent);align-self:center"></span>
           </div>
+          <div class="settings-section-title" style="margin-top:12px">Agents over ACP</div>
+          <div class="settings-row" style="display:block">
+            <small>Any agent that speaks the Agent Client Protocol (ACP) can be added here by the command that starts it. It then appears in the New Session menu. Permission questions come to your approvals.</small>
+          </div>
+          <div id="acp-list" style="display:flex;flex-direction:column;gap:6px;padding:4px 0"></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;padding:4px 0 10px">
+            <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="addAcpRow()">+ Add agent</button>
+            <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="saveAcpAgents()">Save agents</button>
+            <span id="acp-msg" style="font-size:11px;color:var(--accent);align-self:center"></span>
+          </div>
+
           <div class="settings-section-title" style="margin-top:12px">Voices</div>
           <div class="settings-row">
             <label>Read group replies aloud
@@ -1264,6 +1275,7 @@ Example:
       <span class="menu-dot claude" aria-hidden="true"></span>New: Claude Code</button>
     <button class="ai-menu-item" id="auto-menu-btn" onclick="autoNewSession();closeAiMenu()" role="menuitem" title="RAPR picks the cheapest AI that can do the task">
       <span class="menu-dot" aria-hidden="true">✨</span>New: Auto (pick for my task)</button>
+    <button class="ai-menu-item" onclick="openBakeoffModal();closeAiMenu()" role="menuitem" title="Same task, several AIs, then pick the best result"><span class="menu-dot" aria-hidden="true">🧪</span>New: Bake-off (compare AIs)</button>
     <!-- integration "New: ..." buttons inserted here by loadIntegrations() -->
     <button class="ai-menu-item" id="shell-mode-btn" onclick="cmd('new_session:');closeAiMenu()" role="menuitem">
       <span class="menu-dot shell" aria-hidden="true"></span>New: Shell</button>
@@ -1279,6 +1291,7 @@ Example:
   <button id="clip-btn" onclick="document.getElementById('file-input').click()" title="Attach a file" aria-label="Attach file">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
   </button>
+  <button id="handsfree-btn" onclick="toggleHandsFree()" title="Hands-free: talk instead of typing" aria-label="Hands-free voice">🎧</button>
   <button id="mic-btn" onclick="toggleVoiceRec()" title="Click to record voice message" aria-label="Voice input">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
   </button>
@@ -1635,6 +1648,7 @@ Example:
 <script src="/js/groupchat.js?v=3"></script>
 <script src="/js/whatsapp.js?v=2"></script>
 <script src="/js/voices.js?v=1"></script>
+<script src="/js/finish.js?v=1"></script>
 <script src="/js/safety.js?v=3"></script>
 <script src="/js/demos.js?v=2"></script>
 <script>

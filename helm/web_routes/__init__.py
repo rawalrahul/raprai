@@ -43,6 +43,7 @@ from .safety_routes import router as safety_router
 from .playbook_routes import router as playbook_router
 from .bakeoff_routes import router as bakeoff_router
 from .push_routes import router as push_router
+from .acp_routes import router as acp_router
 from .learning_routes import router as learning_router
 from .demo_routes import router as demo_router
 
@@ -75,6 +76,7 @@ app.include_router(safety_router)
 app.include_router(playbook_router)
 app.include_router(bakeoff_router)
 app.include_router(push_router)
+app.include_router(acp_router)
 app.include_router(learning_router)
 app.include_router(demo_router)
 

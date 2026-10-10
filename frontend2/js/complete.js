@@ -155,6 +155,10 @@ function connect(){
         renderMsg(d);
       }
       // Send desktop notification if user is not focused and this is from assistant
+      // Hands-free: speak the reply in its AI's voice.
+      if(d.role === 'assistant' && window._handsFree && (!d.session_id || d.session_id === _focusedId) && typeof speakReplyHandsFree === 'function'){
+        speakReplyHandsFree(d.ai, d.content || '');
+      }
       if(d.role === 'assistant' && document.hidden && _notificationsEnabled){
         sendNotification(d);
       }
