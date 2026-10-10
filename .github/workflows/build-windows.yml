@@ -1,0 +1,130 @@
+name: Build Windows installer
+
+# Compiles RAPR AI with Nuitka (via build.bat) and packages it with Inno Setup
+# on a clean Windows runner. The installer is uploaded as a workflow artifact
+# named RAPR_AI_Setup.exe, ready to attach to the rawalrahul/rapr-releases
+# release that raprai.com/download links to.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+    branches: ['ci/windows-build']
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    env:
+      # 'true' only when the RELEASES_TOKEN secret exists; gates the publish step.
+      HAS_RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN != '' }}
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.13 matches the source install. requirements.txt only pulls fastembed on
+      # <3.13, so build.bat skips bundling onnxruntime/numpy/tokenizers (keyword/FTS
+      # memory only). Compiling those with Nuitka pushed builds past 2h on 3.12.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install nuitka ordered-set zstandard pypdf
+
+      - name: Ensure Inno Setup 6 is installed
+        shell: pwsh
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup not found at $iscc" }
+
+      # Output goes to build.log as well as the console. If the build fails or
+      # times out, the next step posts the log tail as an annotation, which is
+      # readable from the API even where raw job logs are not.
+      - name: Build (build.bat)
+        timeout-minutes: 150
+        shell: pwsh
+        env:
+          NUITKA_EXTRA: --lto=no
+        run: |
+          cmd /c "build.bat 2>&1" | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) { throw "build.bat exited with $LASTEXITCODE" }
+
+      - name: Report build failure
+        if: failure()
+        shell: pwsh
+        run: |
+          if (Test-Path build.log) {
+            $tail = (Get-Content build.log -Tail 40) -join '%0A'
+            Write-Output "::error title=build.bat log tail::$tail"
+          } else {
+            Write-Output '::error title=build.bat::no build.log produced'
+          }
+
+      - name: Check installer and rename for release
+        shell: pwsh
+        run: |
+          $out = Get-ChildItem installer_output\RAPR_AI_Setup_*.exe | Select-Object -First 1
+          if (-not $out) { throw 'Installer was not produced - see the build step log.' }
+          if (-not (Test-Path web_app.dist\web_app.exe)) { throw 'web_app.exe missing from dist.' }
+          Copy-Item $out.FullName installer_output\RAPR_AI_Setup.exe
+          $mb = [math]::Round((Get-Item installer_output\RAPR_AI_Setup.exe).Length / 1MB, 1)
+          $sha = (Get-FileHash installer_output\RAPR_AI_Setup.exe -Algorithm SHA256).Hash
+          "Built $($out.Name) -> RAPR_AI_Setup.exe ($mb MB)"
+          "SHA256: $sha"
+          "### RAPR_AI_Setup.exe`n- Size: $mb MB`n- SHA256: ``$sha``" >> $env:GITHUB_STEP_SUMMARY
+
+      # Smoke test: the compiled app must start and serve its web UI.
+      - name: Smoke test web_app.exe
+        shell: pwsh
+        run: |
+          Copy-Item .env.example web_app.dist\.env
+          $p = Start-Process -FilePath web_app.dist\web_app.exe -WorkingDirectory web_app.dist -PassThru
+          $ok = $false
+          foreach ($i in 1..40) {
+            Start-Sleep -Seconds 3
+            try {
+              $r = Invoke-WebRequest -Uri http://127.0.0.1:8000/setup -UseBasicParsing -TimeoutSec 5
+              if ($r.StatusCode -eq 200) { $ok = $true; break }
+            } catch {}
+            if ($p.HasExited) { break }
+          }
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          Get-ChildItem web_app.dist\logs -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName -Tail 40 }
+          if (-not $ok) { throw 'web_app.exe did not serve /setup within 2 minutes.' }
+          'Smoke test passed: /setup returned 200.'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RAPR_AI_Setup
+          path: installer_output/RAPR_AI_Setup.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      # Publish: replace RAPR_AI_Setup.exe in the existing rapr-releases v1.0.0
+      # release (raprai.com/download links to that exact URL, so it never
+      # changes). Runs only after the smoke test passed, and only when the
+      # RELEASES_TOKEN secret (fine-grained PAT, Contents: read/write on
+      # rawalrahul/rapr-releases) is configured; otherwise it is skipped.
+      - name: Publish to rapr-releases (replace RAPR_AI_Setup.exe in v1.0.0)
+        if: ${{ env.HAS_RELEASES_TOKEN == 'true' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          gh release upload v1.0.0 installer_output\RAPR_AI_Setup.exe --clobber --repo rawalrahul/rapr-releases
+          if ($LASTEXITCODE -ne 0) { throw 'Upload to rapr-releases failed.' }
+          $rel = gh release view v1.0.0 --repo rawalrahul/rapr-releases --json assets | ConvertFrom-Json
+          $a = $rel.assets | Where-Object { $_.name -eq 'RAPR_AI_Setup.exe' }
+          if (-not $a) { throw 'RAPR_AI_Setup.exe not found on the release after upload.' }
+          $line = "$($a.name): $([math]::Round($a.size / 1MB, 1)) MB, updated $($a.updatedAt)"
+          "Published: $line"
+          "### Published to rapr-releases v1.0.0`n$line" >> $env:GITHUB_STEP_SUMMARY
