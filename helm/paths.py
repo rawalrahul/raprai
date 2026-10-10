@@ -66,6 +66,11 @@ def user_data_dir() -> pathlib.Path:
     In a bundled build this is the directory containing the .exe, which is
     writable and persists across runs (unlike _MEIPASS which is temporary).
     """
+    override = os.environ.get("RAPR_DATA_DIR", "").strip()   # set in the server container
+    if override:
+        p = pathlib.Path(override)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
     if is_bundled():
         return pathlib.Path(sys.executable).parent
     return PROJECT_ROOT

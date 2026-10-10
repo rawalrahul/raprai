@@ -665,6 +665,32 @@ Example:
             <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="saveRules()">Save rules</button>
             <span id="rules-msg" style="font-size:11px;color:var(--accent);align-self:center"></span>
           </div>
+          <div class="settings-section-title" style="margin-top:12px">Cloud server (run RAPR 24/7)</div>
+          <div class="settings-row" style="display:block">
+            <small>Run RAPR on a server you own, so your AIs keep working when this computer is off. You need a Linux server you can SSH into: an Oracle Cloud free server, a Hetzner or DigitalOcean server, or a home Linux machine. RAPR installs itself and gives you an https:// address. Your PIN is stored on the server only as a hash. Full guide: docs/cloud-setup.md.</small>
+          </div>
+          <div style="display:grid;grid-template-columns:150px 1fr;gap:6px;align-items:center;font-size:12px;padding:6px 0">
+            <span>Server address</span><input class="settings-input wide" id="cloud-host" placeholder="203.0.113.7 or host name" autocomplete="off">
+            <span>SSH user</span><input class="settings-input" id="cloud-user" placeholder="ubuntu" value="ubuntu" autocomplete="off">
+            <span>SSH port</span><input class="settings-input" id="cloud-port" placeholder="22" value="22" style="width:90px">
+            <span>Server name</span><input class="settings-input" id="cloud-name" placeholder="rapr" value="rapr" autocomplete="off">
+            <span>Password <small>(or key below)</small></span><input class="settings-input wide" type="password" id="cloud-password" autocomplete="new-password">
+            <span>Private key <small>(OpenSSH, paste)</small></span><textarea class="settings-input wide" id="cloud-key" rows="3" autocomplete="off" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
+            <span>PIN for the server</span><input class="settings-input" type="password" id="cloud-pin" placeholder="at least 4 characters" autocomplete="new-password">
+          </div>
+          <div class="settings-row" style="display:block"><small>Copy these settings to the server (only these leave this computer, over your SSH connection):</small></div>
+          <div id="cloud-copy" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px;padding:4px 0 8px"></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;padding:4px 0 8px">
+            <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="startCloudDeploy()">Deploy to my server</button>
+            <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="cloudAction('status')">Refresh status</button>
+            <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="cloudAction('update')">Update</button>
+            <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="cloudAction('restart')">Restart</button>
+            <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="cloudAction('logs')">View logs</button>
+            <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="cloudAction('remove')">Remove from server</button>
+          </div>
+          <div id="cloud-url" style="font-size:12px;padding:2px 0 6px"></div>
+          <pre id="cloud-log" style="white-space:pre-wrap;font-size:11px;background:var(--bg-elevated,#111);padding:8px;border-radius:6px;max-height:240px;overflow:auto;margin:0"></pre>
+
           <div class="settings-section-title" style="margin-top:12px">Agents over ACP</div>
           <div class="settings-row" style="display:block">
             <small>Any agent that speaks the Agent Client Protocol (ACP) can be added here by the command that starts it. It then appears in the New Session menu. Permission questions come to your approvals.</small>
@@ -1649,6 +1675,7 @@ Example:
 <script src="/js/whatsapp.js?v=2"></script>
 <script src="/js/voices.js?v=1"></script>
 <script src="/js/finish.js?v=1"></script>
+<script src="/js/cloud.js?v=1"></script>
 <script src="/js/safety.js?v=3"></script>
 <script src="/js/demos.js?v=2"></script>
 <script>

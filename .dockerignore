@@ -1,0 +1,12 @@
+.git
+**/__pycache__
+**/*.pyc
+.env
+*.db
+tests
+node_modules
+installer_output
+web_app.dist
+web_app.build
+build.log
+release-notes
