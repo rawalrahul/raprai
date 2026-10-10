@@ -112,9 +112,11 @@ def _now() -> float:
     return time.time()
 
 
-def member_from_session(sess: dict) -> dict:
+def member_from_session(sess: dict, role: str = "", role_prompt: str = "") -> dict:
     return {
         "id": f"m-{uuid4().hex[:6]}",
+        "role": role,
+        "role_prompt": role_prompt,
         "session_id": sess["id"],
         "ai": sess.get("ai"),
         "model": sess.get("model"),
@@ -125,8 +127,11 @@ def member_from_session(sess: dict) -> dict:
     }
 
 
-def make_group(name: str, about: str, sessions: list[dict]) -> dict:
-    members = [member_from_session(s) for s in sessions]
+def make_group(name: str, about: str, sessions: list[dict],
+               roles: Optional[list[tuple[str, str]]] = None) -> dict:
+    """roles: optional (role name, role prompt) per session, in the same order."""
+    roles = roles or [("", "")] * len(sessions)
+    members = [member_from_session(s, r, p) for s, (r, p) in zip(sessions, roles)]
     group = {
         "id": f"g-{uuid4().hex[:8]}",
         "name": (name or "").strip() or ", ".join(m["name"] for m in members),
@@ -241,10 +246,11 @@ def build_prompt(group: dict, member: dict) -> str:
     transcript = "\n\n".join(lines) or "(no messages yet)"
 
     about = f'What this group is for: {group["about"]}\n\n' if group.get("about") else ""
+    role = f'Your role in this group: {member["role_prompt"]}\n\n' if member.get("role_prompt") else ""
     return (
         f"{header}\n\n"
         f"You are {member['name']}, one of several AI assistants in a group chat "
-        f"with the user. {about}"
+        f"with the user. {about}{role}"
         f"Conversation so far (oldest first):\n\n{transcript}\n\n"
         f"---\nWrite your next message to the group as {member['name']}.\n"
         "- Answer the user directly, and build on, correct or agree with the other "
