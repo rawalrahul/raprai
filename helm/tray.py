@@ -95,6 +95,13 @@ def start_tray(port: int, shutdown_callback=None):
     """
     global _tray_icon, _shutdown_event
 
+    if sys.platform == "darwin":
+        # macOS only allows menu-bar icons on the main thread, and RAPR's main
+        # thread runs the server; the "RAPR AI" app (scripts/install-mac.sh)
+        # opens and quits RAPR instead.
+        logger.info("Tray icon: not used on macOS (open and quit from the RAPR AI app)")
+        return
+
     try:
         import pystray
         from pystray import MenuItem, Menu

@@ -446,6 +446,12 @@ async def _main():
     actual_port = find_free_port(WEB_HOST, WEB_PORT)
     # Store actual port so OAuth callbacks use the right port
     os.environ["WEB_PORT"] = str(actual_port)
+    # And on disk, so launchers (the macOS app) can open the right address.
+    try:
+        from helm.paths import user_data_dir
+        (user_data_dir() / "web_port").write_text(str(actual_port), encoding="utf-8")
+    except Exception:
+        pass
 
     # --- Build uvicorn server ---
     config = uvicorn.Config(

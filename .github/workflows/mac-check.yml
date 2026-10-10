@@ -1,0 +1,87 @@
+name: Mac check
+
+# Installs RAPR on a real Mac (Apple Silicon) with scripts/install-mac.sh, opens
+# the "RAPR AI" app, checks RAPR answers, quits the app, and runs the tests.
+# Free for public repositories.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - scripts/install-mac.sh
+      - .github/workflows/mac-check.yml
+      - web_app.py
+      - requirements.txt
+      - helm/keep_awake.py
+      - helm/tray.py
+      - helm/paths.py
+  pull_request:
+    paths:
+      - scripts/install-mac.sh
+      - .github/workflows/mac-check.yml
+      - web_app.py
+      - requirements.txt
+      - helm/keep_awake.py
+      - helm/tray.py
+      - helm/paths.py
+
+concurrency:
+  group: mac-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mac:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install with the one-line installer
+        env:
+          RAPR_SOURCE_DIR: ${{ github.workspace }}
+          RAPR_NO_OPEN: "1"
+          RAPR_YES: "1"
+        run: bash scripts/install-mac.sh
+
+      - name: The app and the rapr command are there
+        run: |
+          test -d "$HOME/Applications/RAPR AI.app"
+          plutil -lint "$HOME/Applications/RAPR AI.app/Contents/Info.plist"
+          test -s "$HOME/Applications/RAPR AI.app/Contents/Resources/applet.icns"
+          command -v rapr
+
+      - name: Open the app, RAPR answers, quit the app, RAPR stops
+        run: |
+          data="$HOME/Library/Application Support/RAPR AI"
+          open "$HOME/Applications/RAPR AI.app"
+          for i in $(seq 1 60); do
+            port=$(cat "$data/web_port" 2>/dev/null || true)
+            if [ -n "$port" ] && curl -fsS "http://127.0.0.1:$port/health"; then echo; break; fi
+            sleep 2
+          done
+          curl -fsS "http://127.0.0.1:$port/health" >/dev/null || { tail -80 "$HOME/Library/Logs/RAPR AI/rapr.log"; exit 1; }
+          # First run: no settings yet, so RAPR shows its setup wizard.
+          test "$(curl -s -o /dev/null -w '%{redirect_url}' "http://127.0.0.1:$port/")" = "http://127.0.0.1:$port/setup"
+          rapr status
+          osascript -e 'quit app "RAPR AI"'
+          for i in $(seq 1 30); do rapr status >/dev/null 2>&1 || break; sleep 1; done
+          if rapr status; then echo "RAPR still running after quitting the app"; exit 1; fi
+          grep -q "Tray icon: not used on macOS" "$HOME/Library/Logs/RAPR AI/rapr.log"
+
+      - name: rapr start / stop
+        run: |
+          rapr start
+          for i in $(seq 1 60); do rapr status >/dev/null 2>&1 && curl -fsS "http://127.0.0.1:$(cat "$HOME/Library/Application Support/RAPR AI/web_port")/health" >/dev/null 2>&1 && break; sleep 2; done
+          rapr status
+          rapr stop
+          ! rapr status
+
+      - name: Tests
+        run: |
+          "$HOME/.rapr-ai/venv/bin/python" -m pip install --quiet pytest
+          "$HOME/.rapr-ai/venv/bin/python" -m pytest tests --ignore=tests/agent -q
+
+      - name: Log on failure
+        if: failure()
+        run: tail -150 "$HOME/Library/Logs/RAPR AI/rapr.log" || true
