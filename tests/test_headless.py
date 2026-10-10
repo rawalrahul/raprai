@@ -52,6 +52,7 @@ def test_whatsapp_kelvin_command(monkeypatch):
 
 
 def test_whatsapp_approvals(monkeypatch):
+    import helm.whatsapp_bridge as wa
     import helm.approval as appr
     import helm.state as _st
     monkeypatch.setattr(_st, "approval_queue", {}, raising=False)
