@@ -3,7 +3,7 @@ helm/crews.py — Ready-made AI crews: a group chat with a job for each member.
 
 A crew is a group chat where every AI has a role, for example "Writer" and
 "Reviewer". The role is added to that member's prompt, so it knows what to do
-in the room. Pick a crew, choose which open AI sessions to use, and RAPR
+in the room. Pick a crew, choose which AIs to use, and RAPR
 assigns each role to one of them (preferring the AI a role suits best).
 """
 
