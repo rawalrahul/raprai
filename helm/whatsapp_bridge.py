@@ -182,6 +182,52 @@ def _ensure_magic() -> None:
         sys.modules["magic"] = stub
 
 
+_PROTO_ALIAS_PREFIXES = ("wa", "instamadillo", "Neonize_pb2")
+
+
+class _NeonizeProtoAliases:
+    """neonize adds its proto folder to sys.path and imports those packages by
+    short names ("waCommon", "waE2E.WAWebProtobufsE2E_pb2"), and elsewhere by
+    their full names ("neonize.proto.waE2E..."). In the compiled Windows app
+    there are no files on that path, only the compiled neonize.proto.* modules,
+    so the short names fail ("No module named 'waAICommon'"). This finder,
+    placed last so normal installs never reach it, answers a short name with
+    the same compiled module under its full name (one module, not two copies,
+    so protobuf registers each file once)."""
+
+    def find_spec(self, fullname, path=None, target=None):
+        import importlib.util
+        if not fullname.startswith(_PROTO_ALIAS_PREFIXES):
+            return None
+        real = "neonize.proto." + fullname
+        try:
+            if importlib.util.find_spec(real) is None:
+                return None
+        except (ImportError, ValueError):
+            return None
+        return importlib.util.spec_from_loader(fullname, _ProtoAliasLoader(real))
+
+
+class _ProtoAliasLoader:
+    def __init__(self, real: str):
+        self.real = real
+
+    def create_module(self, spec):
+        import importlib
+        module = importlib.import_module(self.real)
+        self._spec = module.__spec__   # Python overwrites it with the alias's spec
+        return module
+
+    def exec_module(self, module):
+        module.__spec__ = self._spec   # already executed under its full name
+
+
+def _ensure_proto_aliases() -> None:
+    import sys
+    if not any(isinstance(f, _NeonizeProtoAliases) for f in sys.meta_path):
+        sys.meta_path.append(_NeonizeProtoAliases())
+
+
 def approval_text(req: dict) -> str:
     details = "".join(f"\n  • {str(d)[:100]}" for d in (req.get("details") or [])[:5])
     return (f"⚠️ Approval needed\n{req.get('description', '')}{details}\n\n"
@@ -265,6 +311,7 @@ async def start() -> dict:
         return public_state()
     try:
         _ensure_magic()
+        _ensure_proto_aliases()
         from neonize.aioze.client import NewAClient
         from neonize.aioze.events import ConnectedEv, MessageEv, LoggedOutEv, PairStatusEv
     except Exception as exc:  # missing wheel / libmagic on this machine
