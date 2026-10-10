@@ -45,6 +45,9 @@ def load_rules() -> list[dict]:
 
 def save_rules(rules: list[dict]) -> None:
     clean = [validate(r) for r in rules]
+    ids = [r["id"] for r in clean]
+    if len(ids) != len(set(ids)):
+        raise ValueError("two rules have the same id; give each rule its own id")
     _path().write_text(json.dumps({"rules": clean}, indent=2, ensure_ascii=False), encoding="utf-8")
 
 

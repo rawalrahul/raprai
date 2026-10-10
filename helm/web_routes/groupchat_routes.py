@@ -179,3 +179,37 @@ async def clear_group(group_id: str):
     gc.save_groups()
     await gc.broadcast_group(g)
     return JSONResponse({"ok": True})
+
+
+class CrewGroupRequest(BaseModel):
+    crew_id: str
+    session_ids: list[str]
+    name: str = ""
+
+
+@router.get("/api/crews")
+async def list_crews():
+    from helm import crews
+    return JSONResponse({"crews": [crews.public(c) for c in crews.CREWS]})
+
+
+@router.post("/api/groups/from-crew")
+async def create_group_from_crew(req: CrewGroupRequest):
+    from helm import crews
+    gc.load_groups()
+    crew = crews.get(req.crew_id)
+    if not crew:
+        return _err("Unknown crew")
+    sessions, err = _member_sessions(req.session_ids)
+    if err:
+        return _err(err)
+    try:
+        pairs = crews.assign(crew, sessions)
+    except ValueError as exc:
+        return _err(str(exc))
+    group = gc.make_group(req.name.strip() or crew["name"], crew["about"],
+                          [s for _, s in pairs],
+                          roles=[(r["name"], r["prompt"]) for r, _ in pairs])
+    gc.save_groups()
+    await gc.broadcast_group(group)
+    return JSONResponse({"group": gc._public(group)})

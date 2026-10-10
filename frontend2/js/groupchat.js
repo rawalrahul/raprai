@@ -483,6 +483,37 @@ async function openGroupModal(group) {
   aboutWrap.appendChild(about);
   body.appendChild(aboutWrap);
 
+  // New group only: start from a ready-made crew (each AI gets a role).
+  let crewSel = null;
+  if (!group) {
+    const crewWrap = _g('div');
+    crewWrap.appendChild(_g('label', 'council-modal-label', 'Start from a crew (optional)'));
+    crewSel = document.createElement('select');
+    crewSel.id = 'group-crew';
+    crewSel.className = 'council-modal-select';
+    const none = document.createElement('option');
+    none.value = ''; none.textContent = 'No crew: a plain group';
+    crewSel.appendChild(none);
+    try {
+      window._crewCache = (await _gFetch('/api/crews')).crews;
+      window._crewCache.forEach(c => {
+        const o = document.createElement('option');
+        o.value = c.id;
+        o.textContent = c.name + ' — ' + c.roles.map(r => r.name).join(', ');
+        crewSel.appendChild(o);
+      });
+    } catch (_) {}
+    crewSel.addEventListener('change', () => {
+      document.getElementById('group-about').value = '';
+      if (crewSel.value) {
+        const c = (window._crewCache || []).find(x => x.id === crewSel.value);
+        if (c) document.getElementById('group-about').value = c.about;
+      }
+    });
+    crewWrap.appendChild(crewSel);
+    body.appendChild(crewWrap);
+  }
+
   const memWrap = _g('div');
   memWrap.appendChild(_g('label', 'council-modal-label', 'Members (your open AI sessions)'));
   const list = _g('div', 'council-modal-sessions');
@@ -537,10 +568,16 @@ async function submitGroupModal(group) {
     about: (document.getElementById('group-about')?.value || '').trim(),
     member_session_ids: ids,
   };
+  const crewId = document.getElementById('group-crew')?.value || '';
   try {
-    const d = group
-      ? await _gFetch('/api/groups/' + encodeURIComponent(group.id), { method: 'PATCH', body: JSON.stringify(payload) })
-      : await _gFetch('/api/groups', { method: 'POST', body: JSON.stringify(payload) });
+    let d;
+    if (group) {
+      d = await _gFetch('/api/groups/' + encodeURIComponent(group.id), { method: 'PATCH', body: JSON.stringify(payload) });
+    } else if (crewId) {
+      d = await _gFetch('/api/groups/from-crew', { method: 'POST', body: JSON.stringify({ crew_id: crewId, session_ids: ids, name: payload.name }) });
+    } else {
+      d = await _gFetch('/api/groups', { method: 'POST', body: JSON.stringify(payload) });
+    }
     document.getElementById('group-modal')?.remove();
     _upsertSummary(d.group);
     groupState.activeId = d.group.id;

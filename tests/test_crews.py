@@ -73,3 +73,20 @@ def test_group_from_crew_carries_roles_into_prompts(env):
 def test_plain_group_has_no_role_line(env):
     g = gc.make_group("Plain", "", [sess("1", "claude")])
     assert "Your role" not in gc.build_prompt(g, g["members"][0])
+
+
+def test_crew_endpoint_creates_a_group(env, monkeypatch):
+    from fastapi.testclient import TestClient
+    from helm.web_routes import app as webapp
+    monkeypatch.setattr(_st, "sessions", {"1": sess("1", "claude"), "2": sess("2", "codex"),
+                                          "3": sess("3", "gemini")}, raising=False)
+    client = TestClient(webapp)
+    r = client.post("/api/groups/from-crew", json={"crew_id": "code-review", "session_ids": ["1", "2", "3"]})
+    assert r.status_code == 200, r.text
+    g = r.json()["group"]
+    assert g["name"] == "Code review"
+    assert [m["role"] for m in g["members"]] == ["Author", "Reviewer", "Tester"]
+    r = client.post("/api/groups/from-crew", json={"crew_id": "nope", "session_ids": ["1"]})
+    assert "error" in r.json()
+    r = client.post("/api/groups/from-crew", json={"crew_id": "launch", "session_ids": ["1"]})
+    assert "needs 3 AI sessions" in r.json()["error"]

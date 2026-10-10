@@ -653,6 +653,25 @@ Example:
       <!-- WhatsApp -->
       <div class="settings-section" id="wa-section">
         <div class="settings-section-title">WhatsApp</div>
+        <!-- Approval rules and audit log -->
+        <div class="settings-section" id="safety-section">
+          <div class="settings-section-title">Approvals &amp; audit</div>
+          <div class="settings-row" style="display:block">
+            <small>Your rules decide some actions without asking. <b>ask</b> always asks, <b>deny</b> refuses, <b>allow</b> approves. The pattern is a regular expression, checked against the action's description. The first enabled match wins.</small>
+          </div>
+          <div id="rules-list" style="display:flex;flex-direction:column;gap:6px;padding:6px 0"></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;padding:4px 0 10px">
+            <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="addRuleRow()">+ Add rule</button>
+            <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="saveRules()">Save rules</button>
+            <span id="rules-msg" style="font-size:11px;color:var(--accent);align-self:center"></span>
+          </div>
+          <div class="settings-row">
+            <label>Audit log <small>What was asked, what you decided, and by whom. Stays on this computer.</small></label>
+            <a class="settings-save-btn" style="font-size:11px;padding:4px 12px;text-decoration:none" href="/api/audit.csv" download="rapr-audit.csv">Export CSV</a>
+          </div>
+          <div id="audit-list" style="max-height:180px;overflow-y:auto;font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:3px"></div>
+        </div>
+
         <div class="settings-row">
           <label>Control RAPR from WhatsApp
             <small>Free, no Business API: RAPR joins your WhatsApp as a linked device, like WhatsApp Web. Talk to it from your "Message yourself" chat: type to reach your focused session, /group for group chats, /help for more.</small>
@@ -1216,6 +1235,8 @@ Example:
     <div class="ai-menu-section" role="presentation">New Session</div>
     <button id="claude-menu-btn" class="ai-menu-item" onclick="cmd('new_session:claude');closeAiMenu()" role="menuitem">
       <span class="menu-dot claude" aria-hidden="true"></span>New: Claude Code</button>
+    <button class="ai-menu-item" id="auto-menu-btn" onclick="autoNewSession();closeAiMenu()" role="menuitem" title="RAPR picks the cheapest AI that can do the task">
+      <span class="menu-dot" aria-hidden="true">✨</span>New: Auto (pick for my task)</button>
     <!-- integration "New: ..." buttons inserted here by loadIntegrations() -->
     <button class="ai-menu-item" id="shell-mode-btn" onclick="cmd('new_session:');closeAiMenu()" role="menuitem">
       <span class="menu-dot shell" aria-hidden="true"></span>New: Shell</button>
@@ -1586,6 +1607,7 @@ Example:
 <script src="/js/council.js?v=10"></script>
 <script src="/js/groupchat.js?v=3"></script>
 <script src="/js/whatsapp.js?v=2"></script>
+<script src="/js/safety.js?v=1"></script>
 <script src="/js/demos.js?v=2"></script>
 <script>
 // Register PWA service worker

@@ -2211,6 +2211,7 @@ function loadSettings(){
 
 function _populateAiDropdowns(settingsData){
   fetch('/integrations').then(r=>r.json()).catch(()=>[]).then(intList=>{
+    if(!Array.isArray(intList)) intList = [];   // e.g. a rate-limit error object
     // Build full AI list: claude built-in + all integrations
     const allAis = [{key:'claude', name:'Claude Code', emoji:'🤖'}];
     const seen = new Set(['claude']);

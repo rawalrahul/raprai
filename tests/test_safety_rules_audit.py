@@ -69,6 +69,12 @@ def test_ask_rule_and_default_still_ask(data):
     assert entries[0]["source"] == "web" and entries[0]["action"] == "approved"
 
 
+def test_duplicate_rule_ids_are_refused(data):
+    with pytest.raises(ValueError, match="same id"):
+        rules.save_rules([{"id": "x", "match": "a", "action": "ask"},
+                          {"id": "x", "match": "b", "action": "deny"}])
+
+
 def test_rules_file_is_saved_and_validated(data):
     rules.save_rules([{"id": "x", "match": "rm", "action": "deny", "description": "no rm"}])
     assert json.loads((data / "approval_rules.json").read_text())["rules"][0]["match"] == "rm"
