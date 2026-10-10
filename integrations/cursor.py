@@ -27,12 +27,16 @@ def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
         import shutil
         if shutil.which(_bin + ".cmd"):
             _bin = _bin + ".cmd"
-    cmd = [_bin, "-p"]
+    cmd = [_bin, "-p", "--output-format", "text"]
     if model:
-        cmd.extend(["-m", model])
+        cmd.extend(["--model", model])
     approval_flag = os.environ.get("CURSOR_APPROVAL_FLAG", "--force")
     if approval_flag:
         cmd.append(approval_flag)
+    # Without --trust, a folder the CLI hasn't seen before stops at "Workspace Trust Required".
+    trust_flag = os.environ.get("CURSOR_TRUST_FLAG", "--trust")
+    if trust_flag:
+        cmd.append(trust_flag)
     cmd.append(prompt)
     return cmd
 

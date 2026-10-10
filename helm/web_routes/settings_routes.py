@@ -23,7 +23,8 @@ router = APIRouter()
 
 
 _KNOWN_OPENROUTER_MODELS = [
-    "anthropic/claude-sonnet-4-5",
+    "openrouter/free",
+    "anthropic/claude-sonnet-4.6",
     "openai/gpt-4o",
     "google/gemini-2.0-flash-001",
     "meta-llama/llama-3.3-70b-instruct",
@@ -31,12 +32,19 @@ _KNOWN_OPENROUTER_MODELS = [
     "deepseek/deepseek-chat-v3-0324",
 ]
 
+_KNOWN_GITHUB_MODELS = [
+    "openai/gpt-4o-mini",
+    "openai/gpt-4o",
+    "openai/gpt-4.1",
+    "openai/gpt-4.1-mini",
+    "meta/Llama-3.3-70B-Instruct",
+    "microsoft/Phi-4",
+    "mistral-ai/Mistral-Large-2411",
+]
+
 _KNOWN_GROQ_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "deepseek-r1-distill-llama-70b",
-    "gemma2-9b-it",
-    "mixtral-8x7b-32768",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
 ]
 
 
@@ -67,7 +75,9 @@ def _fetch_openai_compat_models(base_url: str, api_key: str = "", timeout: int =
     if not base_url:
         return []
     url = base_url.rstrip("/") + "/models"
-    headers = {"Accept": "application/json"}
+    from helm.ai_runner._openai_compat_cli import _user_agent
+    # Without a User-Agent, Cloudflare (in front of Groq and OpenRouter) refuses the request.
+    headers = {"Accept": "application/json", "User-Agent": _user_agent()}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     req = urllib.request.Request(url, headers=headers, method="GET")
@@ -249,6 +259,18 @@ async def integration_models():
         except Exception as e:
             info["models"]["groq"] = _KNOWN_GROQ_MODELS
             info.setdefault("errors", {})["groq"] = str(e)
+
+        try:
+            fetched = []
+            if os.environ.get("GITHUB_TOKEN", ""):
+                fetched = _fetch_openai_compat_models(
+                    "https://models.github.ai/catalog",
+                    api_key=os.environ.get("GITHUB_TOKEN", ""),
+                )
+            info["models"]["github_models"] = fetched or _KNOWN_GITHUB_MODELS
+        except Exception as e:
+            info["models"]["github_models"] = _KNOWN_GITHUB_MODELS
+            info.setdefault("errors", {})["github_models"] = str(e)
 
         try:
             local_url = os.environ.get("LOCAL_AI_URL", "http://localhost:1234").rstrip("/") + "/v1"

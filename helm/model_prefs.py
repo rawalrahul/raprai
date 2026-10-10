@@ -2,7 +2,10 @@
 helm/model_prefs.py — Persistent per-AI model selection.
 
 Selected models survive session restarts.
-Storage: helm/config/selected_models.json
+Storage: selected_models.json in the user data folder. Before 2.0.1 it was
+helm/config/selected_models.json inside the app, which an update replaces (and
+the server image resets), so choices were lost; that file is still read as a
+fallback until the first new choice is saved.
 """
 
 from __future__ import annotations
@@ -11,7 +14,12 @@ import json
 import os
 from pathlib import Path
 
-_PREFS_PATH = Path(__file__).parent / "config" / "selected_models.json"
+_OLD_PREFS_PATH = Path(__file__).parent / "config" / "selected_models.json"
+
+
+def _prefs_path() -> Path:
+    from helm.paths import user_data_dir
+    return user_data_dir() / "selected_models.json"
 
 _DEFAULTS: dict[str, str | None] = {
     "claude": None,
@@ -22,21 +30,23 @@ _DEFAULTS: dict[str, str | None] = {
 
 
 def _load() -> dict:
-    try:
-        if _PREFS_PATH.exists():
-            return json.loads(_PREFS_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        pass
+    for path in (_prefs_path(), _OLD_PREFS_PATH):
+        try:
+            if path.exists():
+                return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
     return dict(_DEFAULTS)
 
 
 def _save(prefs: dict) -> None:
     try:
-        _PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp = str(_PREFS_PATH) + ".tmp"
+        path = _prefs_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = str(path) + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(prefs, f, indent=2)
-        os.replace(tmp, str(_PREFS_PATH))
+        os.replace(tmp, str(path))
     except Exception:
         pass
 

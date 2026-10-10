@@ -925,7 +925,7 @@ function _ensureOpenRouterModelInput(){
   const inp=document.createElement('input');
   inp.type='text';
   inp.id='node-or-model-inp';
-  inp.placeholder='e.g. anthropic/claude-sonnet-4-5  or  openai/gpt-4o';
+  inp.placeholder='e.g. anthropic/claude-sonnet-4.6  or  openrouter/free';
   inp.style.cssText='width:100%;box-sizing:border-box;background:var(--bg-deep);color:var(--text-main);border:1px solid var(--border-default);border-radius:4px;padding:5px 8px;font-size:12px';
   const hint=document.createElement('div');
   hint.style.cssText='font-size:10px;color:var(--text-dim);margin-top:3px';
@@ -987,7 +987,7 @@ function saveNodeModal(){
     const aiVal=ai.value||'claude';
     if(aiVal==='openrouter'){
       const mi=document.getElementById('node-or-model-inp');
-      const model=(mi&&mi.value.trim())||'anthropic/claude-sonnet-4-5';
+      const model=(mi&&mi.value.trim())||'openrouter/free';
       node.ai='openrouter/'+model;
     } else {
       node.ai=aiVal;

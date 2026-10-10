@@ -289,6 +289,11 @@ def save_ai_to_log(model: Optional[str], session_id: Optional[str] = None):
 _save_ai_to_log = save_ai_to_log  # legacy alias
 
 
+def _unsaved(obj):
+    """json.dumps fallback: values that can't be saved (locks, tasks) are stored as null."""
+    return None
+
+
 def save_last_state():
     """Persist all session state to the database for resume fallback."""
     from helm.db import get_db
@@ -297,7 +302,9 @@ def save_last_state():
         volatile_keys = {"terminal", "session_started", "total_task_seconds",
                          "task_count", "changes"}
         for sid, sess in _st.sessions.items():
-            sessions_data[sid] = {k: v for k, v in sess.items() if k not in volatile_keys}
+            # Keys starting with "_" are runtime-only (e.g. "_lock", an asyncio.Lock).
+            sessions_data[sid] = {k: v for k, v in sess.items()
+                                  if k not in volatile_keys and not k.startswith("_")}
 
         db = get_db()
         state = {
@@ -310,7 +317,7 @@ def save_last_state():
             db.execute(
                 "INSERT OR REPLACE INTO session_state (key, value, updated_at) "
                 "VALUES (?, ?, datetime('now'))",
-                (key, json.dumps(value, ensure_ascii=False)),
+                (key, json.dumps(value, ensure_ascii=False, default=_unsaved)),
             )
         db.commit()
     except Exception as e:

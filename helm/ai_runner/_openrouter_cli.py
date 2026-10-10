@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 
 _API_URL = "https://openrouter.ai/api/v1/chat/completions"
-_DEFAULT_MODEL = "anthropic/claude-sonnet-4-5"
+_DEFAULT_MODEL = "openrouter/free"
 _TIMEOUT = 120  # seconds
 
 
@@ -51,7 +51,8 @@ def main() -> None:
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://raprai.local",
+            "User-Agent": "RAPR-AI (+https://raprai.com)",
+            "HTTP-Referer": "https://raprai.com",
             "X-Title": "RAPR AI Agent",
         },
         method="POST",

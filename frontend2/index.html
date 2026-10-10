@@ -1059,7 +1059,7 @@ Example:
             </div>
             <div class="settings-row" style="padding:0">
               <label>GitHub Token
-                <small>PAT for GitHub Models (gpt-4o, Llama, Phi-4). No scopes needed.</small>
+                <small>Fine-grained token with the "Models: read" permission, for GitHub Models (GPT-4o, Llama, Phi-4).</small>
               </label>
               <div style="display:flex;flex-direction:column;gap:4px;flex:1">
                 <input class="settings-input wide" type="password" id="st-GITHUB_TOKEN" placeholder="ghp_..." autocomplete="off">
@@ -1092,7 +1092,7 @@ Example:
               <input id="oai-emoji" placeholder="Emoji" value="🔌" style="width:50px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px;text-align:center">
             </div>
             <input id="oai-url" placeholder="Base URL: https://api.groq.com/openai/v1  or  http://localhost:1234/v1" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px;font-family:monospace">
-            <input id="oai-model" placeholder="Default model: llama-3.3-70b-versatile" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px;font-family:monospace">
+            <input id="oai-model" placeholder="Default model: openai/gpt-oss-120b" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px;font-family:monospace">
             <input id="oai-key" type="password" placeholder="API key (leave blank for local servers)" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px">
             <button class="sb-add-btn" onclick="addOpenAICompatIntegration()" style="font-size:11px">Add API Integration</button>
           </div>

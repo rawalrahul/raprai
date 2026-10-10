@@ -1,4 +1,4 @@
-Welcome to RAPR AI v2.0.0
+Welcome to RAPR AI v2.0.1
 
 After installation, you will be offered to run the dependency setup.
 
