@@ -99,3 +99,46 @@ def test_session_state_saves_with_a_lock_in_the_session(monkeypatch):
     saved = json.loads(db.execute(
         "SELECT value FROM session_state WHERE key='sessions'").fetchone()[0])
     assert saved == {"s1": {"ai": "groq", "cwd": "/tmp", "extra": {"lock": None}}}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="uses a #! launcher")
+def test_open_interpreter_gets_the_whole_prompt(tmp_path, monkeypatch):
+    """Open Interpreter has no --message option and its --stdin reads one line,
+    so RAPR runs its Python API with the full prompt."""
+    pkg = tmp_path / "site" / "interpreter"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text(
+        "class _Llm: model = 'default'\n"
+        "class _OI:\n"
+        "    llm = _Llm(); auto_run = False\n"
+        "    def chat(self, text, display=True):\n"
+        "        return [{'role': 'user', 'type': 'message', 'content': text},\n"
+        "                {'role': 'assistant', 'type': 'message',\n"
+        "                 'content': f'{self.llm.model}|{self.auto_run}|{text!r}'}]\n"
+        "interpreter = _OI()\n")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    launcher = bindir / "interpreter"
+    launcher.write_text(f"#!{sys.executable}\nraise SystemExit('launcher should not run')\n")
+    launcher.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bindir) + os.pathsep + os.environ["PATH"])
+
+    from integrations import open_interpreter as oi
+    cmd = oi.build_command("ignored", model="gpt-4o")
+    assert cmd[0] == sys.executable
+    env = dict(os.environ, PYTHONPATH=str(tmp_path / "site"))
+    out = subprocess.run(cmd, input="line one\nline two", capture_output=True,
+                         text=True, timeout=30, env=env)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "gpt-4o|True|'line one\\nline two'"
+
+
+def test_cli_ais_run_headless():
+    from integrations import aider, amazon_q, cursor
+    assert "--yes-always" in aider.build_command("p")
+    q = amazon_q.build_command("do it")
+    assert q[1:3] == ["chat", "--no-interactive"] and q[-1] == "do it"
+    assert not amazon_q.STDIN_PROMPT
+    c = cursor.build_command("do it", model="gpt-5")
+    assert c[:2] == [c[0], "-p"] and "--trust" in c and c[-1] == "do it"
+    assert c[c.index("--model") + 1] == "gpt-5"

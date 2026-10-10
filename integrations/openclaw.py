@@ -10,7 +10,7 @@ OpenClaw manages its own auth (OAuth, API keys, etc.) — configure it with:
 This integration just calls the installed openclaw binary.  No API keys need
 to be set in RAPR AI — auth lives entirely inside openclaw's own config.
 
-Install: npm install -g @openclaw/cli
+Install: npm install -g openclaw
 
 Compared to NemoClaw (sandboxed):
   + No sandbox overhead — ~500ms faster per call
@@ -73,7 +73,7 @@ def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
 ENV_VARS: list[str] = ["OPENCLAW_AGENT", "OPENCLAW_MODEL", "OPENCLAW_LOCAL_FLAG"]
 
 SETUP_HINT: str = (
-    "Install openclaw: npm install -g @openclaw/cli  |  "
+    "Install openclaw: npm install -g openclaw  |  "
     "Authenticate: openclaw auth login (OAuth) or openclaw config set key ANTHROPIC_API_KEY <key>  |  "
     "Make sure openclaw is available on the host PATH  |  "
     "Set OPENCLAW_AGENT=<name> to use a different agent profile  |  "

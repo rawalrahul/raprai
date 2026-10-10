@@ -23,7 +23,8 @@ router = APIRouter()
 
 
 _KNOWN_OPENROUTER_MODELS = [
-    "anthropic/claude-sonnet-4-5",
+    "openrouter/free",
+    "anthropic/claude-sonnet-4.6",
     "openai/gpt-4o",
     "google/gemini-2.0-flash-001",
     "meta-llama/llama-3.3-70b-instruct",
@@ -42,11 +43,8 @@ _KNOWN_GITHUB_MODELS = [
 ]
 
 _KNOWN_GROQ_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "deepseek-r1-distill-llama-70b",
-    "gemma2-9b-it",
-    "mixtral-8x7b-32768",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
 ]
 
 

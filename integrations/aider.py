@@ -12,7 +12,7 @@ def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
     """Build aider command. Prompt passed via --message (not stdin)."""
     _ext = ".exe" if sys.platform == "win32" else ""
     # AIDER_YES_FLAG: override if aider renames its auto-confirm flag.
-    yes_flag = os.environ.get("AIDER_YES_FLAG", "--yes").strip()
+    yes_flag = os.environ.get("AIDER_YES_FLAG", "--yes-always").strip()
     cmd = [f"aider{_ext}"]
     if model:
         cmd.extend(["--model", model])

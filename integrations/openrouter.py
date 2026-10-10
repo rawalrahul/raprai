@@ -2,7 +2,8 @@
 
 Setup is done from Settings > LLM Provider Setup; users should not edit .env
 manually. In Agent Builder, select OpenRouter and optionally set a model such
-as anthropic/claude-sonnet-4-6, openai/gpt-4o, or google/gemini-2.0-flash-001.
+as openrouter/free, anthropic/claude-sonnet-4.6 or openai/gpt-4o (OpenRouter
+model IDs use dots: claude-sonnet-4.6, not claude-sonnet-4-6).
 """
 
 import sys
@@ -13,7 +14,7 @@ EMOJI = "🌐"
 COLOR = "#8b5cf6"
 
 _BASE_URL = "https://openrouter.ai/api/v1"
-_DEFAULT_MODEL = "anthropic/claude-sonnet-4-6"
+_DEFAULT_MODEL = "openrouter/free"   # picks a free model; no credits needed
 
 
 def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:

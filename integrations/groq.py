@@ -13,7 +13,7 @@ EMOJI = "⚡"
 COLOR = "#f97316"
 
 _BASE_URL = "https://api.groq.com/openai/v1"
-_DEFAULT_MODEL = "llama-3.3-70b-versatile"
+_DEFAULT_MODEL = "openai/gpt-oss-120b"   # Llama 3.x models were retired in Aug 2026
 
 
 def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
@@ -29,6 +29,6 @@ STDIN_PROMPT = True
 ENV_VARS = ["GROQ_API_KEY"]
 SETUP_HINT = (
     "Save your Groq API key in Settings > LLM Provider Setup. "
-    "Popular models: llama-3.3-70b-versatile, llama-3.1-8b-instant, "
-    "deepseek-r1-distill-llama-70b, gemma2-9b-it, mixtral-8x7b-32768."
+    "Popular models: openai/gpt-oss-120b, openai/gpt-oss-20b (faster). "
+    "Current list: console.groq.com/docs/models"
 )
