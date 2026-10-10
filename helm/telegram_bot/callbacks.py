@@ -208,25 +208,20 @@ async def action_callback(update, context):
             ai_key = fs["ai"]
             current_model = fs.get("model") or None
 
-            # CLI + OAuth AIs don't support model switching
-            _CLI_AIS = {"claude", "gemini", "codex", "openai"}
-            if ai_key in _CLI_AIS:
-                await query.edit_message_text(
-                    f"ℹ️ *Model switching is not available for {ai_key.title()}.*\n\n"
-                    f"{ai_key.title()} runs as a CLI tool authenticated via OAuth — "
-                    f"it uses the model assigned to your account.\n\n"
-                    f"Model switching is available for *Ollama* sessions, which use "
-                    f"a local REST API with locally installed models.",
-                    parse_mode="Markdown",
-                    reply_markup=session_controls_keyboard(),
-                )
-                return
-
-            # Fetch available Ollama models
+            # Claude, Codex and Gemini: the models their installed CLIs report
+            # (passed to the CLI as --model); everything else: Ollama's models.
+            from helm.web_routes.helpers import (
+                _fetch_claude_models, _fetch_gemini_models, _fetch_openai_models,
+            )
+            _fetch = {"claude": _fetch_claude_models, "codex": _fetch_openai_models,
+                      "gemini": _fetch_gemini_models}.get(ai_key, _fetch_ollama_models)
+            ai_label = ai_key.title() if ai_key in ("claude", "codex", "gemini") else "Ollama"
             try:
-                models = await asyncio.to_thread(_fetch_ollama_models)
+                models = await asyncio.to_thread(_fetch)
             except Exception:
                 models = []
+            # Telegram button data is limited to 64 bytes.
+            models = [m for m in models if len(f"ms:model_set:{m}".encode()) <= 64]
 
             rows: list = []
             for m in models[:12]:  # cap at 12 to avoid overly long keyboards
@@ -239,14 +234,17 @@ async def action_callback(update, context):
             if current_model:
                 hint = f"`{current_model}`"
             else:
-                hint = f"(default — `{models[0]}`)" if models else "(default)"
+                hint = ("(CLI default)" if ai_label != "Ollama"
+                        else f"(default — `{models[0]}`)" if models else "(default)")
 
             no_models_note = ""
-            if not models:
+            if not models and ai_label == "Ollama":
                 no_models_note = "\n\n_No models found — is Ollama running? Start it with_ `ollama serve`"
+            elif not models:
+                no_models_note = f"\n\n_Could not read the model list from the {ai_label} CLI._"
 
             await query.edit_message_text(
-                f"🎯 *Model picker* for *Ollama*\n"
+                f"🎯 *Model picker* for *{ai_label}*\n"
                 f"Current: {hint}{no_models_note}\n\n"
                 f"Tap a model to switch, or type `/model <name>` in chat:",
                 parse_mode="Markdown",
@@ -259,6 +257,12 @@ async def action_callback(update, context):
             fs = focused_session()
             if fs:
                 fs["model"] = model_name if model_name else None
+                if fs.get("ai") in ("claude", "gemini", "codex", "ollama"):
+                    try:
+                        from helm.model_prefs import set_model_pref
+                        set_model_pref(fs["ai"], model_name or None)
+                    except Exception:
+                        pass
                 await push_state()
                 label = f"`{model_name}`" if model_name else "default"
                 await query.edit_message_text(

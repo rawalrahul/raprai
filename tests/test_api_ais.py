@@ -167,3 +167,37 @@ def test_open_interpreter_in_rapr_python_counts_as_installed(monkeypatch):
     core._availability_cache.pop("interpreter", None)
     assert core.is_backend_available("interpreter")
     core._availability_cache.pop("interpreter", None)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="uses #! scripts as fake CLIs")
+def test_model_lists_come_from_the_installed_clis(tmp_path, monkeypatch):
+    """/model and Telegram's model picker list what the user's own Claude and
+    Gemini CLIs accept, so new models show up when the CLIs update."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    claude = bindir / "claude"
+    claude.write_text(
+        "#!/bin/sh\n"
+        "[ \"$1\" = --help ] || exit 1\n"
+        "echo '  --model <model>     Model for the current session. Provide'\n"
+        "echo \"                      an alias for the latest model (e.g. 'zeta', 'opus', or\"\n"
+        "echo \"                      'sonnet') or a model's full name.\"\n")
+    claude.chmod(0o755)
+    bundle = tmp_path / "gemini-cli" / "bundle"
+    bundle.mkdir(parents=True)
+    (bundle / "chunk.js").write_text(
+        'var GEMINI_MODEL_ALIAS_AUTO = "auto";\nvar GEMINI_MODEL_ALIAS_ULTRA = "ultra";\n'
+        'var GEMINI_MODEL_ALIAS_AUTO2 = "auto";\n')
+    (bundle / "gemini.js").write_text("#!/usr/bin/env node\n")
+    os.symlink(bundle / "gemini.js", bindir / "gemini")
+    os.chmod(bundle / "gemini.js", 0o755)
+    monkeypatch.setenv("PATH", str(bindir))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from helm.web_routes import helpers
+    monkeypatch.setattr(helpers, "_npm_global_roots", lambda: [])
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    assert helpers._fetch_claude_models()[:3] == ["zeta", "opus", "sonnet"]
+    assert helpers._fetch_gemini_models() == ["auto", "ultra"]
+    assert helpers._fetch_antigravity_models() == []   # agy isn't the gemini command

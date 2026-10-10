@@ -339,6 +339,8 @@ async def _main():
         # Photos and document attachments
         tg.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, tg_file))
         # Plain text + natural language
+        # /model [name] is handled by RAPR itself (core /model), like plain text.
+        tg.add_handler(CommandHandler("model", tg_text))
         tg.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, tg_text))
 
 
@@ -426,6 +428,8 @@ async def _main():
             tg.add_handler(CallbackQueryHandler(browse_callback))
             tg.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, tg_voice))
             tg.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, tg_file))
+            # /model [name] is handled by RAPR itself (core /model), like plain text.
+            tg.add_handler(CommandHandler("model", tg_text))
             tg.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, tg_text))
             await tg.initialize()
             await tg.start()

@@ -98,7 +98,52 @@ def _scan_npm_package(package_names: list[str], pattern, min_len: int = 8,
     return []
 
 
+def _claude_cli_aliases() -> list[str]:
+    """Model aliases the installed Claude CLI accepts, read from its own --help
+    ("Provide an alias for the latest model (e.g. 'fable', 'opus', or 'sonnet')")."""
+    cli = shutil.which("claude") or shutil.which("claude.cmd")
+    if not cli:
+        return []
+    try:
+        r = subprocess.run([cli, "--help"], capture_output=True, text=True,
+                           timeout=15, **hidden_kwargs())
+    except Exception:
+        return []
+    text = " ".join((r.stdout or "").split())
+    m = re.search(r"--model <model>.*?alias[^(]*\(e\.g\. ([^)]*)\)", text)
+    return re.findall(r"'([a-z][\w.-]*)'", m.group(1)) if m else []
+
+
+def _gemini_cli_aliases() -> list[str]:
+    """Model aliases the installed Gemini CLI accepts ("auto", "pro", "flash"...),
+    read from its own code, so only names this version understands are offered."""
+    dirs: list[pathlib.Path] = []
+    cli = shutil.which("gemini") or shutil.which("gemini.cmd")
+    if cli:
+        dirs.append(pathlib.Path(cli).resolve().parent)   # Unix: symlink into bundle/
+    for root in _npm_global_roots():
+        dirs.append(root / "@google" / "gemini-cli" / "bundle")
+    pat = re.compile(r'GEMINI_MODEL_ALIAS_[A-Z_]+ = "([a-z][a-z0-9.-]*)"')
+    for d in dirs:
+        if not d.is_dir():
+            continue
+        for f in sorted(d.glob("*.js")):
+            try:
+                found = pat.findall(f.read_text(encoding="utf-8", errors="ignore"))
+            except Exception:
+                continue
+            if found:
+                return list(dict.fromkeys(found))
+    return []
+
+
 def _fetch_claude_models() -> list[str]:
+    """Claude CLI aliases (opus, sonnet...) first, then any full model names found."""
+    aliases = _claude_cli_aliases()
+    return aliases + [m for m in _fetch_claude_model_ids() if m not in aliases]
+
+
+def _fetch_claude_model_ids() -> list[str]:
     """Return available Claude models.
     Priority: (1) `claude api models list` CLI, (2) Anthropic REST API,
     (3) scan Claude Code npm package for hardcoded model IDs (no API key needed).
@@ -343,6 +388,12 @@ def _fetch_openai_models() -> list[str]:
 
 
 def _fetch_gemini_models() -> list[str]:
+    """Gemini CLI aliases (auto, pro, flash...) first, then any full model names found."""
+    aliases = _gemini_cli_aliases()
+    return aliases + [m for m in _fetch_gemini_model_ids() if m not in aliases]
+
+
+def _fetch_gemini_model_ids() -> list[str]:
     """Return available Gemini models via OAuth token, REST API, or fallback."""
     # ── Method 0: OAuth token from ~/.gemini/oauth_creds.json ────────────────
     oauth_path = pathlib.Path.home() / ".gemini" / "oauth_creds.json"
@@ -425,5 +476,6 @@ def _fetch_antigravity_models() -> list[str]:
                         return ids
         except Exception:
             pass
-    # Fall back to shared Gemini API logic (API key + Gemini OAuth)
-    return _fetch_gemini_models()
+    # Fall back to shared Gemini API logic (API key + Gemini OAuth). Not the Gemini
+    # CLI's aliases: those are what the gemini command accepts, not agy.
+    return _fetch_gemini_model_ids()
