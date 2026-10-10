@@ -9,12 +9,12 @@ on:
   workflow_dispatch:
   push:
     tags: ['v*']
-    branches: ['ci/windows-build']
+    branches: ['ci/windows-build', 'ccr-a9f017b0-ywqde2']
 
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 180
+    timeout-minutes: 300
     env:
       # 'true' only when the RELEASES_TOKEN secret exists; gates the publish step.
       HAS_RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN != '' }}
@@ -25,12 +25,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 3.13 matches the source install. requirements.txt only pulls fastembed on
-      # <3.13, so build.bat skips bundling onnxruntime/numpy/tokenizers (keyword/FTS
-      # memory only). Compiling those with Nuitka pushed builds past 2h on 3.12.
+      # 3.12: newest Python that Nuitka and fastembed/onnxruntime wheels all support,
+      # so semantic memory is bundled. This is the configuration that built and
+      # published successfully (~2.5 h); the 3.13 / no-LTO variant timed out.
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.12'
           cache: pip
 
       - name: Install Python dependencies
@@ -46,28 +46,9 @@ jobs:
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
           if (-not (Test-Path $iscc)) { throw "Inno Setup not found at $iscc" }
 
-      # Output goes to build.log as well as the console. If the build fails or
-      # times out, the next step posts the log tail as an annotation, which is
-      # readable from the API even where raw job logs are not.
       - name: Build (build.bat)
-        timeout-minutes: 150
-        shell: pwsh
-        env:
-          NUITKA_EXTRA: --lto=no
-        run: |
-          cmd /c "build.bat 2>&1" | Tee-Object -FilePath build.log
-          if ($LASTEXITCODE -ne 0) { throw "build.bat exited with $LASTEXITCODE" }
-
-      - name: Report build failure
-        if: failure()
-        shell: pwsh
-        run: |
-          if (Test-Path build.log) {
-            $tail = (Get-Content build.log -Tail 40) -join '%0A'
-            Write-Output "::error title=build.bat log tail::$tail"
-          } else {
-            Write-Output '::error title=build.bat::no build.log produced'
-          }
+        timeout-minutes: 270
+        run: build.bat
 
       - name: Check installer and rename for release
         shell: pwsh
