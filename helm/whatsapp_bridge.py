@@ -49,6 +49,7 @@ HELP = (
     "/group — group chats with several AIs (/group help)\n"
     "/status — what's running\n"
     "/kelvin — is RAPR on? Kelvin's report, same as on Telegram\n"
+    "/approvals — actions waiting for your OK; /approve <id> or /deny <id>\n"
     "/help — this message"
 )
 
@@ -176,6 +177,9 @@ async def handle_text(text: str) -> list[str]:
     if low in ("/kelvin", "kelvin"):
         from helm.kelvin_report import kelvin_report
         return [kelvin_report()]
+    approval_reply = _approval_command(text)
+    if approval_reply:
+        return [approval_reply]
     if low in ("/sessions", "sessions"):
         return [sessions_text()]
     if low.startswith("/use"):
@@ -232,6 +236,40 @@ def _ensure_magic() -> None:
         stub.from_buffer = lambda buf, mime=False: "application/octet-stream" if mime else "data"
         stub.from_file = lambda path, mime=False: "application/octet-stream" if mime else "data"
         sys.modules["magic"] = stub
+
+
+def approval_text(req: dict) -> str:
+    details = "".join(f"\n  • {str(d)[:100]}" for d in (req.get("details") or [])[:5])
+    return (f"⚠️ Approval needed\n{req.get('description', '')}{details}\n\n"
+            f"Reply /approve {req['id']} or /deny {req['id']}")
+
+
+async def notify_approval(req: dict) -> None:
+    """Tell the WhatsApp chat that an action is waiting for approval."""
+    if state["status"] != "connected":
+        return
+    await send_text(approval_text(req))
+
+
+def _approval_command(text: str) -> Optional[str]:
+    """Reply for /approve, /deny or /approvals, or None when it isn't one."""
+    import helm.approval as appr
+    parts = text.split()
+    cmd = parts[0].lower() if parts else ""
+    if cmd == "/approvals":
+        pending = appr.pending()
+        if not pending:
+            return "Nothing is waiting for approval."
+        return "Waiting for approval:\n" + "\n".join(
+            f"• {r['id']}: {r.get('description', '')[:120]}" for r in pending)
+    if cmd in ("/approve", "/deny"):
+        if len(parts) < 2:
+            return f"Usage: {cmd} <id>. See /approvals."
+        status = "approved" if cmd == "/approve" else "denied"
+        if appr.resolve(parts[1], status, source=CHANNEL):
+            return f"✅ {'Approved' if status == 'approved' else 'Denied'} {parts[1]}."
+        return f"No pending approval {parts[1]}. See /approvals."
+    return None
 
 
 def _qr_data_uri(data: bytes) -> str:

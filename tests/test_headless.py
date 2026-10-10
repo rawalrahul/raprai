@@ -49,3 +49,17 @@ def test_whatsapp_kelvin_command(monkeypatch):
     replies = asyncio.run(wa.handle_text("/kelvin"))
     assert replies and replies[0].startswith("🐧 Kelvin is on.")
     assert "/kelvin" in wa.HELP
+
+
+def test_whatsapp_approvals(monkeypatch):
+    import helm.approval as appr
+    import helm.state as _st
+    monkeypatch.setattr(_st, "approval_queue", {}, raising=False)
+    req = appr.create_request("s1", "pipeline_step", "Run git push to main", details=["git push origin main"])
+    rid = req["id"]
+    assert rid in wa.approval_text(req) and "/approve" in wa.approval_text(req)
+    assert "Nothing" not in asyncio.run(wa.handle_text("/approvals"))[0]
+    assert "Approved" in asyncio.run(wa.handle_text(f"/approve {rid}"))[0]
+    assert req["status"] == "approved" and req["resolved_by"] == "whatsapp"
+    assert "No pending" in asyncio.run(wa.handle_text(f"/deny {rid}"))[0]
+    assert asyncio.run(wa.handle_text("/approvals"))[0] == "Nothing is waiting for approval."

@@ -135,6 +135,13 @@ async def broadcast_approval(req: dict):
     except Exception as exc:
         logger.debug("Could not send approval to Telegram: %s", exc)
 
+    # ... and to WhatsApp, as text commands (when it's linked and connected)
+    try:
+        from helm.whatsapp_bridge import notify_approval
+        await notify_approval(req)
+    except Exception as exc:
+        logger.debug("Could not send approval to WhatsApp: %s", exc)
+
 
 async def broadcast_resolution(req: dict):
     """Notify UI and Telegram that an approval was resolved."""
