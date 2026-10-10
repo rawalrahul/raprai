@@ -14,9 +14,10 @@ and 4 GB of free disk. Ubuntu or Debian are the easiest.
    card to verify you; the "Always Free" resources below are not charged.
 2. In the Oracle console: **Compute → Instances → Create instance**.
    - Image: **Canonical Ubuntu**.
-   - Shape: **VM.Standard.E2.1.Micro** (1 GB, always free). If it says it's out
-     of capacity, try a different availability domain, or the ARM shape
-     **VM.Standard.A1.Flex** with 1 OCPU and 6 GB, which is also always free.
+   - Shape: **VM.Standard.A1.Flex** (Ampere, ARM), e.g. 2 OCPUs and 12 GB.
+     Always free up to 4 OCPUs and 24 GB in total, and much roomier than the
+     1 GB **VM.Standard.E2.1.Micro**, which also works but is tight. If A1 says
+     it's out of capacity, try another availability domain or try again later.
    - Networking: keep the default public subnet and assign a public IP.
    - SSH keys: **Generate a key pair** and **download the private key**. Keep it safe.
 3. Once the instance is running, copy its **Public IP address**.
