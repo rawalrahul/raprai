@@ -446,6 +446,12 @@ async def _main():
     actual_port = find_free_port(WEB_HOST, WEB_PORT)
     # Store actual port so OAuth callbacks use the right port
     os.environ["WEB_PORT"] = str(actual_port)
+    # And on disk, so launchers (the macOS app) can open the right address.
+    try:
+        from helm.paths import user_data_dir
+        (user_data_dir() / "web_port").write_text(str(actual_port), encoding="utf-8")
+    except Exception:
+        pass
 
     # --- Build uvicorn server ---
     config = uvicorn.Config(
@@ -680,8 +686,9 @@ def main():
             from helm.resilience import graceful_shutdown
             loop.run_until_complete(graceful_shutdown())
             loop.close()
-        except Exception:
-            # Fallback: at least close DB connections
+        except (Exception, asyncio.CancelledError):
+            # Fallback: at least close DB connections. (A task left over from the
+            # stopped server loop can surface as CancelledError here.)
             try:
                 from helm.db import close_all
                 close_all()

@@ -10,7 +10,8 @@ Mode comes from KELVIN_KEEP_AWAKE (Settings, tray menu):
 Only the computer is kept awake; the screen can still turn off. Closing a
 laptop lid follows the Windows "lid close action" setting and may still sleep.
 Uses SetThreadExecutionState, which needs no admin rights and is released
-automatically if RAPR exits. On other platforms this is a no-op.
+automatically if RAPR exits. On macOS it runs the built-in `caffeinate -i`
+tied to RAPR's process (so it ends if RAPR exits). Elsewhere this is a no-op.
 """
 
 import os
@@ -33,7 +34,29 @@ def current_mode() -> str:
     return mode if mode in MODES else "working"
 
 
+_caffeinate = None   # macOS: the running `caffeinate` process while awake
+
+
+def _mac_setter(awake: bool) -> bool:
+    global _caffeinate
+    import subprocess
+    if awake:
+        if _caffeinate is None or _caffeinate.poll() is not None:
+            # -i: no idle sleep; -w: stop by itself if RAPR's process goes away.
+            _caffeinate = subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())])
+        return True
+    if _caffeinate is not None:
+        _caffeinate.terminate()
+        _caffeinate = None
+    return True
+
+
 def _default_setter(awake: bool) -> bool:
+    if sys.platform == "darwin":
+        try:
+            return _mac_setter(awake)
+        except Exception:
+            return False
     if sys.platform != "win32":
         return False
     import ctypes

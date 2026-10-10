@@ -86,6 +86,28 @@ def test_kelvin_status_counts_running_pipelines_and_approvals_as_active():
     assert k.active()
 
 
-def test_noop_off_windows():
-    if sys.platform != "win32":
-        assert ka._default_setter(True) is False
+def test_noop_off_windows_and_mac(monkeypatch):
+    monkeypatch.setattr(ka.sys, "platform", "linux")
+    assert ka._default_setter(True) is False
+
+
+def test_macos_uses_caffeinate(monkeypatch):
+    """On macOS keep-awake runs `caffeinate -i -w <RAPR's pid>` and stops it when done."""
+    import subprocess
+    from helm import keep_awake as ka
+    started = []
+
+    class FakeProc:
+        def __init__(self, cmd, **kw):
+            started.append(cmd); self.stopped = False
+        def poll(self): return None
+        def terminate(self): self.stopped = True
+
+    monkeypatch.setattr(ka.sys, "platform", "darwin")
+    monkeypatch.setattr(subprocess, "Popen", FakeProc)
+    monkeypatch.setattr(ka, "_caffeinate", None)
+    assert ka._default_setter(True) is True
+    assert ka._default_setter(True) is True            # already running: not started twice
+    assert started == [["caffeinate", "-i", "-w", str(__import__("os").getpid())]]
+    proc = ka._caffeinate
+    assert ka._default_setter(False) is True and proc.stopped and ka._caffeinate is None

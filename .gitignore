@@ -149,3 +149,6 @@ kelvin_tips.json
 helmhq.db*
 helm/learning/routing_table.json
 
+
+# Port the web UI is running on (read by the macOS launcher)
+web_port
