@@ -8,7 +8,7 @@ Flow:
   Step 3 — Claude + Codex + Ollama (optional)
   Step 4 — PIN Protection
   Step 5 — Done / summary
-  Step 6 — Activation Code (MANDATORY, last step before launch, only asked once)
+  Step 6 — Link to raprai.com (optional; skip opens the app)
 """
 
 _SETUP_HTML = r"""<!DOCTYPE html>
@@ -328,18 +328,24 @@ select option{background:var(--surface);color:var(--text)}
       </div>
       <div id="summary"></div>
       <div class="btn-row" style="margin-top:28px">
-        <button class="btn btn-primary" style="width:100%;text-align:center;padding:11px" onclick="goStep(6)">
-          Continue →
+        <button class="btn btn-primary" style="width:100%;text-align:center;padding:11px" onclick="launch()">
+          Open RAPR AI →
         </button>
+      </div>
+      <div style="margin-top:14px;text-align:center">
+        <button class="btn-skip" onclick="goStep(6)">Link to your raprai.com account (optional)</button>
       </div>
     </div>
 
-    <!-- ─── STEP 6: Activation Code (MANDATORY, one-time) ─── -->
+    <!-- ─── STEP 6: Link to raprai.com (optional) ─── -->
     <div class="step" id="step6">
-      <div class="step-title" id="activation-title">Welcome! 🔑</div>
+      <div class="step-title" id="activation-title">Link your account (optional) 🔗</div>
       <div class="step-desc">
-        Enter your one-time activation code which you can find at
-        <a href="https://raprai.com/activate" target="_blank"><strong>raprai.com/activate</strong></a>
+        RAPR works without this. Linking lets connections you set up on raprai.com
+        sync into the app, and sends usage counts (which features you use, never
+        your chats). Get a code at
+        <a href="https://raprai.com/activate" target="_blank"><strong>raprai.com/activate</strong></a>.
+        You can link or unlink any time in Settings.
       </div>
       <div class="field">
         <label>Activation Code</label>
@@ -350,8 +356,11 @@ select option{background:var(--surface);color:var(--text)}
       <div id="activation-msg"></div>
       <div class="btn-row">
         <button class="btn btn-primary" id="activate-btn" style="width:100%;text-align:center;padding:11px" onclick="activateApp()">
-          Activate & Launch RAPR AI →
+          Link & Open RAPR AI →
         </button>
+      </div>
+      <div style="margin-top:14px;text-align:center">
+        <button class="btn-skip" onclick="launch()">Skip, open RAPR AI</button>
       </div>
     </div>
 
@@ -363,14 +372,12 @@ select option{background:var(--surface);color:var(--text)}
 let _geminiStatus = {};
 let _saved = {gemini: false, tg: false, claude: false, codex: false, ollama: false};
 
-// ── Activation Code (Step 6 — last step before launch) ────────
+// ── Link to raprai.com (Step 6, optional) ─────────────────────
 async function prepareActivation() {
   // Personalize with user name
   const userName = document.getElementById('user-name').value.trim();
   const title = document.getElementById('activation-title');
-  if (title && userName) {
-    title.textContent = 'Welcome, ' + userName + '! 🔑';
-  }
+
   // Check if already activated — skip straight to launch
   try {
     const st = await fetch('/device/status').then(r => r.json());
@@ -393,7 +400,7 @@ async function activateApp() {
   }
 
   btn.disabled = true;
-  btn.textContent = 'Activating...';
+  btn.textContent = 'Linking...';
 
   try {
     const r = await fetch('/device/activate', {
@@ -409,14 +416,14 @@ async function activateApp() {
       msg.innerHTML = `<div class="alert alert-ok">✓ Activated! (${used}/${max} devices used) — Launching...</div>`;
       setTimeout(() => launch(), 1000);
     } else {
-      msg.innerHTML = `<div class="alert alert-warn">⚠ ${data.error || 'Activation failed. Check your code and try again.'}</div>`;
+      msg.innerHTML = `<div class="alert alert-warn">⚠ ${/connection error|max retries|timed out/i.test(data.error || '') ? "Couldn't reach raprai.com. Check your internet connection, or skip for now." : (data.error || 'Linking failed. Check your code and try again.')}</div>`;
       btn.disabled = false;
-      btn.textContent = 'Activate & Launch RAPR AI →';
+      btn.textContent = 'Link & Open RAPR AI →';
     }
   } catch(e) {
     msg.innerHTML = '<div class="alert alert-warn">⚠ Could not reach raprai.com — check your internet connection.</div>';
     btn.disabled = false;
-    btn.textContent = 'Activate & Launch RAPR AI →';
+    btn.textContent = 'Link & Open RAPR AI →';
   }
 }
 
@@ -782,9 +789,8 @@ function copyCode(btn) {
 
 
 # ---------------------------------------------------------------------------
-# Standalone activation page — shown when .env exists but no device token.
-# This handles the edge case: user completed onboarding, closed the app
-# before activating, and reopened it.
+# Standalone page to link RAPR to a raprai.com account (optional), opened
+# from Settings → raprai.com account.
 # ---------------------------------------------------------------------------
 
 _ACTIVATE_HTML = r"""<!DOCTYPE html>
@@ -792,7 +798,7 @@ _ACTIVATE_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RAPR AI — Activate</title>
+<title>RAPR AI — Link your account</title>
 <link rel="icon" href="/static/rapr-logo.png" type="image/png">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -850,9 +856,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);
     </div>
   </div>
   <div class="card-body">
-    <div class="step-title" id="activation-title">One Last Step! 🔑</div>
+    <div class="step-title" id="activation-title">Link your raprai.com account (optional) 🔗</div>
     <div class="step-desc">
-      Enter your one-time activation code which you can find at
+      RAPR works without this. Linking syncs connections you set up on raprai.com and
+      sends usage counts (never your chats). Get a code at
       <a href="https://raprai.com/activate" target="_blank"><strong>raprai.com/activate</strong></a>
     </div>
     <div class="field">
@@ -866,8 +873,11 @@ html,body{height:100%;background:var(--bg);color:var(--text);
       <button class="btn btn-primary" id="activate-btn"
               style="width:100%;text-align:center;padding:11px"
               onclick="activateApp()">
-        Activate & Launch RAPR AI →
+        Link & Open RAPR AI →
       </button>
+    </div>
+    <div style="margin-top:14px;text-align:center">
+      <a href="/" style="color:var(--dim);font-size:13px">Skip, open RAPR AI</a>
     </div>
   </div>
 </div>
@@ -891,7 +901,7 @@ async function activateApp() {
   }
 
   btn.disabled = true;
-  btn.textContent = 'Activating...';
+  btn.textContent = 'Linking...';
 
   try {
     const r = await fetch('/device/activate', {
@@ -907,14 +917,14 @@ async function activateApp() {
       msg.innerHTML = '<div class="alert alert-ok">Activated! (' + used + '/' + max + ' devices used) — Launching...</div>';
       setTimeout(() => { window.location.href = '/'; }, 1000);
     } else {
-      msg.innerHTML = '<div class="alert alert-warn">' + (data.error || 'Activation failed. Check your code and try again.') + '</div>';
+      msg.innerHTML = '<div class="alert alert-warn">' + (/connection error|max retries|timed out/i.test(data.error || '') ? "Couldn't reach raprai.com. Check your internet connection, or skip for now." : (data.error || 'Linking failed. Check your code and try again.')) + '</div>';
       btn.disabled = false;
-      btn.textContent = 'Activate & Launch RAPR AI →';
+      btn.textContent = 'Link & Open RAPR AI →';
     }
   } catch(e) {
     msg.innerHTML = '<div class="alert alert-warn">Could not reach raprai.com — check your internet connection.</div>';
     btn.disabled = false;
-    btn.textContent = 'Activate & Launch RAPR AI →';
+    btn.textContent = 'Link & Open RAPR AI →';
   }
 }
 

@@ -253,7 +253,8 @@ async def set_pin_endpoint(request: Request):
         if len(new_pin) < 4:
             return JSONResponse({"error": "PIN must be at least 4 characters."}, status_code=400)
 
-        if _auth.pin_is_set():
+        first_pin = not _auth.pin_is_set()
+        if not first_pin:
             if not old_pin:
                 return JSONResponse({"error": "Current PIN required to change PIN."}, status_code=400)
             if not _auth.verify_pin(old_pin):
@@ -278,7 +279,18 @@ async def set_pin_endpoint(request: Request):
         os.environ["PIN_SALT"] = salt
         os.environ["PIN_HASH"] = hashed
 
-        return JSONResponse({"ok": True})
+        response = JSONResponse({"ok": True})
+        if first_pin:
+            # Whoever sets the first PIN is the owner: log them in, so the rest
+            # of the setup wizard keeps working now that a PIN is required.
+            response.set_cookie(
+                key      = _auth.COOKIE_NAME,
+                value    = _auth.issue_token(),
+                httponly = True,
+                samesite = "lax",
+                max_age  = _auth.SESSION_DAYS * 86_400,
+            )
+        return response
     except Exception as exc:
         logger.error("set-pin error: %s", exc)
         return JSONResponse({"error": str(exc)}, status_code=500)
