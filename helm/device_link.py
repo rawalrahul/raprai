@@ -1,13 +1,17 @@
 """
 helm/device_link.py — Device linking & credential sync with raprai.com.
 
-Manages the connection between the desktop app and the user's raprai.com account.
-Handles: activation code entry, credential sync, and usage telemetry.
+Optional: RAPR works without it. Linking connects the app to the user's
+raprai.com account (Settings → raprai.com account) so connections set up on
+raprai.com sync into the app; linked apps also send usage counts (which features
+are used, no chat content). Handles: activation code entry, credential sync,
+usage telemetry, and unlinking.
 
 Public API:
     get_device_token() → str | None
     set_device_token(token) → None
     activate_with_code(code) → dict
+    unlink_device() → None
     sync_connections() → dict
     send_telemetry(events) → bool
     get_link_status() → dict
@@ -101,6 +105,30 @@ def set_device_token(token: str) -> None:
             env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         except Exception as e2:
             logger.error("Failed to store device token: %s", e2)
+
+
+def unlink_device() -> None:
+    """Forget the device token: stop syncing and stop sending usage counts."""
+    global _device_token, _cached_connections
+    _device_token = None
+    _cached_connections = {}
+    _telemetry_buffer.clear()
+    os.environ.pop("RAPR_DEVICE_TOKEN", None)
+    try:
+        from helm.token_vault import delete_token
+        delete_token("RAPR_DEVICE_TOKEN")
+    except Exception as e:
+        logger.warning("Could not remove device token from vault: %s", e)
+    try:
+        from helm.paths import user_data_dir
+        env_path = user_data_dir() / ".env"
+        if env_path.exists():
+            lines = [l for l in env_path.read_text(encoding="utf-8").splitlines()
+                     if not l.strip().startswith("RAPR_DEVICE_TOKEN=")]
+            env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except Exception as e:
+        logger.warning("Could not remove device token from .env: %s", e)
+    logger.info("Device unlinked from raprai.com")
 
 
 # ---------------------------------------------------------------------------

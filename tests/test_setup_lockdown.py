@@ -96,3 +96,56 @@ def test_logged_in_user_can_still_use_setup(client, monkeypatch):
     _csrf(c)
     r = c.post("/setup/save", json={"ALLOWED_USER_IDS": "123"})
     assert r.status_code == 200, r.text
+
+
+def test_device_linking_is_first_run_only(client, monkeypatch):
+    """Linking to raprai.com is optional now, so it isn't public either."""
+    c, data = client
+    assert c.get("/device/status").status_code == 200        # first run: open
+    _lock(monkeypatch)
+    assert c.get("/device/status").status_code == 401
+    assert c.post("/device/activate", json={"code": "RAPR-AAAA-BBBB"}).status_code == 401
+    assert c.post("/device/unlink").status_code == 401
+    r = c.get("/activate", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login"
+
+
+def test_no_activation_gate(client, monkeypatch):
+    """An unlinked RAPR opens the app (it used to send you to /activate)."""
+    c, data = client
+    from helm import device_link
+    monkeypatch.setattr(device_link, "get_device_token", lambda: None)
+    r = c.get("/", follow_redirects=False)
+    assert r.status_code == 200, r.headers.get("location")
+
+
+def test_first_pin_logs_the_owner_in(client, monkeypatch):
+    c, data = client
+    issued = set()
+    def issue():
+        issued.add(t := f"tok{len(issued)}")
+        return t
+    monkeypatch.setattr(auth, "issue_token", issue)
+    monkeypatch.setattr(auth, "is_valid_token", lambda t: t in issued)
+    r = c.post("/auth/set-pin", json={"pin": "4321"})
+    assert r.status_code == 200 and r.cookies.get(auth.COOKIE_NAME) in issued
+    # The wizard's next steps work without a separate login.
+    assert c.get("/setup/status").status_code == 200
+    assert c.get("/device/status").status_code == 200
+    # Changing the PIN later doesn't hand out a new login.
+    r = c.post("/auth/set-pin", json={"pin": "9999", "old_pin": "4321"})
+    assert r.status_code == 200 and not r.cookies.get(auth.COOKIE_NAME)
+
+
+def test_unlink_forgets_the_token(tmp_path, monkeypatch):
+    from helm import device_link
+    monkeypatch.setenv("RAPR_DATA_DIR", str(tmp_path))
+    (tmp_path / ".env").write_text("A=1\nRAPR_DEVICE_TOKEN=secret\n")
+    monkeypatch.setenv("RAPR_DEVICE_TOKEN", "secret")
+    monkeypatch.setattr(device_link, "_device_token", "secret")
+    device_link.track_usage("chat")
+    device_link.unlink_device()
+    assert device_link.get_device_token() is None
+    assert "RAPR_DEVICE_TOKEN" not in (tmp_path / ".env").read_text()
+    assert device_link.get_link_status()["pending_telemetry"] == 0
+    assert device_link.flush_telemetry() is False      # nothing is sent when unlinked

@@ -6,6 +6,9 @@ Endpoints:
     POST /device/activate   — Activate with an activation code
     GET  /device/connections — Get synced connections
     POST /device/sync       — Force sync connections from raprai.com
+    POST /device/unlink     — Unlink (stop syncing and sending usage counts)
+
+Linking is optional; RAPR works without it.
 """
 
 from fastapi import APIRouter
@@ -53,3 +56,11 @@ async def force_sync():
     from helm.device_link import sync_connections
     result = sync_connections(force=True)
     return result
+
+
+@router.post("/unlink")
+async def unlink():
+    """Unlink the app from raprai.com."""
+    from helm.device_link import unlink_device
+    unlink_device()
+    return {"ok": True}

@@ -691,6 +691,18 @@ Example:
           <div id="cloud-url" style="font-size:12px;padding:2px 0 6px"></div>
           <pre id="cloud-log" style="white-space:pre-wrap;font-size:11px;background:var(--bg-elevated,#111);padding:8px;border-radius:6px;max-height:240px;overflow:auto;margin:0"></pre>
 
+          <div class="settings-section-title" style="margin-top:12px">raprai.com account (optional)</div>
+          <div class="settings-row" style="display:block">
+            <small>RAPR works without an account. Linking lets connections you set up on raprai.com sync into RAPR, and sends usage counts (which features you use, never your chats). Get a code at <a href="https://raprai.com/activate" target="_blank" rel="noopener">raprai.com/activate</a>.</small>
+          </div>
+          <div id="account-link-status" style="font-size:12px;padding:4px 0"></div>
+          <div id="account-link-form" style="display:flex;gap:6px;flex-wrap:wrap;padding:4px 0 8px">
+            <input class="settings-input" id="account-link-code" placeholder="RAPR-XXXX-XXXX" autocomplete="off" style="text-transform:uppercase">
+            <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="linkAccount()">Link</button>
+          </div>
+          <div style="padding:0 0 8px"><button class="settings-save-btn" id="account-unlink-btn" hidden style="font-size:11px;padding:4px 12px" onclick="unlinkAccount()">Unlink</button></div>
+          <div id="account-link-msg" style="font-size:11px;color:var(--accent);padding-bottom:6px"></div>
+
           <div class="settings-section-title" style="margin-top:12px">Agents over ACP</div>
           <div class="settings-row" style="display:block">
             <small>Any agent that speaks the Agent Client Protocol (ACP) can be added here by the command that starts it. It then appears in the New Session menu. Permission questions come to your approvals.</small>
@@ -1677,6 +1689,7 @@ Example:
 <script src="/js/voices.js?v=2"></script>
 <script src="/js/finish.js?v=2"></script>
 <script src="/js/cloud.js?v=1"></script>
+<script src="/js/account_link.js?v=1"></script>
 <script src="/js/safety.js?v=3"></script>
 <script src="/js/demos.js?v=2"></script>
 <script>

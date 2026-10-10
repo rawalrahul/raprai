@@ -36,14 +36,15 @@ app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 # ---------------------------------------------------------------------------
 
 # Paths that are always public (no PIN required)
-_PUBLIC_PREFIXES = ("/login", "/activate", "/device/status", "/device/activate", "/static", "/health", "/manifest.json", "/sw.js", "/update/check")
+_PUBLIC_PREFIXES = ("/login", "/static", "/health", "/manifest.json", "/sw.js", "/update/check")
 
-# First-run paths (the setup wizard and its preferences). Open while no PIN is
-# set, so the wizard works before you have a login; once a PIN exists they need
-# one like everything else. They write settings (bot tokens, allowed users,
-# custom instructions), so leaving them open would let anyone who can reach
-# RAPR, e.g. on a server, take it over.
-_FIRST_RUN_PREFIXES = ("/setup", "/prefs")
+# First-run paths (the setup wizard, its preferences, and the optional
+# raprai.com linking). Open while no PIN is set, so the wizard works before you
+# have a login; once a PIN exists they need one like everything else. They write
+# settings (bot tokens, allowed users, custom instructions, the linked account),
+# so leaving them open would let anyone who can reach RAPR, e.g. on a server,
+# take it over.
+_FIRST_RUN_PREFIXES = ("/setup", "/prefs", "/activate", "/device")
 
 # Plugin connect/OAuth routes are opened in popup windows which may not share
 # the session cookie. These are localhost-only and protected by OAuth state tokens.
@@ -86,7 +87,7 @@ class _AuthMiddleware(BaseHTTPMiddleware):
         if any(path == p or path.startswith(p + "/") for p in _FIRST_RUN_PREFIXES):
             if _auth.check_auth(request):      # true while no PIN is set
                 return await call_next(request)
-            if request.method == "GET" and path == "/setup":
+            if request.method == "GET" and path in ("/setup", "/activate"):
                 return RedirectResponse(url="/login", status_code=303)
             from fastapi.responses import JSONResponse
             return JSONResponse({"error": "log in first"}, status_code=401)
@@ -438,15 +439,8 @@ async def index():
     if not (user_data_dir() / ".env").exists():
         return RedirectResponse(url="/setup")
 
-    # .env exists but no device token → activation gate
-    # This catches users who completed onboarding but closed the app
-    # before entering their activation code. They must activate first.
-    try:
-        from helm.device_link import get_device_token
-        if not get_device_token():
-            return RedirectResponse(url="/activate")
-    except Exception:
-        pass  # If device_link import fails, don't block the app
+    # Linking to raprai.com is optional (Settings → raprai.com account), so
+    # there's no activation gate here.
 
     # Serve separated frontend (frontend2/)
     if not _USE_SEPARATED_FRONTEND:
@@ -587,9 +581,9 @@ async def agent_run_window(run_id: str):
 
 @app.get("/activate", response_class=HTMLResponse)
 async def activate_gate():
-    """Standalone activation page — shown when .env exists but no device token.
+    """Page to link RAPR to a raprai.com account (optional; Settings links here).
 
-    If the user is already activated, redirect straight to the main app.
+    If it's already linked, go straight to the main app.
     """
     try:
         from helm.device_link import get_device_token
