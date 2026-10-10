@@ -179,7 +179,14 @@ async function loadPlaybooks() {
 (function () {
   const orig = window.openSettings;
   if (typeof orig === 'function') {
-    window.openSettings = function () { const r = orig.apply(this, arguments); loadRules(); loadAudit(); loadPlaybooks(); return r; };
+    window.openSettings = function () {
+      const r = orig.apply(this, arguments);
+      loadRules(); loadAudit(); loadPlaybooks();
+      const gs = document.getElementById('st-group-speak');
+      if (gs) gs.value = window._groupSpeak ? '1' : '0';
+      if (typeof renderVoiceSettings === 'function') renderVoiceSettings();
+      return r;
+    };
   }
 })();
 

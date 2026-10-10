@@ -105,6 +105,9 @@ function groupOnDeleted(d) {
 function groupOnMessage(d) {
   const s = groupState.groups.find(g => g.id === d.group_id);
   const m = d.message;
+  if (m && m.role === 'member' && window._groupSpeak && typeof speakAs === 'function') {
+    speakAs(m.author_ai, m.content || '');   // each AI in its own voice
+  }
   if (s && m) {
     const who = m.role === 'user' ? 'You' : (m.author_name || '');
     s.last_message = (who ? who + ': ' : '') + (m.content || '').slice(0, 120);

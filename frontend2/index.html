@@ -665,6 +665,18 @@ Example:
             <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="saveRules()">Save rules</button>
             <span id="rules-msg" style="font-size:11px;color:var(--accent);align-self:center"></span>
           </div>
+          <div class="settings-section-title" style="margin-top:12px">Voices</div>
+          <div class="settings-row">
+            <label>Read group replies aloud
+              <small>Each AI speaks in its own voice (uses this device's built-in voices, free).</small>
+            </label>
+            <select class="settings-input" style="width:auto" onchange="toggleGroupSpeak(this.value==='1')" id="st-group-speak">
+              <option value="0">Off</option>
+              <option value="1">On</option>
+            </select>
+          </div>
+          <div id="voice-settings" style="display:flex;flex-direction:column;gap:4px;padding:4px 0 10px;font-size:12px"></div>
+
           <div class="settings-section-title" style="margin-top:12px">Phone notifications</div>
           <div class="settings-row" style="display:block">
             <small>Get a notification on your phone when an action needs your OK, even with the app closed. Install RAPR on your phone first (Add to Home Screen). Free: it uses your browser's own push service.</small>
@@ -1622,7 +1634,8 @@ Example:
 <script src="/js/council.js?v=10"></script>
 <script src="/js/groupchat.js?v=3"></script>
 <script src="/js/whatsapp.js?v=2"></script>
-<script src="/js/safety.js?v=2"></script>
+<script src="/js/voices.js?v=1"></script>
+<script src="/js/safety.js?v=3"></script>
 <script src="/js/demos.js?v=2"></script>
 <script>
 // Register PWA service worker
