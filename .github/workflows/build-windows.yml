@@ -145,5 +145,4 @@ jobs:
           if (-not $a) { throw 'RAPR_AI_Setup.exe not found on the release after upload.' }
           $line = "$($a.name): $([math]::Round($a.size / 1MB, 1)) MB, updated $($a.updatedAt)"
           "Published: $line"
-          "### Published to rapr-releases $tag`
-$line" >> $env:GITHUB_STEP_SUMMARY
+          "### Published to rapr-releases $tag`n$line" >> $env:GITHUB_STEP_SUMMARY
