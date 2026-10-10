@@ -132,10 +132,53 @@ async function loadAudit() {
   } catch (_) {}
 }
 
+// ── What RAPR has learned (playbooks) ───────────────────────────────────────
+
+async function loadPlaybooks() {
+  const list = document.getElementById('playbook-list');
+  if (!list) return;
+  let items = [];
+  try { items = (await (await fetch('/api/playbooks/library')).json()).playbooks || []; } catch (_) {}
+  list.textContent = '';
+  if (!items.length) { list.textContent = 'Nothing learned yet.'; return; }
+  items.forEach(pb => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:grid;grid-template-columns:1fr auto auto;gap:6px;align-items:center;font-size:12px';
+    const name = document.createElement('span');
+    const rate = pb.success_rate != null ? Math.round(pb.success_rate * 100) + '%' : '—';
+    name.textContent = pb.name.replace(/_/g, ' ') + '  · ' + pb.task_type + ' · ' + rate + ' · ' + pb.sample_count + ' uses';
+    const sel = document.createElement('select');
+    sel.className = 'settings-input';
+    ['active', 'draft', 'disabled'].forEach(st => {
+      const o = document.createElement('option');
+      o.value = st; o.textContent = st; if (pb.status === st) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', async () => {
+      await fetch('/api/playbooks/library/' + encodeURIComponent(pb.task_type) + '/' + encodeURIComponent(pb.name) + '/status', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: sel.value }),
+      });
+    });
+    const view = document.createElement('button');
+    view.className = 'settings-save-btn'; view.textContent = 'View';
+    view.style.cssText = 'font-size:11px;padding:3px 8px';
+    view.addEventListener('click', async () => {
+      const out = document.getElementById('playbook-view');
+      try {
+        const d = await (await fetch('/api/playbooks/library/' + encodeURIComponent(pb.task_type) + '/' + encodeURIComponent(pb.name))).json();
+        out.textContent = d.content || d.error || '';
+        out.style.display = 'block';
+      } catch (_) {}
+    });
+    row.append(name, sel, view);
+    list.appendChild(row);
+  });
+}
+
 // Load when Settings opens.
 (function () {
   const orig = window.openSettings;
   if (typeof orig === 'function') {
-    window.openSettings = function () { const r = orig.apply(this, arguments); loadRules(); loadAudit(); return r; };
+    window.openSettings = function () { const r = orig.apply(this, arguments); loadRules(); loadAudit(); loadPlaybooks(); return r; };
   }
 })();
