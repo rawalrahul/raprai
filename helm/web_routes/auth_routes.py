@@ -3,6 +3,7 @@ helm/web_routes/auth_routes.py — Login, logout, PIN setup, auth status endpoin
 """
 
 import os
+import re
 import pathlib
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -83,6 +84,15 @@ async def setup_status():
     })
 
 
+# Settings the wizard may save. The PIN has its own endpoint (which checks the
+# old PIN); login and internal tokens are never set from outside.
+_SETUP_KEY_RE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+_SETUP_FORBIDDEN_KEYS = frozenset({
+    "PIN_SALT", "PIN_HASH", "PIN_MAX_ATTEMPTS", "PIN_LOCKOUT_SECS", "SESSION_DAYS",
+    "MCP_BEARER_TOKEN", "RAPR_DATA_DIR", "RAPR_HEADLESS",
+})
+
+
 @router.post("/setup/save")
 async def setup_save(request: Request):
     """Write one or more key=value pairs to the .env file and reload env.
@@ -91,14 +101,22 @@ async def setup_save(request: Request):
     and their .env entry is replaced with a ``vault-managed`` placeholder.
     Non-secret keys (ALLOWED_USER_IDS, etc.) are written to .env as before.
     """
+    # JSON only: a web page can't send that to RAPR without the browser asking
+    # first, unlike a form post.
+    if "application/json" not in request.headers.get("content-type", ""):
+        return JSONResponse({"error": "expected JSON"}, status_code=415)
     try:
         from helm.security import VAULT_ELIGIBLE_KEYS
         from helm.token_vault import store_token
 
         body = await request.json()
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "expected an object"}, status_code=400)
         for key, value in body.items():
             if not (isinstance(key, str) and isinstance(value, str) and value.strip()):
                 continue
+            if not _SETUP_KEY_RE.fullmatch(key) or key in _SETUP_FORBIDDEN_KEYS:
+                return JSONResponse({"error": f"{key} can't be set here"}, status_code=400)
             value = value.strip()
 
             if key in VAULT_ELIGIBLE_KEYS:

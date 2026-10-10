@@ -36,7 +36,14 @@ app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 # ---------------------------------------------------------------------------
 
 # Paths that are always public (no PIN required)
-_PUBLIC_PREFIXES = ("/login", "/setup", "/activate", "/device/status", "/device/activate", "/prefs", "/static", "/health", "/manifest.json", "/sw.js", "/update/check")
+_PUBLIC_PREFIXES = ("/login", "/activate", "/device/status", "/device/activate", "/static", "/health", "/manifest.json", "/sw.js", "/update/check")
+
+# First-run paths (the setup wizard and its preferences). Open while no PIN is
+# set, so the wizard works before you have a login; once a PIN exists they need
+# one like everything else. They write settings (bot tokens, allowed users,
+# custom instructions), so leaving them open would let anyone who can reach
+# RAPR, e.g. on a server, take it over.
+_FIRST_RUN_PREFIXES = ("/setup", "/prefs")
 
 # Plugin connect/OAuth routes are opened in popup windows which may not share
 # the session cookie. These are localhost-only and protected by OAuth state tokens.
@@ -76,6 +83,13 @@ class _AuthMiddleware(BaseHTTPMiddleware):
         if any(path == p or path.startswith(p + "/") or path.startswith(p + "?")
                for p in _PUBLIC_PREFIXES):
             return await call_next(request)
+        if any(path == p or path.startswith(p + "/") for p in _FIRST_RUN_PREFIXES):
+            if _auth.check_auth(request):      # true while no PIN is set
+                return await call_next(request)
+            if request.method == "GET" and path == "/setup":
+                return RedirectResponse(url="/login", status_code=303)
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"error": "log in first"}, status_code=401)
 
         # Plugin connect/OAuth routes — opened in popup windows that may
         # not share the session cookie. These are safe to expose because
