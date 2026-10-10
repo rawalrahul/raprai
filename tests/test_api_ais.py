@@ -142,3 +142,15 @@ def test_cli_ais_run_headless():
     c = cursor.build_command("do it", model="gpt-5")
     assert c[:2] == [c[0], "-p"] and "--trust" in c and c[-1] == "do it"
     assert c[c.index("--model") + 1] == "gpt-5"
+
+
+def test_model_choice_is_saved_in_the_data_folder(tmp_path, monkeypatch):
+    """/model for Claude, Codex and Gemini is kept in the user's data folder, so
+    an app update (which replaces helm/config) doesn't forget it."""
+    monkeypatch.setenv("RAPR_DATA_DIR", str(tmp_path))
+    from helm import model_prefs
+    old = model_prefs._OLD_PREFS_PATH.read_text()
+    model_prefs.set_model_pref("claude", "claude-haiku-4-5")
+    assert model_prefs.get_model_pref("claude") == "claude-haiku-4-5"
+    assert json.loads((tmp_path / "selected_models.json").read_text())["claude"] == "claude-haiku-4-5"
+    assert model_prefs._OLD_PREFS_PATH.read_text() == old

@@ -17,7 +17,7 @@
 ; ═══════════════════════════════════════════════════════════════════════════════
 
 #define MyAppName "RAPR AI"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.0.1"
 #define MyAppPublisher "RAPR AI"
 #define MyAppURL "https://raprai.com"
 #define MyAppExeName "web_app.exe"

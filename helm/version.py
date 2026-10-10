@@ -9,4 +9,4 @@ build.bat, installer.iss, and marketplace all reference this value
 at build/runtime rather than hardcoding their own strings.
 """
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
