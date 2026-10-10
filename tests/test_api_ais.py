@@ -154,3 +154,16 @@ def test_model_choice_is_saved_in_the_data_folder(tmp_path, monkeypatch):
     assert model_prefs.get_model_pref("claude") == "claude-haiku-4-5"
     assert json.loads((tmp_path / "selected_models.json").read_text())["claude"] == "claude-haiku-4-5"
     assert model_prefs._OLD_PREFS_PATH.read_text() == old
+
+
+def test_open_interpreter_in_rapr_python_counts_as_installed(monkeypatch):
+    """Open Interpreter run through RAPR's own Python is a CLI, not an API key AI."""
+    from helm.ai_runner import core
+    import helm.state as st
+    monkeypatch.setitem(st.integrations, "interpreter", {
+        "build_command": lambda p, model=None: [sys.executable, "-c", "x", "", "1"],
+        "env_vars": ["INTERPRETER_AUTO_FLAG"]})
+    monkeypatch.delenv("INTERPRETER_AUTO_FLAG", raising=False)
+    core._availability_cache.pop("interpreter", None)
+    assert core.is_backend_available("interpreter")
+    core._availability_cache.pop("interpreter", None)

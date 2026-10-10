@@ -280,7 +280,7 @@ def is_backend_available(ai_key: str) -> bool:
                 test_cmd = info["build_command"]("test", model=None)
                 cli_name = test_cmd[0] if test_cmd else ai_key
                 env_vars = info.get("env_vars", [])
-                if cli_name == sys.executable:
+                if cli_name == sys.executable and test_cmd[1:2] == ["-m"]:
                     # Python-subprocess integration — check env vars, not PATH
                     result = (
                         any(os.environ.get(v, "").strip() for v in env_vars)
