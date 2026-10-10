@@ -1,0 +1,85 @@
+/* ── App header ───────────────────────────────────────────────────────────────
+   Loaded after the older stylesheets; #app-header raises specificity over their
+   global button and .hdr-btn rules (several use !important).
+   Layout: [sidebar] RAPR AI | session | Group chat · Council | theme · notifications · help | sessions panel · status */
+
+#app-header {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  height: 52px !important;
+  padding: 0 14px !important;
+}
+
+#app-header .header-logo-group {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex: 0 0 auto;
+}
+
+#app-header .logo { display: flex !important; align-items: center; line-height: 1; }
+#app-header #kelvin-header { margin-left: 6px; vertical-align: 0; }
+
+#app-header .header-context { flex: 0 1 auto; margin: 0 auto; }
+
+#app-header .header-right {
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  flex: 0 0 auto;
+}
+
+#app-header .hdr-btn {
+  height: 32px !important;
+  min-height: 32px !important;
+  min-width: 32px !important;
+  width: auto !important;
+  padding: 0 8px !important;
+  gap: 6px !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  color: var(--text-muted, var(--muted)) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  transform: none !important;
+}
+#app-header .hdr-btn:hover {
+  background: var(--bg-hover) !important;
+  color: var(--text-main, var(--text)) !important;
+  border-color: var(--border-dim, transparent) !important;
+}
+#app-header .hdr-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#app-header .hdr-btn.hdr-icon { width: 32px !important; padding: 0 !important; }
+#app-header .hdr-btn svg { width: 16px; height: 16px; flex: none; display: block; }
+
+/* Labelled feature buttons */
+#app-header .hdr-feature { border-color: var(--border-dim, rgba(255,255,255,.08)) !important; padding: 0 10px !important; }
+#app-header .hdr-feature span { white-space: nowrap; }
+
+/* Sidebar toggles: highlighted while their panel is open */
+#app-header #toggle-left-panel[aria-pressed="true"],
+#app-header #toggle-right-panel[aria-pressed="true"] { color: var(--text-main, var(--text)) !important; }
+#app-header #notify-toggle-btn[aria-pressed="true"] { color: var(--accent) !important; }
+
+#app-header .hdr-sep {
+  width: 1px; height: 20px; margin: 0 4px;
+  background: var(--border-dim, rgba(255,255,255,.1));
+}
+
+#app-header [hidden] { display: none !important; }
+
+#app-header #conn { margin-left: 6px; flex: none; }
+
+/* Narrow windows: icons only for the feature buttons, drop the separators */
+@media (max-width: 1100px) {
+  #app-header .hdr-feature span { display: none; }
+  #app-header .hdr-feature { width: 32px !important; padding: 0 !important; }
+}
+@media (max-width: 640px) {
+  #app-header { gap: 6px !important; padding: 0 8px !important; }
+  #app-header .hdr-sep, #app-header #help-btn { display: none !important; }
+}

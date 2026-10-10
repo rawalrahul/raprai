@@ -106,14 +106,7 @@ function connect(){
     // Apply theme from localStorage (or default to dark)
     const savedTheme = localStorage.getItem('helmTheme') || 'dark';
     document.documentElement.dataset.theme = savedTheme;
-    const themeBtn = document.getElementById('theme-toggle-btn');
-    if(themeBtn) themeBtn.textContent = savedTheme === 'light' ? '☀️' : '🌙';
-    // Show notification button if Notification API is supported
-    const notifyBtn = document.getElementById('notify-toggle-btn');
-    if(notifyBtn && typeof Notification !== 'undefined'){
-      notifyBtn.style.display = 'inline-block';
-      notifyBtn.textContent = _notificationsEnabled ? '🔔' : '🔕';
-    }
+    renderHeaderIcons();
     try { initOnboarding(); } catch(e){ console.warn('initOnboarding err', e); }
     try { cmd('schedule_list'); } catch(e){ console.warn('schedule_list err', e); }
     try { loadSbHistory(); } catch(e){ console.warn('loadSbHistory err', e); }
@@ -205,8 +198,7 @@ async function sendNotification(msg){
 function toggleNotifications(){
   _notificationsEnabled = !_notificationsEnabled;
   localStorage.setItem('helmNotify', _notificationsEnabled ? '1' : '0');
-  const btn = document.getElementById('notify-toggle-btn');
-  if(btn) btn.textContent = _notificationsEnabled ? '🔔' : '🔕';
+  renderHeaderIcons();
   if(_notificationsEnabled && Notification.permission === 'default'){
     Notification.requestPermission();
   }
@@ -217,9 +209,40 @@ function toggleTheme(){
   const next = curr === 'light' ? 'dark' : 'light';
   document.documentElement.dataset.theme = next;
   localStorage.setItem('helmTheme', next);
-  const btn = document.getElementById('theme-toggle-btn');
-  if(btn) btn.textContent = next === 'light' ? '☀️' : '🌙';
+  renderHeaderIcons();
 }
+
+// Header icons are SVG (not emoji) so they match; the icon shows the current state.
+const _HDR_ICONS = {
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>',
+  moon: '<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>',
+  bell: '<path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>',
+  bellOff: '<path d="M13.73 21a2 2 0 01-3.46 0M18.63 13A17.89 17.89 0 0118 8M6.26 6.26A5.86 5.86 0 006 8c0 7-3 9-3 9h14M18 8a6 6 0 00-9.33-5M1 1l22 22"/>',
+};
+function _hdrSvg(name){
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + _HDR_ICONS[name] + '</svg>';
+}
+function renderHeaderIcons(){
+  const light = (document.documentElement.dataset.theme || 'dark') === 'light';
+  const theme = document.getElementById('theme-toggle-btn');
+  if(theme){
+    theme.innerHTML = _hdrSvg(light ? 'moon' : 'sun');
+    theme.title = light ? 'Switch to dark theme' : 'Switch to light theme';
+  }
+  const notify = document.getElementById('notify-toggle-btn');
+  if(notify){
+    notify.hidden = typeof Notification === 'undefined';
+    notify.innerHTML = _hdrSvg(_notificationsEnabled ? 'bell' : 'bellOff');
+    notify.title = _notificationsEnabled ? 'Desktop notifications are on (click to turn off)' : 'Desktop notifications are off (click to turn on)';
+    notify.setAttribute('aria-pressed', _notificationsEnabled ? 'true' : 'false');
+  }
+}
+
+// One button per side: on wide screens it collapses the sidebar, on narrow ones it opens the drawer.
+const _narrowLayout = () => window.matchMedia('(max-width: 900px)').matches;
+function toggleSidebarLeft(){ _narrowLayout() ? toggleLeft() : toggleLeftPanel(); }
+function toggleSidebarRight(){ _narrowLayout() ? toggleRight() : toggleRightPanel(); }
+renderHeaderIcons();
 
 let _onboardingStep = 0;
 const _onboardingSteps = [
@@ -2147,7 +2170,7 @@ function loadSettings(){
                   'CLAUDE_TIMEOUT','SESSION_DAYS','WEB_PORT','WEB_HOST',
                   'HEARTBEAT_ENABLED','HEARTBEAT_AI',
                   'AI_MAX_RETRIES','AI_AUTO_SWITCH',
-                  'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD','TELEGRAM_KELVIN_STICKERS','KELVIN_KEEP_AWAKE','KELVIN_DESKTOP_PET','KELVIN_DAILY_CHECKIN',
+                  'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD','TELEGRAM_KELVIN_STICKERS','KELVIN_KEEP_AWAKE','KELVIN_DESKTOP_PET','KELVIN_DESKTOP_SIZE','KELVIN_DAILY_CHECKIN',
                   'LOCAL_AI_URL','LOCAL_AI_MODEL',
                   'COMPUTER_USE','COMPUTER_USE_TIER2','OMNIPARSER_ENABLED'];
     keys.forEach(k=>{
@@ -2233,7 +2256,7 @@ function saveSettings(){
                 'CLAUDE_TIMEOUT','SESSION_DAYS','WEB_PORT','WEB_HOST',
                 'HEARTBEAT_ENABLED','HEARTBEAT_AI',
                 'AI_MAX_RETRIES','AI_AUTO_SWITCH',
-                'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD','TELEGRAM_KELVIN_STICKERS','KELVIN_KEEP_AWAKE','KELVIN_DESKTOP_PET','KELVIN_DAILY_CHECKIN',
+                'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD','TELEGRAM_KELVIN_STICKERS','KELVIN_KEEP_AWAKE','KELVIN_DESKTOP_PET','KELVIN_DESKTOP_SIZE','KELVIN_DAILY_CHECKIN',
                 'LOCAL_AI_URL','LOCAL_AI_MODEL',
                 'COMPUTER_USE','COMPUTER_USE_TIER2','OMNIPARSER_ENABLED'];
   const body = {};
@@ -3204,15 +3227,12 @@ function exportDiagnostics(){
 })();
 
 function updateToggleBtn(side, collapsed){
-  if(side === 'left'){
-    const btn = document.getElementById('toggle-left-panel');
-    if(btn) btn.textContent = collapsed ? '▸' : '☰';
-    if(btn) btn.title = collapsed ? 'Show left sidebar' : 'Hide left sidebar';
-  } else {
-    const btn = document.getElementById('toggle-right-panel');
-    if(btn) btn.textContent = collapsed ? '◂' : '▸';
-    if(btn) btn.title = collapsed ? 'Show sessions panel' : 'Hide sessions panel';
-  }
+  // Keep the SVG icon; show state through the title and aria-pressed (styled in header.css).
+  const btn = document.getElementById(side === 'left' ? 'toggle-left-panel' : 'toggle-right-panel');
+  if(!btn) return;
+  btn.title = side === 'left' ? (collapsed ? 'Show sidebar' : 'Hide sidebar')
+                              : (collapsed ? 'Show sessions panel' : 'Hide sessions panel');
+  btn.setAttribute('aria-pressed', collapsed ? 'false' : 'true');
 }
 
 function toggleLeftPanel(){

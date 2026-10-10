@@ -58,6 +58,8 @@ Telegram App (your phone)        ←── Bot API  ────┘             
 
 6. *(Optional)* Give your bot Kelvin's face: send `/setuserpic` to **@BotFather**, pick your bot, and upload `frontend2/assets/kelvin/avatar.png`.
 
+> **Desktop Kelvin.** On Windows a small Kelvin sits on your desktop. Drag him anywhere, scroll the mouse wheel over him to resize (small, medium, large), hover and click ✕ to hide him, or right-click for *Hide for 1 hour* and *Show → Only while AI works* (he then appears only when an AI is working or needs your approval). The same choices are in the tray menu (**Kelvin on desktop**) and **Settings → Personalization**.
+
 > **Kelvin stickers.** Kelvin, the RAPR AI penguin, can also send a sticker when a long task or pipeline finishes, when a run fails, and alongside approval requests. It's off by default: turn on **Settings → Personalization → Kelvin stickers on Telegram**.
 
 ---

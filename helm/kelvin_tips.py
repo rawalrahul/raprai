@@ -22,7 +22,8 @@ WINDOW_CLOSED_DELAY = 6.0   # ignore page reloads and quick reconnects
 
 FIRST_RUN = ("Kelvin is here",
              "RAPR AI runs in your system tray, next to the clock. Click ^ and drag Kelvin onto the "
-             "taskbar to keep it in view. You can also drag desktop Kelvin anywhere on screen.")
+             "taskbar to keep it in view. Desktop Kelvin: drag him anywhere, scroll over him to "
+             "resize, hover and click ✕ to hide.")
 WINDOW_CLOSED = ("RAPR AI is still running",
                  "Your AIs, schedules and Telegram keep working. Open RAPR again from the tray or "
                  "double-click Kelvin. Quit from the tray menu.")
