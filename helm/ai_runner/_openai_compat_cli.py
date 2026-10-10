@@ -24,6 +24,14 @@ import urllib.request
 _DEFAULT_TIMEOUT = 120
 
 
+def _user_agent() -> str:
+    try:
+        from helm.version import APP_VERSION
+    except Exception:
+        APP_VERSION = "2"
+    return f"RAPR-AI/{APP_VERSION} (+https://raprai.com)"
+
+
 def main() -> None:
     args = sys.argv[1:]
 
@@ -66,12 +74,20 @@ def main() -> None:
         "messages": [{"role": "user", "content": prompt}],
     }).encode("utf-8")
 
-    headers = {"Content-Type": "application/json"}
+    # A User-Agent is required: Groq and OpenRouter sit behind Cloudflare, which
+    # refuses urllib's default one with "error code: 1010".
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": _user_agent(),
+    }
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     if "openrouter.ai" in base_url:
-        headers["HTTP-Referer"] = "https://raprai.local"
+        headers["HTTP-Referer"] = "https://raprai.com"
         headers["X-Title"]      = "RAPR AI Agent"
+    if "models.github.ai" in base_url:
+        headers["X-GitHub-Api-Version"] = "2022-11-28"
 
     req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
 
