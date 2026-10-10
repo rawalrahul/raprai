@@ -515,18 +515,22 @@ async def _main():
     except Exception:
         pass
 
-    try:
-        from helm.keep_awake import start_keep_awake
-        start_keep_awake()
-    except Exception as exc:
-        logger.info("Keep-awake not available: %s", exc)
+    from helm.headless import is_headless
+    if is_headless():
+        logger.info("Headless mode: no tray, desktop Kelvin or keep-awake (Telegram, WhatsApp and the web UI still work)")
+    else:
+        try:
+            from helm.keep_awake import start_keep_awake
+            start_keep_awake()
+        except Exception as exc:
+            logger.info("Keep-awake not available: %s", exc)
 
-    try:
-        from helm.tray import hide_console, start_tray, stop_tray
-        hide_console()
-        start_tray(actual_port, shutdown_callback=_tray_shutdown)
-    except Exception as exc:
-        logger.info("Tray icon not available: %s (console will remain visible)", exc)
+        try:
+            from helm.tray import hide_console, start_tray, stop_tray
+            hide_console()
+            start_tray(actual_port, shutdown_callback=_tray_shutdown)
+        except Exception as exc:
+            logger.info("Tray icon not available: %s (console will remain visible)", exc)
 
     async def _open_browser():
         await asyncio.sleep(1.2)

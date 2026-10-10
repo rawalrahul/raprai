@@ -44,8 +44,7 @@ def next_schedule(now: Optional[float] = None) -> Optional[tuple]:
 
 def kelvin_report(now: Optional[float] = None) -> str:
     from helm.kelvin_status import status
-    from helm import keep_awake
-    from helm.desktop_kelvin import pet_mode, pet_size, MODE_LABELS
+    from helm.headless import is_headless
 
     now = now or time.time()
     c = status.counts()
@@ -72,10 +71,13 @@ def kelvin_report(now: Optional[float] = None) -> str:
     else:
         lines.append("⏰ No schedules set.")
 
-    lines.append(f"☕ {keep_awake.describe()}")
-    mode = pet_mode()
-    pet = "hidden" if mode == "off" else f"{MODE_LABELS[mode].lower()}, {pet_size()}"
-    lines.append(f"🖥️ Desktop Kelvin: {pet}")
+    if not is_headless():
+        from helm import keep_awake
+        from helm.desktop_kelvin import pet_mode, pet_size, MODE_LABELS
+        lines.append(f"☕ {keep_awake.describe()}")
+        mode = pet_mode()
+        pet = "hidden" if mode == "off" else f"{MODE_LABELS[mode].lower()}, {pet_size()}"
+        lines.append(f"🖥️ Desktop Kelvin: {pet}")
     return "\n".join(lines)
 
 
@@ -117,6 +119,14 @@ async def daily_checkin_loop(poll_seconds: float = 30.0) -> None:
             if checkin_due(now, last_sent):
                 last_sent = now.strftime("%Y-%m-%d")
                 greeting = "Good morning from Kelvin!" if now.hour < 12 else "Daily check-in from Kelvin"
-                await forward_to_telegram(f"{greeting}\n\n{kelvin_report()}")
+                text = f"{greeting}\n\n{kelvin_report()}"
+                await forward_to_telegram(text)
+                # Same check-in on WhatsApp when it's linked and connected.
+                try:
+                    from helm.whatsapp_bridge import send_text as _wa_send, state as _wa_state
+                    if _wa_state.get("status") == "connected":
+                        await _wa_send(text)
+                except Exception as exc:
+                    logger.debug("WhatsApp check-in skipped: %s", exc)
         except Exception as exc:
             logger.warning("Kelvin daily check-in failed: %s", exc)

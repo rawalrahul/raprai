@@ -23,6 +23,7 @@ def test_report_when_quiet(monkeypatch):
     _fresh_status(monkeypatch)
     monkeypatch.setattr(_st, "scheduled_tasks", {}, raising=False)
     monkeypatch.setenv("KELVIN_KEEP_AWAKE", "working")
+    monkeypatch.setenv("RAPR_HEADLESS", "0")   # desktop mode, whatever machine runs the tests
     text = kr.kelvin_report()
     assert text.startswith("🐧 Kelvin is on.")
     assert "Nothing running right now." in text

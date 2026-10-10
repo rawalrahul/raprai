@@ -48,6 +48,7 @@ HELP = (
     "/new <ai> — start a session (claude, gemini, codex, ollama…)\n"
     "/group — group chats with several AIs (/group help)\n"
     "/status — what's running\n"
+    "/kelvin — is RAPR on? Kelvin's report, same as on Telegram\n"
     "/help — this message"
 )
 
@@ -172,6 +173,9 @@ async def handle_text(text: str) -> list[str]:
         return [await gch.handle_command(CHANNEL, text[6:])]
     if low in ("/status", "status"):
         return [status_text()]
+    if low in ("/kelvin", "kelvin"):
+        from helm.kelvin_report import kelvin_report
+        return [kelvin_report()]
     if low in ("/sessions", "sessions"):
         return [sessions_text()]
     if low.startswith("/use"):
