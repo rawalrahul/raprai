@@ -97,3 +97,6 @@ neonize==0.5.2
 # ─────────────────────────────────────────────────────────
 # discord.py>=2.3
 # slack-bolt>=1.18
+
+# Phone notifications (Settings → Approvals & audit → Phone notifications), free Web Push
+pywebpush>=2.0

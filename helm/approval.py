@@ -156,6 +156,13 @@ async def broadcast_approval(req: dict):
     except Exception as exc:
         logger.debug("Could not send approval to Telegram: %s", exc)
 
+    # ... and to your phone (Web Push), if you've turned on phone notifications
+    try:
+        from helm import push
+        await asyncio.to_thread(push.notify_approval, req["description"][:160], req["id"])
+    except Exception as exc:
+        logger.debug("Could not send approval to phones: %s", exc)
+
     # ... and to WhatsApp, as text commands (when it's linked and connected)
     try:
         from helm.whatsapp_bridge import notify_approval

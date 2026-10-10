@@ -665,6 +665,15 @@ Example:
             <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="saveRules()">Save rules</button>
             <span id="rules-msg" style="font-size:11px;color:var(--accent);align-self:center"></span>
           </div>
+          <div class="settings-section-title" style="margin-top:12px">Phone notifications</div>
+          <div class="settings-row" style="display:block">
+            <small>Get a notification on your phone when an action needs your OK, even with the app closed. Install RAPR on your phone first (Add to Home Screen). Free: it uses your browser's own push service.</small>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;padding:4px 0 10px">
+            <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="enablePhoneNotifications()">Turn on for this phone</button>
+            <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="sendTestPush()">Send test</button>
+            <span id="phone-msg" style="font-size:11px;color:var(--accent);align-self:center"></span>
+          </div>
           <div class="settings-section-title" style="margin-top:12px">What RAPR has learned</div>
           <div class="settings-row" style="display:block">
             <small>Short how-to notes RAPR wrote from solved tasks and reuses for similar ones. Switch one off to stop RAPR using it; nothing is deleted.</small>
@@ -1613,7 +1622,7 @@ Example:
 <script src="/js/council.js?v=10"></script>
 <script src="/js/groupchat.js?v=3"></script>
 <script src="/js/whatsapp.js?v=2"></script>
-<script src="/js/safety.js?v=1"></script>
+<script src="/js/safety.js?v=2"></script>
 <script src="/js/demos.js?v=2"></script>
 <script>
 // Register PWA service worker

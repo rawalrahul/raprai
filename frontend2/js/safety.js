@@ -182,3 +182,45 @@ async function loadPlaybooks() {
     window.openSettings = function () { const r = orig.apply(this, arguments); loadRules(); loadAudit(); loadPlaybooks(); return r; };
   }
 })();
+
+// ── Phone notifications ──────────────────────────────────────────────────────
+
+function _b64urlToBytes(b64) {
+  const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
+}
+
+async function enablePhoneNotifications() {
+  const msg = document.getElementById('phone-msg');
+  const say = t => { if (msg) msg.textContent = t; };
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    say('This browser can\'t do phone notifications. Use the installed app on Chrome, Edge or Safari (iOS 16.4+).');
+    return;
+  }
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { say('Notifications are blocked. Allow them in the browser settings.'); return; }
+    const reg = await navigator.serviceWorker.ready;
+    const { publicKey } = await (await fetch('/api/push/key')).json();
+    const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({
+      userVisibleOnly: true, applicationServerKey: _b64urlToBytes(publicKey),
+    });
+    const r = await fetch('/api/push/subscribe', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sub.toJSON()),
+    });
+    const d = await r.json();
+    if (!r.ok) { say(d.error || 'Could not turn on notifications'); return; }
+    say('On for this device. Use "Send test" to check.');
+  } catch (err) {
+    say('Could not turn on notifications: ' + err.message);
+  }
+}
+
+async function sendTestPush() {
+  const msg = document.getElementById('phone-msg');
+  try {
+    const d = await (await fetch('/api/push/test', { method: 'POST' })).json();
+    if (msg) msg.textContent = d.sent ? 'Test sent to ' + d.sent + ' device(s).' : 'No device is turned on yet.';
+  } catch (err) { if (msg) msg.textContent = err.message; }
+}
