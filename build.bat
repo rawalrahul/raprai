@@ -23,10 +23,13 @@ if exist installer_output (
 )
 
 :: ── Generate self-signed cert and sign exe (bypasses Smart App Control) ──
-echo  Generating self-signed code signing certificate...
-powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\gen_cert.ps1"
-echo  Certificate ready.
-echo.
+:: Skipped in CI (GitHub Actions sets CI=true): a throwaway runner cert adds nothing.
+if not defined CI (
+    echo  Generating self-signed code signing certificate...
+    powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\gen_cert.ps1"
+    echo  Certificate ready.
+    echo.
+)
 
 :: ── Generate .ico from rapr-logo.png (needed by Inno Setup + shortcuts) ──────
 echo  Generating logo.ico from rapr-logo.png...
@@ -50,7 +53,17 @@ set "VEC_FLAGS="
 python -c "import fastembed, onnxruntime" 2>nul && set "VEC_FLAGS=--include-package=fastembed --include-package=onnxruntime --include-package=tokenizers --include-package=numpy --include-package=huggingface_hub --include-package-data=onnxruntime --include-package-data=fastembed"
 if defined VEC_FLAGS (echo  Semantic vector memory: ENABLED in this build) else (echo  Semantic vector memory: NOT bundled - keyword/FTS only)
 
-python -m nuitka --standalone --enable-plugin=tk-inter ^
+:: -- WhatsApp (neonize): bundle the package and its native library. Nuitka does not
+::    copy DLLs as package data, so the DLL is added explicitly next to the package.
+set "WA_FLAGS="
+set "NEONIZE_DIR="
+for /f "delims=" %%i in ('python -c "import importlib.util,os;s=importlib.util.find_spec('neonize');print(os.path.dirname(s.origin) if s else '')" 2^>nul') do set "NEONIZE_DIR=%%i"
+if defined NEONIZE_DIR if exist "%NEONIZE_DIR%\neonize-windows-amd64.dll" set "WA_FLAGS=--include-package=neonize --include-package=segno --include-data-files=%NEONIZE_DIR%\neonize-windows-amd64.dll=neonize\neonize-windows-amd64.dll"
+if defined WA_FLAGS (echo  WhatsApp support: ENABLED in this build) else (echo  WhatsApp support: NOT bundled - pip install neonize)
+
+:: --assume-yes-for-downloads: Nuitka otherwise stops to ask before fetching its
+:: C compiler / dependency tools, which hangs unattended (CI) builds.
+python -m nuitka --standalone --assume-yes-for-downloads --enable-plugin=tk-inter ^
     --include-data-files=rapr-logo.png=rapr-logo.png ^
     --include-data-files=logo-watermark-dark.png=logo-watermark-dark.png ^
     --include-data-files=logo-watermark-light.png=logo-watermark-light.png ^
@@ -69,12 +82,14 @@ python -m nuitka --standalone --enable-plugin=tk-inter ^
     --include-module=helm.mcp.composio_mcp ^
     --include-module=helm.mcp.zapier_mcp ^
     %VEC_FLAGS% ^
+    %WA_FLAGS% ^
+    %NUITKA_EXTRA% ^
     web_app.py
 
 if errorlevel 1 (
     echo.
     echo  ERROR: Nuitka compilation failed. Check the errors above.
-    pause
+    if not defined CI pause
     exit /b 1
 )
 
@@ -189,4 +204,4 @@ if exist installer_output\RAPR_AI_Setup_2.0.0.exe (
     echo  Installer:    installer_output\RAPR_AI_Setup_2.0.0.exe
     echo.
 )
-pause
+if not defined CI pause

@@ -221,11 +221,27 @@ def start_tray(port: int, shutdown_callback=None):
                 logger.warning("Could not change keep-awake mode: %s", exc)
         return _handler
 
-    from helm.desktop_kelvin import pet_enabled as _pet_enabled, set_pet_enabled, start_desktop_kelvin
+    from helm.desktop_kelvin import (
+        MODE_LABELS as _pet_mode_labels, SIZE_ORDER as _pet_sizes,
+        pet_mode as _pet_mode, pet_size as _pet_size,
+        set_pet_mode, set_pet_size, start_desktop_kelvin,
+    )
 
-    def _toggle_pet(icon, item):
-        set_pet_enabled(not _pet_enabled())
-        icon.update_menu()
+    def _set_pet(fn, value):
+        def _handler(icon, item):
+            fn(value)
+            icon.update_menu()
+        return _handler
+
+    _pet_menu = Menu(*(
+        [MenuItem(_pet_mode_labels[m], _set_pet(set_pet_mode, m), radio=True,
+                  checked=(lambda m: lambda item: _pet_mode() == m)(m))
+         for m in ("always", "working", "off")]
+        + [Menu.SEPARATOR]
+        + [MenuItem(z.title(), _set_pet(set_pet_size, z), radio=True,
+                    checked=(lambda z: lambda item: _pet_size() == z)(z))
+           for z in _pet_sizes]
+    ))
 
     menu = Menu(
         MenuItem(f"RAPR AI — {url}", on_open_ui, default=True),
@@ -233,7 +249,7 @@ def start_tray(port: int, shutdown_callback=None):
         Menu.SEPARATOR,
         MenuItem("Open in Browser", on_open_ui),
         MenuItem("Show Console", on_show_console),
-        MenuItem("Kelvin on desktop", _toggle_pet, checked=lambda item: _pet_enabled()),
+        MenuItem("Kelvin on desktop", _pet_menu),
         MenuItem("Keep PC awake", Menu(*[
             MenuItem(_awake_labels[m], _set_awake(m), radio=True,
                      checked=(lambda m: lambda item: _awake_mode() == m)(m))
@@ -295,7 +311,8 @@ def start_tray(port: int, shutdown_callback=None):
 
     # Kelvin on the desktop: a draggable, always-on-top companion (Windows).
     try:
-        start_desktop_kelvin(lambda: _open_app_mode(url))
+        start_desktop_kelvin(lambda: _open_app_mode(url),
+                             on_hidden=lambda message: notify("Kelvin", message))
     except Exception as exc:
         logger.info("Desktop Kelvin not started: %s", exc)
     logger.info("System tray icon started")

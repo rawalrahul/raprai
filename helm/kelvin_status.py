@@ -43,6 +43,7 @@ class KelvinStatus:
         self._busy: set[str] = set()
         self._approvals: dict[str, str] = {}
         self._pipelines: set[str] = set()
+        self._groups: set[str] = set()      # group chats with a room turn running
         self.started_at = time.time()
         self._last_event = time.time()
         self._done_until = 0.0
@@ -83,6 +84,13 @@ class KelvinStatus:
             elif kind == "message" and data.get("role") == "assistant":
                 self._done_until = now + DONE_SECONDS
                 self._error_until = 0.0
+            elif kind == "group_status":
+                gid = str(data.get("group_id"))
+                if data.get("status") == "running":
+                    self._groups.add(gid)
+                elif gid in self._groups:
+                    self._groups.discard(gid)
+                    self._done_until = now + DONE_SECONDS
             elif kind == "pipeline_update":
                 pl = data.get("pipeline") or {}
                 status = pl.get("status")
@@ -108,7 +116,7 @@ class KelvinStatus:
                 return "approval"
             if now < self._error_until:
                 return "error"
-            if self._busy:
+            if self._busy or self._groups:
                 return "working"
             if now < self._done_until:
                 return "done"
@@ -117,7 +125,7 @@ class KelvinStatus:
     def active(self) -> bool:
         """True while there is real work in flight (busy sessions, running pipelines, waiting approvals)."""
         with self._lock:
-            return bool(self._busy or self._pipelines or self._approvals)
+            return bool(self._busy or self._pipelines or self._approvals or self._groups)
 
     def idle_seconds(self, now: Optional[float] = None) -> float:
         """Seconds since the last agent event (used to let Kelvin doze off)."""
@@ -127,17 +135,22 @@ class KelvinStatus:
     def counts(self) -> dict:
         with self._lock:
             return {"busy": len(self._busy), "pipelines": len(self._pipelines), "approvals": len(self._approvals),
+                    "groups": len(self._groups),
                     "approval_texts": list(self._approvals.values())}
 
     def describe(self, now: Optional[float] = None) -> str:
         mood = self.mood(now)
         with self._lock:
-            busy, approvals = len(self._busy), len(self._approvals)
+            busy, approvals, groups = len(self._busy), len(self._approvals), len(self._groups)
         if mood == "approval":
             return "Kelvin: waiting for your approval" if approvals == 1 else f"Kelvin: {approvals} approvals waiting"
         if mood == "error":
             return "Kelvin: something went wrong"
         if mood == "working":
+            if groups and not busy:
+                return "Kelvin: group chat answering" if groups == 1 else f"Kelvin: {groups} group chats answering"
+            if groups:
+                return f"Kelvin: {busy} session{'s' if busy != 1 else ''} + {groups} group chat{'s' if groups != 1 else ''} working"
             return "Kelvin: working" if busy == 1 else f"Kelvin: {busy} sessions working"
         if mood == "done":
             return "Kelvin: done"

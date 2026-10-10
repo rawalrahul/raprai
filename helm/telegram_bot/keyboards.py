@@ -25,7 +25,8 @@ def sessions_keyboard():
         label = f"{icon} {sess['name']} · {cwd_short}"
         rows.append([InlineKeyboardButton(label, callback_data=f"ms:focus:{sess['id']}")])
     rows.append([InlineKeyboardButton("➕ New Session", callback_data="ms:new")])
-    rows.append([InlineKeyboardButton("📊 Usage", callback_data="ms:usage")])
+    rows.append([InlineKeyboardButton("👥 Group chats", callback_data="gc:list"),
+                 InlineKeyboardButton("📊 Usage", callback_data="ms:usage")])
     rows.append([
         InlineKeyboardButton("💬 Past chats", callback_data="action:history"),
         InlineKeyboardButton("🔄 Resume old", callback_data="action:resume"),

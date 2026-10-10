@@ -81,3 +81,12 @@ static-ffmpeg>=2.5
 # (e.g. 3.14); relax it once wheels exist for your target runtime.
 # ─────────────────────────────────────────────────────────
 fastembed>=0.3.6 ; python_version < "3.13"
+
+# ─────────────────────────────────────────────────────────
+# WhatsApp control (Settings → WhatsApp). Free: RAPR links to WhatsApp as a
+# device via neonize (whatsmeow), no Business API. neonize ships its own
+# native library for Windows/macOS/Linux. (It imports python-magic, which
+# needs libmagic; RAPR only sends text, so helm/whatsapp_bridge.py stands in
+# a tiny fallback when libmagic isn't installed.)
+# ─────────────────────────────────────────────────────────
+neonize==0.5.2

@@ -95,3 +95,59 @@ def test_only_starts_on_windows(monkeypatch):
     monkeypatch.setattr(dk.sys, "platform", "linux")
     monkeypatch.setattr(dk, "_instance", None)
     assert dk.start_desktop_kelvin(lambda: None) is None
+
+
+# ── Size and visibility ──────────────────────────────────────────────────────
+
+def test_modes(monkeypatch):
+    for raw, mode in (("1", "always"), ("true", "always"), ("working", "working"), ("auto", "working"),
+                      ("0", "off"), ("off", "off")):
+        monkeypatch.setenv("KELVIN_DESKTOP_PET", raw)
+        assert dk.pet_mode() == mode, raw
+    monkeypatch.delenv("KELVIN_DESKTOP_PET")
+    assert dk.pet_mode() == "always"
+
+
+def test_should_show():
+    assert dk.should_show("always", "idle", False)
+    assert not dk.should_show("always", "idle", True)             # hidden for an hour
+    assert dk.should_show("always", "approval", True)             # ...but approvals still show him
+    assert not dk.should_show("working", "idle", False)
+    assert not dk.should_show("working", "sleeping", False)
+    for mood in ("thinking", "working", "approval", "error", "done"):
+        assert dk.should_show("working", mood, False), mood
+    assert not dk.should_show("off", "approval", False)
+
+
+def test_sizes(monkeypatch):
+    monkeypatch.delenv("KELVIN_DESKTOP_SIZE", raising=False)
+    assert dk.pet_size() == "medium"
+    monkeypatch.setenv("KELVIN_DESKTOP_SIZE", "huge")
+    assert dk.pet_size() == "medium"
+    assert dk.pet_box("large") == (dk.PET_W, dk.PET_H)
+    assert dk.pet_box("small") == (dk.PET_W // 2, dk.PET_H // 2)
+    assert dk.next_size("medium", 1) == "large" and dk.next_size("large", 1) == "large"
+    assert dk.next_size("medium", -1) == "small" and dk.next_size("small", -1) == "small"
+    frames = dk.load_strip("idle", dk.pet_box("small"))
+    assert frames[0].size == dk.pet_box("small")
+
+
+def test_resize_keeps_bottom_right_corner():
+    old, new = dk.pet_box("large"), dk.pet_box("small")
+    x, y = dk.resize_anchor(1000, 800, old, new)
+    assert (x + new[0], y + new[1]) == (1000 + old[0], 800 + old[1])
+
+
+def test_mode_and_size_are_saved(monkeypatch, tmp_path):
+    import importlib
+    app = importlib.import_module("helm.web_routes.app")
+    saved = {}
+    monkeypatch.setattr(app, "update_env", lambda k, v: saved.__setitem__(k, v))
+    dk.set_pet_mode("working")
+    dk.set_pet_size("small")
+    assert saved == {"KELVIN_DESKTOP_PET": "working", "KELVIN_DESKTOP_SIZE": "small"}
+    assert dk.pet_mode() == "working" and dk.pet_size() == "small"
+    dk.set_pet_enabled(True)
+    assert dk.pet_mode() == "always"
+    monkeypatch.delenv("KELVIN_DESKTOP_SIZE")
+    monkeypatch.delenv("KELVIN_DESKTOP_PET")

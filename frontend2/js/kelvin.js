@@ -273,6 +273,7 @@
     mode: 'animated', focusedId: null, thinking: {}, activity: false, approval: false,
     doneUntil: 0, listenUntil: 0, errorUntil: 0, lastEvent: Date.now(), current: null, views: [],
     sessions: [], pipeline: null, pipelineEndedAt: 0, dismissedPipeline: null, stepDoneAt: {},
+    groups: {},   // group chats answering right now: id -> {name, members, speaking, replied}
   };
 
   function readMode() {
@@ -285,6 +286,7 @@
     if (ui.approval) return 'approval';
     if (now < ui.errorUntil) return 'error';
     if (ui.activity) return 'working';
+    if (Object.keys(ui.groups).length) return 'working';
     if (thinking) return 'thinking';
     if (now < ui.doneUntil) return 'done';
     if (now < ui.listenUntil) return 'listening';
@@ -395,6 +397,27 @@
       });
     }
 
+    // Group chats: one Kelvin per member, in that AI's beanie. The member speaking
+    // works, members who already replied this turn look pleased, the rest wait.
+    Object.keys(ui.groups).forEach(function (gid) {
+      var g = ui.groups[gid];
+      var speaker = (g.members || []).filter(function (m) { return m.id === g.speaking; })[0];
+      var replied = Object.keys(g.replied).length;
+      groups.push({
+        kind: 'group', id: gid,
+        title: '👥 ' + g.name,
+        sub: (speaker ? speaker.name + ' is replying…' : 'The group is thinking…') +
+             (replied ? ' · ' + replied + ' repl' + (replied === 1 ? 'y' : 'ies') + ' so far' : ''),
+        lanes: [(g.members || []).map(function (m) {
+          var talking = m.id === g.speaking, done = !!g.replied[m.id];
+          return { key: 'g:' + gid + ':' + m.id, ai: m.ai, groupId: gid,
+                   mood: talking ? 'working' : done ? 'done' : 'idle',
+                   name: (m.emoji ? m.emoji + ' ' : '') + m.name,
+                   tag: talking ? 'replying' : done ? 'replied' : 'waiting' };
+        })],
+      });
+    });
+
     var pl = ui.pipeline;
     var ended = pl && /^(completed|failed|cancelled)$/.test(pl.status);
     if (pl && pl.id !== ui.dismissedPipeline && (!ended || now - ui.pipelineEndedAt < CREW_LINGER_MS)) {
@@ -448,8 +471,9 @@
             '<div class="kc-wave' + (lane.length > 1 ? ' kc-parallel' : '') + '">' +
             lane.map(function (m) {
               // Divs with role=button: the app's global button styles (!important) would break this layout.
-              return '<div class="kc-m' + (m.lead ? ' kc-lead' : '') + (m.sessionId ? ' kc-click' : '') + '" data-key="' + esc(m.key) + '"' +
-                (m.sessionId ? ' role="button" tabindex="0"' : '') + '>' +
+              var clickable = m.sessionId || m.groupId;
+              return '<div class="kc-m' + (m.lead ? ' kc-lead' : '') + (clickable ? ' kc-click' : '') + '" data-key="' + esc(m.key) + '"' +
+                (clickable ? ' role="button" tabindex="0"' : '') + '>' +
                 '<span class="kelvin-slot kc-art"></span><span class="kc-name"></span><span class="kc-tag"></span></div>';
             }).join('') + '</div>';
         }).join('');
@@ -466,6 +490,9 @@
             crew.members[m.key] = { node: node, k: mount(node.querySelector('.kc-art'), {
               overlays: false, track: false, pokeable: false, ai: m.ai, label: 'Kelvin: ' + m.name } ) };
             if (m.sessionId) onActivate(node, function () { if (typeof window.cmd === 'function') window.cmd('focus:' + m.sessionId); });
+            if (m.groupId) onActivate(node, function () {
+              if (typeof window.openGroupSection === 'function') { window.openGroupSection(); window.openGroup(m.groupId); }
+            });
           });
         });
         var close = el.querySelector('[data-group="' + groups.indexOf(g) + '"] .kc-close');
@@ -577,6 +604,20 @@
         case 'state':
           if (d.focused_id !== undefined) ui.focusedId = d.focused_id;
           if (Array.isArray(d.sessions)) ui.sessions = d.sessions;
+          break;
+        case 'group_status':
+          if (d.status === 'running') {
+            var prevG = ui.groups[d.group_id];
+            ui.groups[d.group_id] = { name: d.name || 'Group chat', members: d.members || (prevG && prevG.members) || [],
+                                      speaking: d.speaking, replied: prevG ? prevG.replied : {} };
+          } else if (ui.groups[d.group_id]) {
+            delete ui.groups[d.group_id];
+            ui.doneUntil = now + 2500;
+          }
+          break;
+        case 'group_message':
+          if (d.message && d.message.role === 'member' && ui.groups[d.group_id]) ui.groups[d.group_id].replied[d.message.author] = true;
+          else if (d.message && d.message.role === 'user' && ui.groups[d.group_id]) ui.groups[d.group_id].replied = {};
           break;
         case 'crew_suggest':
           if (mine) showCrewSuggest();

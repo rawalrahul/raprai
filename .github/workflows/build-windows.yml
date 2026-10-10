@@ -1,0 +1,148 @@
+name: Build Windows installer
+
+# Compiles RAPR AI with Nuitka (via build.bat) and packages it with Inno Setup
+# on a clean Windows runner. The installer is uploaded as a workflow artifact
+# named RAPR_AI_Setup.exe, ready to attach to the rawalrahul/rapr-releases
+# release that raprai.com/download links to.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+    branches: ['ci/windows-build', 'ccr-a9f017b0-ywqde2']
+
+# A newer push supersedes a build still running for the same branch.
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Builds only when started by hand (Actions -> Run workflow) or from a v* tag.
+    # A push still creates a run, which (via concurrency above) cancels any build
+    # in progress for the branch, but this job is skipped.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    runs-on: windows-latest
+    timeout-minutes: 300
+    env:
+      # 'true' only when the RELEASES_TOKEN secret exists; gates the publish step.
+      HAS_RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN != '' }}
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.12: newest Python that Nuitka and fastembed/onnxruntime wheels all support,
+      # so semantic memory is bundled. This is the configuration that built and
+      # published successfully (~2.5 h); the 3.13 / no-LTO variant timed out.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install nuitka ordered-set zstandard pypdf
+
+      - name: Ensure Inno Setup 6 is installed
+        shell: pwsh
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup not found at $iscc" }
+
+      - name: Build (build.bat)
+        timeout-minutes: 270
+        run: build.bat
+
+      - name: Check installer and rename for release
+        shell: pwsh
+        run: |
+          $out = Get-ChildItem installer_output\RAPR_AI_Setup_*.exe | Select-Object -First 1
+          if (-not $out) { throw 'Installer was not produced - see the build step log.' }
+          if (-not (Test-Path web_app.dist\web_app.exe)) { throw 'web_app.exe missing from dist.' }
+          Copy-Item $out.FullName installer_output\RAPR_AI_Setup.exe
+          $mb = [math]::Round((Get-Item installer_output\RAPR_AI_Setup.exe).Length / 1MB, 1)
+          $sha = (Get-FileHash installer_output\RAPR_AI_Setup.exe -Algorithm SHA256).Hash
+          "Built $($out.Name) -> RAPR_AI_Setup.exe ($mb MB)"
+          "SHA256: $sha"
+          "### RAPR_AI_Setup.exe`n- Size: $mb MB`n- SHA256: ``$sha``" >> $env:GITHUB_STEP_SUMMARY
+
+      # Smoke test: the compiled app must start and serve its web UI.
+      - name: Smoke test web_app.exe
+        shell: pwsh
+        run: |
+          Copy-Item .env.example web_app.dist\.env
+          $p = Start-Process -FilePath web_app.dist\web_app.exe -WorkingDirectory web_app.dist -PassThru
+          $ok = $false
+          foreach ($i in 1..40) {
+            Start-Sleep -Seconds 3
+            try {
+              $r = Invoke-WebRequest -Uri http://127.0.0.1:8000/setup -UseBasicParsing -TimeoutSec 5
+              if ($r.StatusCode -eq 200) { $ok = $true; break }
+            } catch {}
+            if ($p.HasExited) { break }
+          }
+          # WhatsApp: the bundled neonize library must load and reach the QR step.
+          $wa = $null
+          if ($ok) {
+            try {
+              $wa = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/whatsapp/connect -TimeoutSec 30
+              foreach ($i in 1..30) {
+                if ($wa.status -ne 'starting') { break }
+                Start-Sleep -Seconds 2
+                $wa = Invoke-RestMethod -Uri http://127.0.0.1:8000/api/whatsapp/status -TimeoutSec 10
+              }
+            } catch { $wa = @{ status = 'request-failed'; error = "$_" } }
+            "WhatsApp status: $($wa.status) $($wa.error)"
+          }
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          Get-ChildItem web_app.dist\logs -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName -Tail 40 }
+          if (-not $ok) { throw 'web_app.exe did not serve /setup within 2 minutes.' }
+          'Smoke test passed: /setup returned 200.'
+          if ($wa.available -eq $false -or $wa.status -eq 'request-failed') { throw "WhatsApp support is broken in the build: $($wa.error)" }
+          if ($wa.status -eq 'qr') { 'Smoke test passed: WhatsApp produced a link QR code.' }
+          else { Write-Output "::warning title=WhatsApp::No QR within 60s (status $($wa.status)). The library loaded; the runner may not reach WhatsApp." }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RAPR_AI_Setup
+          path: installer_output/RAPR_AI_Setup.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      # Publish: create the release for the app version in helm/version.py
+      # (e.g. v2.0.0) on rawalrahul/rapr-releases if it doesn't exist yet, and
+      # attach RAPR_AI_Setup.exe. Older releases (v1.0.0) are not touched.
+      # Runs only after the smoke test passed, and only when the
+      # RELEASES_TOKEN secret (fine-grained PAT, Contents: read/write on
+      # rawalrahul/rapr-releases) is configured; otherwise it is skipped.
+      - name: Publish to rapr-releases
+        if: ${{ env.HAS_RELEASES_TOKEN == 'true' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          $ver = [regex]::Match((Get-Content helm\version.py -Raw), 'APP_VERSION = "([^"]+)"').Groups[1].Value
+          if (-not $ver) { throw 'Could not read APP_VERSION from helm/version.py' }
+          $tag = "v$ver"
+          $notes = "release-notes\$tag.md"
+          gh release view $tag --repo rawalrahul/rapr-releases *> $null
+          if ($LASTEXITCODE -ne 0) {
+            $args = @('release', 'create', $tag, '--repo', 'rawalrahul/rapr-releases', '--title', "RAPR AI $tag", '--latest')
+            if (Test-Path $notes) { $args += @('--notes-file', $notes) } else { $args += @('--notes', "RAPR AI $tag") }
+            gh @args
+            if ($LASTEXITCODE -ne 0) { throw "Could not create release $tag." }
+          }
+          gh release upload $tag installer_output\RAPR_AI_Setup.exe --clobber --repo rawalrahul/rapr-releases
+          if ($LASTEXITCODE -ne 0) { throw "Upload to $tag failed." }
+          $rel = gh release view $tag --repo rawalrahul/rapr-releases --json assets | ConvertFrom-Json
+          $a = $rel.assets | Where-Object { $_.name -eq 'RAPR_AI_Setup.exe' }
+          if (-not $a) { throw 'RAPR_AI_Setup.exe not found on the release after upload.' }
+          $line = "$($a.name): $([math]::Round($a.size / 1MB, 1)) MB, updated $($a.updatedAt)"
+          "Published: $line"
+          "### Published to rapr-releases $tag`n$line" >> $env:GITHUB_STEP_SUMMARY

@@ -19,6 +19,8 @@
 <link rel="stylesheet" href="/css/overhaul.css?v=1">
 <link rel="stylesheet" href="/css/impeccable.css?v=3">
 <link rel="stylesheet" href="/css/kelvin.css?v=3">
+<link rel="stylesheet" href="/css/groupchat.css?v=3">
+<link rel="stylesheet" href="/css/header.css?v=1">
 </head>
 <body>
 <div id="app" class="main-layout">
@@ -215,6 +217,18 @@
       </div>
     </div>
 
+    <div class="sb-section" data-section="groups" id="sb-section-groups">
+      <div class="sb-section-header" onclick="toggleSbSection(this)" role="button" aria-expanded="false" aria-controls="sb-panel-groups">
+        <span class="sb-section-arrow" aria-hidden="true">▶</span>
+        <span class="sb-section-label">Group Chats</span>
+        <button onclick="event.stopPropagation();openGroupSection();openGroupModal(null)" class="sb-section-action" title="New group chat" aria-label="New group chat">+</button>
+        <button onclick="event.stopPropagation();openGroupSection()" class="sb-section-action" title="Open Group Chats" aria-label="Open Group Chats">👥</button>
+      </div>
+      <div class="sb-section-body" id="sb-panel-groups">
+        <div class="sb-empty">Loading...</div>
+      </div>
+    </div>
+
     <div class="sb-section" data-section="council" id="sb-section-council">
       <div class="sb-section-header" onclick="openCouncilSection()" role="button" aria-expanded="false" aria-controls="council-wrapper">
         <span class="sb-section-arrow" aria-hidden="true">▶</span>
@@ -300,10 +314,10 @@
 <!-- --- Center Panel --- -->
 <div id="center-panel">
 
-<header>
+<header id="app-header">
   <div class="header-logo-group">
-    <button class="panel-toggle" id="toggle-left-panel" onclick="toggleLeftPanel()" title="Toggle left sidebar" aria-label="Toggle left sidebar">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    <button class="hdr-btn hdr-icon" id="toggle-left-panel" onclick="toggleSidebarLeft()" title="Hide sidebar" aria-label="Toggle sidebar" aria-pressed="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
     </button>
     <div class="logo">RAPR<em>AI</em><span class="kelvin-slot" id="kelvin-header"></span></div>
   </div>
@@ -312,26 +326,25 @@
     <span class="hctx-name" id="hctx-name">No session</span>
   </div>
   <div class="header-right">
-    <button class="sb-toggle" id="toggle-left" onclick="toggleLeft()" title="History & Scheduled" aria-label="Toggle History and Scheduled">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+    <button class="hdr-btn hdr-feature" id="group-nav-btn" onclick="openGroupSection()" title="Group chat: several AIs in one conversation" aria-label="Open Group Chats">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+      <span>Group chat</span>
     </button>
-    <button class="sb-toggle" id="toggle-right" onclick="toggleRight()" title="Sessions" aria-label="Toggle Active Sessions">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+    <button class="hdr-btn hdr-feature" id="council-nav-btn" onclick="openCouncilSection()" title="AI Council: let your AIs debate a question" aria-label="Open AI Council">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21h18M5 21V10M19 21V10M9.5 21V10M14.5 21V10M2 10l10-7 10 7z"/></svg>
+      <span>Council</span>
     </button>
-    <button class="hdr-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle light/dark theme" aria-label="Toggle Theme">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+    <span class="hdr-sep" aria-hidden="true"></span>
+    <button class="hdr-btn hdr-icon" id="theme-toggle-btn" onclick="toggleTheme()" title="Switch to light theme" aria-label="Toggle light or dark theme"></button>
+    <button class="hdr-btn hdr-icon" id="notify-toggle-btn" onclick="toggleNotifications()" title="Desktop notifications" aria-label="Toggle desktop notifications"></button>
+    <button class="hdr-btn hdr-icon" id="help-btn" onclick="showHelpTour()" title="Help &amp; tour" aria-label="Show help and tour">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
     </button>
-    <button class="hdr-btn" id="notify-toggle-btn" onclick="toggleNotifications()" title="Toggle notifications" aria-label="Toggle Notifications">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+    <span class="hdr-sep" aria-hidden="true"></span>
+    <button class="hdr-btn hdr-icon" id="toggle-right-panel" onclick="toggleSidebarRight()" title="Hide sessions panel" aria-label="Toggle sessions panel" aria-pressed="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></svg>
     </button>
-    <button class="hdr-btn" id="council-nav-btn" onclick="openCouncilSection()" title="AI Council" aria-label="Open AI Council">🏛️</button>
-    <button class="hdr-btn" onclick="showHelpTour()" title="Help & tour" aria-label="Show Help and Tour">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg>
-    </button>
-    <button class="panel-toggle" id="toggle-right-panel" onclick="toggleRightPanel()" title="Toggle sessions panel" aria-label="Toggle Right Panel">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
-    </button>
-    <div id="conn" title="WebSocket status" role="status" aria-label="Connection Status"></div>
+    <div id="conn" title="Connection to RAPR" role="status" aria-label="Connection status"></div>
   </div>
 </header>
 <!-- --- Connection error banner (hidden by default) --- -->
@@ -599,11 +612,22 @@ Example:
         </div>
         <div class="settings-row">
           <label for="st-KELVIN_DESKTOP_PET">Kelvin on desktop
-            <small>A small Kelvin you can drag anywhere on screen, always on top. Double-click to open RAPR. Also in the tray menu.</small>
+            <small>A small Kelvin you can drag anywhere on screen, always on top. Double-click to open RAPR. "Only while AI works" keeps him out of the way until something happens. Also in the tray menu, or hover him and click ✕.</small>
           </label>
           <select class="settings-input" id="st-KELVIN_DESKTOP_PET" style="width:auto">
-            <option value="1">Show</option>
-            <option value="0">Hide</option>
+            <option value="1">Always</option>
+            <option value="working">Only while AI works</option>
+            <option value="0">Hidden</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <label for="st-KELVIN_DESKTOP_SIZE">Desktop Kelvin size
+            <small>You can also scroll the mouse wheel over Kelvin.</small>
+          </label>
+          <select class="settings-input" id="st-KELVIN_DESKTOP_SIZE" style="width:auto">
+            <option value="small">Small</option>
+            <option value="medium">Medium</option>
+            <option value="large">Large</option>
           </select>
         </div>
         <div class="settings-row">
@@ -626,6 +650,33 @@ Example:
       </div>
 
       <!-- Custom Instructions -->
+      <!-- WhatsApp -->
+      <div class="settings-section" id="wa-section">
+        <div class="settings-section-title">WhatsApp</div>
+        <div class="settings-row">
+          <label>Control RAPR from WhatsApp
+            <small>Free, no Business API: RAPR joins your WhatsApp as a linked device, like WhatsApp Web. Talk to it from your "Message yourself" chat: type to reach your focused session, /group for group chats, /help for more.</small>
+          </label>
+          <span id="wa-status" style="font-size:11px;color:var(--muted);white-space:nowrap">—</span>
+        </div>
+        <div id="wa-qr-wrap" style="display:none;padding:6px 0 10px;text-align:center">
+          <img id="wa-qr" alt="WhatsApp link QR code" style="width:220px;height:220px;background:#fff;border-radius:8px;padding:6px">
+          <div style="font-size:11px;color:var(--muted);margin-top:6px">On your phone: WhatsApp → Settings → Linked devices → Link a device, then scan this code.</div>
+        </div>
+        <div class="settings-row">
+          <label for="wa-allowed">Also accept messages from
+            <small>Optional. Phone numbers with country code, comma-separated (e.g. 919812345678). Use this when RAPR is linked to a spare number and you message it from your own.</small>
+          </label>
+          <input class="settings-input wide" type="text" id="wa-allowed" placeholder="919812345678" autocomplete="off">
+        </div>
+        <div style="padding:8px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="settings-save-btn" id="wa-connect-btn" onclick="waConnect()" style="font-size:11px;padding:4px 12px">Link WhatsApp</button>
+          <button class="settings-save-btn" id="wa-unlink-btn" onclick="waUnlink()" style="font-size:11px;padding:4px 12px" hidden>Unlink</button>
+          <button class="settings-save-btn" onclick="waSaveAllowed()" style="font-size:11px;padding:4px 12px">Save numbers</button>
+          <span id="wa-msg" style="font-size:11px;color:var(--accent)"></span>
+        </div>
+      </div>
+
       <div class="settings-section">
         <div class="settings-section-title">Custom Instructions
           <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:9px">(applied to all AIs)</span>
@@ -1380,7 +1431,7 @@ Example:
 .agent-slider-wrapper.open {
   visibility: visible;
 }
-#agent-builder-overlay, #agent-run-overlay, #council-overlay {
+#agent-builder-overlay, #agent-run-overlay, #council-overlay, #group-overlay {
   display:flex; position:absolute; top:12px; right:12px; bottom:12px;
   width: min(1500px, calc(100% - 64px));
   background:var(--bg-deep); flex-direction:column;
@@ -1394,7 +1445,8 @@ Example:
 }
 .agent-slider-wrapper.open #agent-builder-overlay,
 .agent-slider-wrapper.open #agent-run-overlay,
-.agent-slider-wrapper.open #council-overlay {
+.agent-slider-wrapper.open #council-overlay,
+.agent-slider-wrapper.open #group-overlay {
   transform: translateX(0);
 }
 #agent-toolbar {
@@ -1507,14 +1559,33 @@ Example:
   </div>
 </div>
 
-<script src="/js/kelvin.js?v=3"></script>
-<script src="/js/complete.js?v=9"></script>
+<!-- --- Group Chats Overlay --- -->
+<div id="group-wrapper" class="agent-slider-wrapper" aria-label="Group Chats">
+  <div id="group-overlay" role="dialog" aria-labelledby="group-overlay-title" style="display:flex;flex-direction:column;height:100%;background:var(--bg-surface,#1e1e2e);overflow:hidden">
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid oklch(24% 0.01 264);flex-shrink:0;background:var(--bg-surface,#1e1e2e)">
+      <button onclick="closeGroupSection()" style="background:none;border:none;color:var(--text-dim,#888);font-size:16px;cursor:pointer;padding:0 4px;line-height:1;opacity:0.6" aria-label="Close group chats">&#8592;</button>
+      <span id="group-overlay-title" style="font-size:12px;font-weight:700;color:var(--text-main,#eee);letter-spacing:-0.01em">Group Chats</span>
+      <span style="font-size:11px;color:var(--text-dim,#888)">Several AIs, one conversation</span>
+      <div style="flex:1"></div>
+      <button onclick="openGroupModal(null)" style="background:oklch(21% 0.01 264);border:1px solid oklch(30% 0.01 264);color:oklch(56% 0.008 264);font-size:11px;padding:4px 10px;border-radius:5px;cursor:pointer;font-weight:600" title="New group chat">+ New</button>
+    </div>
+    <div class="group-layout">
+      <div class="group-sidebar"><div id="group-list" role="list"></div></div>
+      <div id="group-conversation"></div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/kelvin.js?v=4"></script>
+<script src="/js/complete.js?v=12"></script>
 <script src="/js/packages.js?v=4"></script>
 <script src="/js/memory.js?v=2"></script>
 <script src="/js/custom_ai.js?v=3"></script>
 <script src="/js/backup.js?v=2"></script>
 <script src="/js/agents.js?v=12"></script>
 <script src="/js/council.js?v=10"></script>
+<script src="/js/groupchat.js?v=3"></script>
+<script src="/js/whatsapp.js?v=2"></script>
 <script src="/js/demos.js?v=2"></script>
 <script>
 // Register PWA service worker

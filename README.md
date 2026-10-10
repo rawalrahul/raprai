@@ -19,6 +19,8 @@ Telegram App (your phone)        ←── Bot API  ────┘             
 
 - **Multi-session** — run Claude Code, Gemini, Codex, Ollama, custom AIs, and a raw shell at the same time, each with its own directory and history
 - **Focused session** — Telegram always routes to the session you last tapped. Switch focus with one button tap
+- **Group chats** — put several AIs (Claude, Gemini, Codex, Ollama, …) in one conversation. Ask once and they all answer, reading and building on each other's replies; `@mention` a member to choose who answers, and any member can pull another in with an @mention. Works from the web UI, Telegram (`/group`) and WhatsApp
+- **WhatsApp control** — link RAPR to WhatsApp by scanning a QR code (free, no Business API) and talk to your sessions and group chats from your "Message yourself" chat
 - **Web UI** — chat bubbles, session picker chip, directory bar, per-session badges, thinking indicator
 - **Full sync** — web messages forwarded to Telegram, Telegram messages shown in browser, both always in sync
 - **File auto-send** — any AI-generated file (PDF, image, video, code) sent to Telegram as a proper attachment the moment it's created
@@ -55,6 +57,8 @@ Telegram App (your phone)        ←── Bot API  ────┘             
    Copy it — you'll need it in Step 3.
 
 6. *(Optional)* Give your bot Kelvin's face: send `/setuserpic` to **@BotFather**, pick your bot, and upload `frontend2/assets/kelvin/avatar.png`.
+
+> **Desktop Kelvin.** On Windows a small Kelvin sits on your desktop. Drag him anywhere, scroll the mouse wheel over him to resize (small, medium, large), hover and click ✕ to hide him, or right-click for *Hide for 1 hour* and *Show → Only while AI works* (he then appears only when an AI is working or needs your approval). The same choices are in the tray menu (**Kelvin on desktop**) and **Settings → Personalization**.
 
 > **Kelvin stickers.** Kelvin, the RAPR AI penguin, can also send a sticker when a long task or pipeline finishes, when a run fails, and alongside approval requests. It's off by default: turn on **Settings → Personalization → Kelvin stickers on Telegram**.
 
@@ -232,6 +236,17 @@ Tap **➕ New Session** → pick an AI.
 | `/stop_ai` | Removes the AI from the focused session (keeps terminal running as shell) |
 | `/clear` | Clears the Claude conversation history for the focused session |
 
+**Group chats**
+
+| Command | What it does |
+|---------|-------------|
+| `/group` | Lists your group chats as buttons; tap one to enter it, or ➕ New group to tick AI sessions and create one |
+| `/group <number>` | Enters that group: your messages (typed or voice) now go to every member, and each reply comes back signed by the AI that wrote it |
+| `/group new <name>: 1 3` | Creates a group from AI sessions 1 and 3 (`/group new` lists them) |
+| `/group who` / `/group stop` / `/group leave` | Members, stop the replies in progress, back to a single session (tapping a session also leaves) |
+
+Inside a group, start a message with `@Name` (or `@all`) to choose who answers.
+
 **Directory control**
 
 | Command | What it does |
@@ -299,6 +314,38 @@ The real power is running sessions in parallel. A typical multi-session workflow
 ```
 
 Each session's files, CWD, and conversation history are completely independent. Stopping one never affects another.
+
+---
+
+## Group chats
+
+Open **👥 Group Chats** in the header (or the sidebar section), pick any of your open AI sessions, and chat with all of them at once.
+
+- Each message gets up to 3 rounds and 10 replies. Members answer one at a time and see the whole conversation, so they build on each other instead of repeating.
+- `@Name` (full name, name without spaces, or first word) or `@all` picks who answers; a member can pull another in the same way. A member with nothing to add replies `(pass)` and stays quiet.
+- A new message or **Stop** ends the replies in progress. Groups are saved, and a member keeps answering from its saved AI/model/folder even after its session is closed.
+- The same group can be used from the web UI, Telegram and WhatsApp at once; every app that's in the group sees every message.
+- Kelvin shows a crew for the group while it answers: one Kelvin per member in its AI's beanie, working, done or waiting. It also counts as work for the tray, keep-awake, `/kelvin` and the "done" sticker.
+
+---
+
+## WhatsApp
+
+Free WhatsApp control through [neonize](https://github.com/krypton-byte/neonize) (whatsmeow): RAPR joins your WhatsApp as a linked device, the same way WhatsApp Web does. No Meta developer account, no per-message fees.
+
+1. **Settings → WhatsApp → Link WhatsApp**.
+2. On your phone: WhatsApp → Settings → **Linked devices** → **Link a device**, and scan the QR code.
+3. Open your **"Message yourself"** chat and type. Your message goes to the focused session (or the group chat you're in) and the reply comes back there.
+
+| Message | What it does |
+|---------|-------------|
+| any text | Sent to the focused session, or to your group chat |
+| `/sessions`, `/use 2` | List sessions, switch to session 2 |
+| `/new claude` | Start a session (any AI: `gemini`, `codex`, `ollama`, …) |
+| `/group …` | Group chats, same commands as on Telegram |
+| `/status`, `/help` | What's running; the command list |
+
+RAPR only acts on your "Message yourself" chat and on numbers you add under **Also accept messages from** (for when RAPR is linked to a spare number). Chats with other people, groups and statuses are ignored. **Unlink** in Settings, or removing the device on your phone, disconnects it. WhatsApp's terms don't cover unofficial clients, so a dedicated or spare number is the safest choice.
 
 ---
 

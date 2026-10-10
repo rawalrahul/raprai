@@ -77,6 +77,8 @@ RAPR AI has **no hard prerequisites** — it will run on its own. However, certa
 All configuration is stored in a `.env` file that RAPR AI creates automatically on first launch. You can configure everything through the web UI:
 
 - **Settings panel** — API keys, model selection, Telegram bot token
+- **Settings → WhatsApp** — link RAPR to WhatsApp by scanning a QR code, then talk to it from your "Message yourself" chat
+- **👥 Group Chats** (header button) — put several AIs in one chat; also from Telegram with `/group`
 - **Setup Wizard** — runs automatically on first launch to walk you through initial setup
 - **PIN protection** — optional login PIN to secure the web UI
 

@@ -33,6 +33,9 @@ from .commands import (
     _update_env,
 )
 
+# Group chats
+from .groups import tg_group, group_callback
+
 # Callbacks (inline keyboard callbacks)
 from .callbacks import action_callback, pipeline_callback, approval_callback, agent_callback
 

@@ -45,7 +45,7 @@ def next_schedule(now: Optional[float] = None) -> Optional[tuple]:
 def kelvin_report(now: Optional[float] = None) -> str:
     from helm.kelvin_status import status
     from helm import keep_awake
-    from helm.desktop_kelvin import pet_enabled
+    from helm.desktop_kelvin import pet_mode, pet_size, MODE_LABELS
 
     now = now or time.time()
     c = status.counts()
@@ -58,6 +58,8 @@ def kelvin_report(now: Optional[float] = None) -> str:
     work = []
     if c["busy"]:
         work.append(f"{c['busy']} session{'s' if c['busy'] != 1 else ''} working")
+    if c.get("groups"):
+        work.append(f"{c['groups']} group chat{'s' if c['groups'] != 1 else ''} answering")
     if c["pipelines"]:
         work.append(f"{c['pipelines']} pipeline{'s' if c['pipelines'] != 1 else ''} running")
     lines.append("⚙️ " + (", ".join(work) if work else "Nothing running right now."))
@@ -71,7 +73,9 @@ def kelvin_report(now: Optional[float] = None) -> str:
         lines.append("⏰ No schedules set.")
 
     lines.append(f"☕ {keep_awake.describe()}")
-    lines.append(f"🖥️ Desktop Kelvin: {'shown' if pet_enabled() else 'hidden'}")
+    mode = pet_mode()
+    pet = "hidden" if mode == "off" else f"{MODE_LABELS[mode].lower()}, {pet_size()}"
+    lines.append(f"🖥️ Desktop Kelvin: {pet}")
     return "\n".join(lines)
 
 
