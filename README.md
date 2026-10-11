@@ -57,8 +57,12 @@ Install the tools you want, and RAPR finds them. **Settings → AI Integrations*
 
 ## Install
 
-**Windows:** download the installer from [raprai.com](https://raprai.com) or the [latest release](https://github.com/rawalrahul/rapr-releases/releases/latest), run it, and follow the setup page that opens.
-> Windows SmartScreen may warn because the installer isn't code-signed yet: click **More info → Run anyway**.
+**Windows:** in PowerShell, run
+```powershell
+irm https://raw.githubusercontent.com/rawalrahul/raprai/main/scripts/install-windows.ps1 | iex
+```
+This adds **RAPR AI** to your Start menu and desktop and a `rapr` command, and always installs the latest version.
+Prefer a classic installer? Download it from [raprai.com](https://raprai.com) or the [latest release](https://github.com/rawalrahul/rapr-releases/releases/latest). Windows SmartScreen may warn because it isn't code-signed yet: click **More info → Run anyway**.
 
 **macOS:**
 ```bash
