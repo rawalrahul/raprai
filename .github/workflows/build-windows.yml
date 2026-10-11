@@ -32,12 +32,12 @@ jobs:
         shell: cmd
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # 3.12: newest Python that Nuitka and fastembed/onnxruntime wheels all support,
       # so semantic memory is bundled. This is the configuration that built and
       # published successfully (~2.5 h); the 3.13 / no-LTO variant timed out.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           cache: pip
@@ -108,7 +108,7 @@ jobs:
           if ($wa.status -eq 'qr') { 'Smoke test passed: WhatsApp produced a link QR code.' }
           else { Write-Output "::warning title=WhatsApp::No QR within 60s (status $($wa.status)). The library loaded; the runner may not reach WhatsApp." }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: RAPR_AI_Setup
           path: installer_output/RAPR_AI_Setup.exe
