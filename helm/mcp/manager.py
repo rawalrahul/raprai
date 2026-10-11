@@ -599,17 +599,26 @@ class MCPManager:
             #
             #               [mcp_servers.NAME.env]
             #               KEY = "val"
+            # Strings and keys are escaped: a Windows path like "C:\Users\…" written
+            # as-is is an invalid TOML escape, and then Codex can't load its config.
+            def _s(v) -> str:
+                return json.dumps(str(v), ensure_ascii=False)   # JSON escapes are valid TOML
+
+            def _k(k) -> str:
+                k = str(k)
+                return k if k and all(c.isascii() and (c.isalnum() or c in "_-") for c in k) else _s(k)
+
             mcp_lines: list[str] = []
             for sid, srv in servers.items():
-                mcp_lines.append(f"\n[mcp_servers.{sid}]")
-                mcp_lines.append(f'command = "{srv["command"]}"')
+                mcp_lines.append(f"\n[mcp_servers.{_k(sid)}]")
+                mcp_lines.append(f'command = {_s(srv["command"])}')
                 if srv.get("args"):
-                    args_str = ", ".join(f'"{a}"' for a in srv["args"])
+                    args_str = ", ".join(_s(a) for a in srv["args"])
                     mcp_lines.append(f"args = [{args_str}]")
                 if srv.get("env"):
-                    mcp_lines.append(f"\n[mcp_servers.{sid}.env]")
+                    mcp_lines.append(f"\n[mcp_servers.{_k(sid)}.env]")
                     for k, v in srv["env"].items():
-                        mcp_lines.append(f'{k} = "{v}"')
+                        mcp_lines.append(f'{_k(k)} = {_s(v)}')
                 mcp_lines.append("")
 
             with open(codex_path, "w", encoding="utf-8") as f:

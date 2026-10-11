@@ -143,3 +143,30 @@ def test_skill_is_picked_from_the_users_words_not_the_safety_rule():
     out = sk.inject_skill_prefix(_SAFETY_PREAMBLE + "organize files in my downloads folder",
                                  ai="codex", match_text="organize files in my downloads folder")
     assert "HQ SKILL: file-organizer" in out
+
+
+def test_codex_config_stays_valid_toml_with_windows_paths(tmp_path, monkeypatch):
+    """RAPR copies MCP servers into ~/.codex/config.toml. Unescaped Windows paths
+    ("C:\\Users\\…") made the file invalid, which breaks Codex itself."""
+    import tomllib
+    from helm.mcp.manager import MCPManager
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    (tmp_path / ".codex").mkdir()
+    cfg = tmp_path / ".codex" / "config.toml"
+    cfg.write_text('model = "gpt-6-sol"\n')
+    m = MCPManager()
+    servers = {"fs": {"command": r"C:\Users\me\AppData\Roaming\npm\npx.cmd",
+                      "args": ["-y", r"C:\Users\me\Desktop"],
+                      "env": {"TOKEN": 'a"b\\c', "ODD KEY": "x"}},
+               "my.server": {"command": "uvx"}}
+    monkeypatch.setattr(m, "_get_subprocess_servers", lambda: servers)
+    m.sync_native_mcp_configs()
+    m.sync_native_mcp_configs()                        # a second sync replaces, not duplicates
+    data = tomllib.loads(cfg.read_text(encoding="utf-8"))
+    assert data["model"] == "gpt-6-sol"
+    fs = data["mcp_servers"]["fs"]
+    assert fs["command"] == r"C:\Users\me\AppData\Roaming\npm\npx.cmd"
+    assert fs["args"] == ["-y", r"C:\Users\me\Desktop"]
+    assert fs["env"] == {"TOKEN": 'a"b\\c', "ODD KEY": "x"}
+    assert data["mcp_servers"]["my.server"]["command"] == "uvx"
