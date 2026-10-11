@@ -151,6 +151,13 @@ APP = $AppDirPy
 DATA = $DataDirPy
 os.environ['RAPR_DATA_DIR'] = DATA
 os.environ['RAPR_INSTALL_KIND'] = 'source-windows'
+# pythonw.exe (no console window) gives Python no stdout/stderr, and uvicorn's
+# logging calls sys.stdout.isatty() at startup. Send them to a log file instead.
+if sys.stdout is None or sys.stderr is None:
+    os.makedirs(os.path.join(DATA, 'logs'), exist_ok=True)
+    _out = open(os.path.join(DATA, 'logs', 'console.log'), 'a', encoding='utf-8', buffering=1)
+    sys.stdout = sys.stdout or _out
+    sys.stderr = sys.stderr or _out
 try:
     port = open(os.path.join(DATA, 'web_port'), encoding='utf-8').read().strip()
     urllib.request.urlopen('http://127.0.0.1:%s/health' % port, timeout=2)
@@ -181,7 +188,7 @@ switch (`$cmd) {
   'open'   { Start-Process "http://localhost:`$(Get-Port)" }
   'stop'   { `$p = Get-Rapr; if (`$p) { foreach (`$x in `$p) { taskkill /PID `$x.ProcessId /T /F | Out-Null }; 'RAPR stopped.' } else { 'RAPR is not running.' } }
   'status' { if (Get-Rapr) { "RAPR is running at http://localhost:`$(Get-Port)" } else { 'RAPR is not running. Start it with: rapr start (or the RAPR AI shortcut)'; `$global:LASTEXITCODE = 1 } }
-  'logs'   { `$l = "`$DataDir\logs\helm.log"; if (Test-Path `$l) { Get-Content `$l -Tail 120 } else { "No log yet (`$l)." } }
+  'logs'   { foreach (`$l in @("`$DataDir\logs\helm.log", "`$DataDir\logs\console.log")) { if (Test-Path `$l) { "== `$l"; Get-Content `$l -Tail 80 } } }
   'update' { irm https://raw.githubusercontent.com/rawalrahul/raprai/main/scripts/install-windows.ps1 | iex }
   'uninstall' {
     `$a = Read-Host "Remove RAPR from this PC? Your chats and settings stay unless you type 'all' [yes/all/N]"

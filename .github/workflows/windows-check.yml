@@ -86,4 +86,6 @@ jobs:
       - name: Log on failure
         if: failure()
         shell: powershell
-        run: Get-Content (Join-Path $env:LOCALAPPDATA 'RAPR AI\logs\helm.log') -Tail 150 -ErrorAction SilentlyContinue
+        run: |
+          Get-Content (Join-Path $env:LOCALAPPDATA 'RAPR AI\logs\console.log') -Tail 80 -ErrorAction SilentlyContinue
+          Get-Content (Join-Path $env:LOCALAPPDATA 'RAPR AI\logs\helm.log') -Tail 150 -ErrorAction SilentlyContinue
