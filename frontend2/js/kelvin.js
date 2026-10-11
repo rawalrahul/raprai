@@ -73,7 +73,8 @@
       ribs += '<line x1="' + x + '" y1="-117" x2="' + x + '" y2="-108" stroke="' + hat[2] + '" stroke-width="2" stroke-linecap="round"/>';
     }
     return '' +
-      '<ellipse cx="-24" cy="-3" rx="14" ry="6" fill="' + C.amber + '"/><ellipse cx="24" cy="-3" rx="14" ry="6" fill="' + C.amber + '"/>' +
+      '<g data-foot="L"><ellipse cx="-24" cy="-3" rx="14" ry="6" fill="' + C.amber + '"/></g>' +
+      '<g data-foot="R"><ellipse cx="24" cy="-3" rx="14" ry="6" fill="' + C.amber + '"/></g>' +
       '<g data-perk data-px="-54" data-py="-74" data-amt="-30"><ellipse cx="-61" cy="-56" rx="11" ry="25" transform="rotate(22 -61 -56)" fill="' + C.wing + '"/></g>' +
       '<g data-perk data-px="54" data-py="-74" data-amt="30"><ellipse cx="61" cy="-56" rx="11" ry="25" transform="rotate(-22 61 -56)" fill="' + C.wing + '"/></g>' +
       '<ellipse cx="0" cy="-63" rx="63" ry="63" fill="' + C.navy + '" stroke="' + C.navyLine + '" stroke-width="2.5"/>' +
@@ -124,10 +125,102 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Scenes: props for the big Kelvins (greeting, Desktop Kelvin). Each mood has
+  // three; the small Kelvins (header, group chats) keep simple moves instead.
+  // Every animation cycles in 1.2 s (or a divisor) so Desktop Kelvin's strips loop.
+  // ---------------------------------------------------------------------------
+
+  var SCENES = {
+    working:  ['laptop', 'run', 'hammer'],
+    thinking: ['bubble', 'bulb', 'pace'],
+    done:     ['jump', 'cloud', 'party'],
+    idle:     ['breathe', 'relax', 'shades'],
+  };
+  // Scenes that bring their own props hide the mood's usual overlay (gear, thought dots).
+  var OWN_OVERLAY = { laptop: 1, run: 1, hammer: 1, bulb: 1, pace: 1 };
+
+  function prop(name, inner) { return '<g data-prop="' + name + '" class="kv-prop" display="none">' + inner + '</g>'; }
+
+  /** Props behind Kelvin, on the ground. */
+  function propsBack() {
+    return prop('run',
+        '<g stroke="#cfd6e2" stroke-width="3" stroke-linecap="round" opacity=".75">' +
+          '<line class="kv-speed" x1="-70" y1="-128" x2="-96" y2="-128"/>' +
+          '<line class="kv-speed kv-s2" x1="-74" y1="-92" x2="-98" y2="-92"/>' +
+          '<line class="kv-speed kv-s3" x1="-70" y1="-52" x2="-94" y2="-52"/></g>' +
+        '<circle class="kv-dust" cx="-34" cy="-5" r="6" fill="#cfc6b8"/>' +
+        '<circle class="kv-dust kv-s2" cx="-46" cy="-9" r="4" fill="#cfc6b8"/>') +
+      prop('relax',
+        '<rect x="-96" y="-9" width="192" height="13" rx="4" fill="#5b9cf5"/>' +
+        '<rect x="-96" y="-5" width="192" height="4" fill="' + C.cream + '" opacity=".85"/>' +
+        '<g transform="translate(-78 -164)"><g class="kv-sun">' +
+          [0, 45, 90, 135].map(function (a) {
+            return '<rect x="-2" y="-19" width="4" height="38" rx="2" fill="#ffd34d" transform="rotate(' + a + ')"/>';
+          }).join('') + '</g><circle r="10" fill="#ffd34d"/></g>');
+  }
+
+  /** Props in front of Kelvin. */
+  function propsFront() {
+    var confetti = '', cols = [C.amber, '#6aa6f8', '#4fd1a1', C.blush, '#b993f5'];
+    for (var i = 0; i < 10; i++) {
+      confetti += '<rect class="kv-fall" style="animation-delay:-' + (i * 0.12).toFixed(2) + 's" x="' + (-90 + i * 19) +
+        '" y="-190" width="6" height="10" rx="1.5" fill="' + cols[i % cols.length] + '"/>';
+    }
+    var code = function (x, txt, cls) {
+      return '<text class="kv-code ' + cls + '" x="' + x + '" y="-62" font-size="12" font-weight="700" fill="#8fd0ff" text-anchor="middle" font-family="monospace">' + txt + '</text>';
+    };
+    return prop('laptop',
+        code(-24, '&lt;/&gt;', '') + code(4, '{ }', 'kv-c2') + code(28, '01', 'kv-c3') +
+        '<rect x="-48" y="-13" width="96" height="10" rx="3" fill="#9aa3b2"/>' +
+        '<path d="M-41 -13 L-35 -58 L35 -58 L41 -13 Z" fill="#cdd4df" stroke="#8e97a6" stroke-width="2" stroke-linejoin="round"/>' +
+        '<path d="M-35 -58 L35 -58" stroke="#8fd0ff" stroke-width="2.5"/>' +
+        '<ellipse cx="-3" cy="-36" rx="9" ry="6" fill="' + C.amber + '"/><path d="M5 -36 l8 -6 v12 Z" fill="' + C.amber + '"/>' +
+        '<circle cx="-7" cy="-37" r="1.6" fill="' + C.ink + '"/>') +
+      prop('hammer',
+        '<rect x="68" y="-34" width="26" height="13" rx="2" fill="#c0603a"/><rect x="68" y="-20" width="26" height="13" rx="2" fill="#a64f2f"/>' +
+        '<g data-bang><path d="' + star(80, -46, 8) + '" fill="#ffd34d"/><path d="' + star(94, -52, 5) + '" fill="#ffd34d"/>' +
+          '<text x="62" y="-122" font-size="15" font-weight="900" fill="#ffd34d" text-anchor="middle">BANG!</text></g>') +
+      prop('pace',
+        '<text class="kv-q" x="-80" y="-148" font-size="24" font-weight="800" fill="' + C.cream + '">?</text>' +
+        '<text class="kv-q kv-c2" x="74" y="-124" font-size="18" font-weight="800" fill="' + C.cream + '">?</text>') +
+      prop('party', confetti) +
+      prop('shades',
+        '<text class="kv-note" x="-84" y="-118" font-size="20" fill="' + C.cream + '">\u266A</text>' +
+        '<text class="kv-note kv-c2" x="70" y="-140" font-size="18" fill="' + C.cream + '">\u266B</text>') +
+      prop('relax',
+        '<text class="kv-note" x="30" y="-150" font-size="15" font-weight="700" fill="' + C.cream + '">ahh~</text>');
+  }
+
+  /** Props that move with Kelvin: behind the body (cloud) and in front of it. */
+  function propsRigBack() {
+    return prop('cloud',
+      '<g fill="#eef3fb"><circle cx="-34" cy="4" r="14"/><circle cx="-12" cy="-2" r="18"/><circle cx="14" cy="-1" r="17"/>' +
+      '<circle cx="36" cy="5" r="13"/><rect x="-48" y="2" width="96" height="16" rx="8"/></g>' +
+      '<text x="0" y="15" text-anchor="middle" font-size="14" font-weight="900" fill="#5b9cf5">9</text>');
+  }
+  function propsRigFront() {
+    return prop('hammer',
+        '<g data-hammer><rect x="45" y="-95" width="6" height="37" rx="3" fill="#8b5a2b"/>' +
+        '<rect x="36" y="-106" width="24" height="13" rx="3" fill="#9aa3b2" stroke="#6b7280" stroke-width="1.5"/></g>') +
+      prop('bulb',
+        '<circle class="kv-bulb" cx="74" cy="-160" r="21" fill="#ffd34d"/>' +
+        '<circle cx="74" cy="-160" r="11" fill="#fff3b0" stroke="#e0b030" stroke-width="2"/>' +
+        '<rect x="69" y="-150" width="10" height="7" rx="2" fill="#9aa3b2"/>' +
+        '<text class="kv-q" x="-80" y="-140" font-size="22" font-weight="800" fill="' + C.cream + '">?</text>') +
+      prop('shades',
+        '<rect x="-34" y="-98" width="28" height="18" rx="7" fill="#111"/><rect x="6" y="-98" width="28" height="18" rx="7" fill="#111"/>' +
+        '<path d="M-6 -91 h12" stroke="#111" stroke-width="3"/>' +
+        '<path d="M-29 -94 l7 0 M11 -94 l7 0" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity=".7"/>' +
+        '<rect x="60" y="-54" width="17" height="21" rx="3" fill="' + C.cream + '"/>' +
+        '<path d="M77 -48 q8 0 8 6 q0 6 -8 6" stroke="' + C.cream + '" stroke-width="3" fill="none"/>' +
+        '<path class="kv-note" d="M64 -60 q-3 -6 0 -10 M71 -60 q3 -6 0 -10" stroke="#cfd6e2" stroke-width="2" fill="none"/>');
+  }
+
+  // ---------------------------------------------------------------------------
   // Rig + shared animation loop
   // ---------------------------------------------------------------------------
 
-  var KEYS = ['hop', 'stretch', 'tilt', 'open', 'happy', 'slant', 'mOpen', 'perk', 'gx', 'gy', 'eyeScale'];
+  var KEYS = ['hop', 'stretch', 'tilt', 'open', 'happy', 'slant', 'mOpen', 'perk', 'gx', 'gy', 'eyeScale', 'dx', 'dy'];
   var instances = [];
   var uid = 0;
   var pointer = [0, 0, false];
@@ -144,8 +237,9 @@
     var withOv = opts.overlays !== false;
     host.innerHTML =
       '<svg viewBox="' + (opts.viewBox || (withOv ? '-100 -190 200 212' : '-76 -170 152 174')) + '" class="kelvin-svg" role="img" aria-label="' + (opts.label || 'Kelvin, the RAPR AI penguin') + '" overflow="visible">' +
-      (withOv ? '<ellipse data-shadow cx="0" cy="2" rx="52" ry="7" fill="#000" opacity=".25"/>' : '') +
-      '<g data-rig>' + body(id, hatFor(opts.ai)) + '</g>' + (withOv ? overlays() : '') + '</svg>';
+      (withOv ? '<ellipse data-shadow cx="0" cy="2" rx="52" ry="7" fill="#000" opacity=".25"/>' + propsBack() : '') +
+      '<g data-rig>' + (withOv ? propsRigBack() : '') + body(id, hatFor(opts.ai)) + (withOv ? propsRigFront() : '') + '</g>' +
+      (withOv ? propsFront() + overlays() : '') + '</svg>';
     var svg = host.firstChild;
     var q = function (s) { return Array.prototype.slice.call(svg.querySelectorAll(s)); };
     var inst = {
@@ -165,6 +259,8 @@
         return { g: g, px: +g.getAttribute('data-px'), py: +g.getAttribute('data-py'), amt: +g.getAttribute('data-amt') };
       }),
       ovs: q('[data-ov]'),
+      props: q('[data-prop]'), feet: q('[data-foot]'), hammer: svg.querySelector('[data-hammer]'), bang: svg.querySelector('[data-bang]'),
+      big: withOv, scene: null,   // only the big Kelvins act out scenes with props
       track: opts.track !== false,
       sp: {},
     };
@@ -198,8 +294,48 @@
     }
     var mv = inst.variant;
     var poked = now - inst.poke < 700;
-    var T = { hop: 0, stretch: 0, tilt: P.tilt, open: P.open, happy: P.happy, slant: P.slant, mOpen: P.mOpen, perk: P.perk, eyeScale: P.eyeScale, gx: 0, gy: 0 };
-    if (!calm) {
+    var T = { hop: 0, stretch: 0, tilt: P.tilt, open: P.open, happy: P.happy, slant: P.slant, mOpen: P.mOpen, perk: P.perk, eyeScale: P.eyeScale, gx: 0, gy: 0, dx: 0, dy: 0 };
+    var scene = inst.big && SCENES[st] ? SCENES[st][mv % SCENES[st].length] : null;
+    var sceneGaze = null, hammerAt = 10, bangOn = false, feetL = 0, feetR = 0;
+    if (scene === 'laptop') {                 // typing away on a laptop
+      sceneGaze = [0, 0.85]; T.slant = 0.25; T.open = 0.85;
+      if (!calm) { T.perk = 0.25 + Math.sin(t * W * 4) * 0.45; T.hop = -Math.abs(Math.sin(t * W * 2)) * 1; }
+    } else if (scene === 'run') {             // running flat out
+      T.tilt = 8; T.slant = 0.3; T.mOpen = 0.25; sceneGaze = [0.9, 0];
+      if (!calm) {
+        var r = Math.sin(t * W * 2);
+        T.hop = -Math.abs(r) * 7; T.stretch = Math.sin(t * W * 4) * 0.03; T.perk = r * 1.2;
+        feetL = -Math.max(0, r) * 9; feetR = -Math.max(0, -r) * 9;
+      }
+    } else if (scene === 'hammer') {          // building it, one brick at a time
+      T.slant = 0.3; sceneGaze = [0.7, 0.4];
+      if (!calm) {
+        var hp = (t / 0.6) % 1;               // strike, lift slowly, strike again
+        hammerAt = hp < 0.6 ? 120 - (hp / 0.6) * 110 : 10 + Math.pow((hp - 0.6) / 0.4, 2) * 110;
+        bangOn = hp < 0.18;
+        T.hop = hp < 0.1 ? -3 : 0;
+      }
+    } else if (scene === 'bulb') {            // lightbulb moment
+      T.tilt = -6; sceneGaze = [0.8, -0.9]; T.perk = 0.4;
+      if (!calm) T.tilt = -6 + Math.sin(t * W) * 2;
+    } else if (scene === 'pace') {            // pacing back and forth
+      sceneGaze = [0, -0.4];
+      if (!calm) { T.dx = Math.sin(t * W) * 22; T.tilt = Math.cos(t * W) * 5; T.hop = -Math.abs(Math.sin(t * W * 2)) * 2; }
+    } else if (scene === 'cloud') {           // on cloud 9
+      T.dy = -18; T.happy = 1; T.perk = 0.9; T.mOpen = 0.5;
+      if (!calm) { T.dy = -18 + Math.sin(t * W) * 4; T.tilt = Math.sin(t * W) * 3; }
+    } else if (scene === 'party') {           // confetti party
+      T.happy = 1; T.mOpen = 0.7;
+      if (!calm) { T.tilt = Math.sin(t * W * 2) * 9; T.perk = 0.6 + Math.sin(t * W * 2) * 0.6; T.hop = -Math.abs(Math.sin(t * W)) * 5; }
+    } else if (scene === 'relax') {           // lying on a beach towel in the sun
+      T.tilt = -90; T.dx = 85; T.dy = -66; T.open = 0.35; T.happy = 0.7; sceneGaze = [0.3, -0.2];
+      if (!calm) T.stretch = Math.sin(t * W) * 0.03;
+    } else if (scene === 'shades') {          // sunglasses, coffee and a tune
+      T.happy = 0.5; T.perk = 0.3;
+      if (!calm) { T.tilt = Math.sin(t * W) * 5; T.hop = -Math.abs(Math.sin(t * W * 2)) * 2; }
+    }
+    var acting = scene && scene !== 'bubble' && scene !== 'jump' && scene !== 'breathe';
+    if (!calm && !acting) {
       T.stretch = st === 'sleeping' ? Math.sin(t * 1.6) * 0.035 : Math.sin(t * 2.4) * 0.02;
       if (st === 'working') {
         if (mv === 1) {                      // waddle side to side
@@ -239,7 +375,7 @@
       T.happy = 1; T.mOpen = 0.6; T.perk = 1;
       T.hop = calm ? 0 : -Math.sin((now - inst.poke) / 700 * Math.PI) * 18;
     }
-    var g = P.gaze;
+    var g = sceneGaze || P.gaze;
     if (!g && inst.track && pointer[2]) {
       var b = inst.svg.getBoundingClientRect();
       var dx = (pointer[0] - (b.left + b.width / 2)) / (window.innerWidth * 0.5);
@@ -263,9 +399,19 @@
     });
     var v = function (k) { return sp[k].x; };
 
-    inst.rig.setAttribute('transform', 'translate(0 ' + v('hop').toFixed(2) + ') rotate(' + v('tilt').toFixed(2) + ') scale(' +
+    inst.rig.setAttribute('transform', 'translate(' + v('dx').toFixed(2) + ' ' + (v('hop') + v('dy')).toFixed(2) + ') rotate(' + v('tilt').toFixed(2) + ') scale(' +
       (1 - v('stretch') * 0.6).toFixed(3) + ' ' + (1 + v('stretch')).toFixed(3) + ')');
-    if (inst.shadow) inst.shadow.setAttribute('rx', (52 * (1 + v('hop') / 60)).toFixed(1));
+    if (inst.shadow) inst.shadow.setAttribute('rx', (scene === 'relax' ? 92 : Math.max(12, 52 * (1 + (v('hop') + v('dy')) / 60))).toFixed(1));
+    if (scene !== inst.scene) {
+      inst.scene = scene;
+      inst.props.forEach(function (el) { el.setAttribute('display', el.getAttribute('data-prop') === scene ? 'inline' : 'none'); });
+    }
+    if (inst.feet.length) {
+      inst.feet[0].setAttribute('transform', 'translate(0 ' + feetL.toFixed(2) + ')');
+      inst.feet[1].setAttribute('transform', 'translate(0 ' + feetR.toFixed(2) + ')');
+    }
+    if (inst.hammer) inst.hammer.setAttribute('transform', 'rotate(' + hammerAt.toFixed(1) + ' 48 -60)');
+    if (inst.bang) inst.bang.setAttribute('opacity', bangOn ? '1' : '0');
     var open = Math.max(0, Math.min(1.15, v('open')));
     var happy = Math.max(0, Math.min(1, v('happy')));
     inst.eyes.forEach(function (e) {
@@ -277,7 +423,7 @@
     });
     if (inst.beak) inst.beak.setAttribute('transform', 'translate(0 ' + (Math.max(0, v('mOpen')) * 7).toFixed(2) + ')');
     inst.perks.forEach(function (p) { p.g.setAttribute('transform', 'rotate(' + (v('perk') * p.amt).toFixed(2) + ' ' + p.px + ' ' + p.py + ')'); });
-    inst.ovs.forEach(function (o) { o.setAttribute('opacity', o.getAttribute('data-ov') === st ? '1' : '0'); });
+    inst.ovs.forEach(function (o) { o.setAttribute('opacity', o.getAttribute('data-ov') === st && !OWN_OVERLAY[scene] ? '1' : '0'); });
   }
 
   function frame(now) {
