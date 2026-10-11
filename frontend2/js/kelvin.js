@@ -150,7 +150,10 @@
     var q = function (s) { return Array.prototype.slice.call(svg.querySelectorAll(s)); };
     var inst = {
       host: host, svg: svg, state: opts.state || 'idle', poke: 0,
-      phase: Math.random() * 10, variant: 0,
+      phase: Math.random() * 10,
+      // Each mood has a few moves; a Kelvin switches move every few seconds.
+      // opts.variant pins one move (used to record Desktop Kelvin's strips).
+      variant: opts.variant || 0, pinned: opts.variant !== undefined, variantUntil: 0,
       blinkAt: performance.now() + 1500 + Math.random() * 2500,
       rig: svg.querySelector('[data-rig]'), shadow: svg.querySelector('[data-shadow]'), beak: svg.querySelector('[data-beak]'),
       eyes: q('[data-eye]').map(function (g) {
@@ -177,38 +180,58 @@
       setState: function (s) {
         if (!STATES[s] || s === inst.state) return;
         inst.state = s;
-        inst.variant = Math.floor(Math.random() * 3);   // a different move each time
+        if (!inst.pinned) { inst.variant = Math.floor(Math.random() * MOVES); inst.variantUntil = 0; }
       },
       destroy: function () { instances = instances.filter(function (i) { return i !== inst; }); host.innerHTML = ''; },
     };
   }
 
+  var MOVES = 3;                    // moves per mood (see step)
+  var W = 2 * Math.PI / 1.2;        // one cycle per 1.2 s, so Desktop Kelvin's 16-frame strips loop cleanly
+
   function step(inst, now, dt) {
     var st = inst.state, P = STATES[st], t = now / 1000 + inst.phase, sp = inst.sp, calm = isStill();
+    if (!inst.pinned && now > inst.variantUntil) {
+      // Time for a different move (never the same one twice in a row).
+      if (inst.variantUntil) inst.variant = (inst.variant + 1 + Math.floor(Math.random() * (MOVES - 1))) % MOVES;
+      inst.variantUntil = now + 6000 + Math.random() * 3000;
+    }
+    var mv = inst.variant;
     var poked = now - inst.poke < 700;
     var T = { hop: 0, stretch: 0, tilt: P.tilt, open: P.open, happy: P.happy, slant: P.slant, mOpen: P.mOpen, perk: P.perk, eyeScale: P.eyeScale, gx: 0, gy: 0 };
     if (!calm) {
       T.stretch = st === 'sleeping' ? Math.sin(t * 1.6) * 0.035 : Math.sin(t * 2.4) * 0.02;
       if (st === 'working') {
-        if (inst.variant === 1) {            // waddle side to side
-          T.tilt = Math.sin(t * 5) * 7; T.hop = -Math.abs(Math.sin(t * 5)) * 2;
-        } else if (inst.variant === 2) {     // typing with both flippers
-          T.perk = 0.3 + Math.sin(t * 16) * 0.6; T.hop = -Math.abs(Math.sin(t * 8)) * 1.5;
+        if (mv === 1) {                      // waddle side to side
+          T.tilt = Math.sin(t * W) * 7; T.hop = -Math.abs(Math.sin(t * W)) * 2.5;
+        } else if (mv === 2) {               // typing with both flippers
+          T.perk = 0.2 + Math.sin(t * W * 2) * 1.4; T.hop = -Math.abs(Math.sin(t * W * 2)) * 3; T.tilt = Math.sin(t * W * 2) * 2;
         } else {                             // busy little hops
-          T.hop = -Math.abs(Math.sin(t * 6)) * 3; T.stretch += Math.sin(t * 12) * 0.015;
+          T.hop = -Math.abs(Math.sin(t * W)) * 3.5; T.stretch += Math.sin(t * W * 2) * 0.015;
         }
       }
       if (st === 'done') {
-        if (inst.variant === 1) {            // happy wiggle
-          T.tilt = Math.sin(t * 9) * 9; T.perk = 0.6 + Math.sin(t * 9) * 0.5;
+        if (mv === 1) {                      // happy wiggle
+          T.tilt = Math.sin(t * W * 2) * 9; T.perk = 0.6 + Math.sin(t * W * 2) * 0.5;
+        } else if (mv === 2) {               // flipper cheer
+          T.perk = 0.8 + Math.sin(t * W * 2) * 1.6; T.hop = -Math.abs(Math.sin(t * W)) * 12; T.stretch += Math.sin(t * W * 2) * 0.04;
         } else {                             // jump for joy
-          var ph = (t * 1.25) % 1;
+          var ph = (t / 1.2) % 1;
           T.hop = ph < 0.45 ? -Math.sin(ph / 0.45 * Math.PI) * 16 : 0;
           T.stretch += (ph < 0.06 || (ph > 0.42 && ph < 0.5)) ? -0.08 : 0.02;
-          T.perk = 0.4 + Math.sin(t * 9) * 0.7;
+          T.perk = 0.4 + Math.sin(t * W) * 0.7;
         }
       }
-      if (st === 'thinking' && inst.variant === 1) T.tilt = P.tilt + Math.sin(t * 1.3) * 6;   // ponder, head swaying
+      if (st === 'thinking') {
+        if (mv === 1) T.tilt = P.tilt + Math.sin(t * W) * 6;                    // ponder, head swaying
+        else if (mv === 2) {                                                     // hmm… little bounces
+          T.hop = -Math.abs(Math.sin(t * W)) * 5; T.perk = 0.3 + Math.sin(t * W) * 0.8; T.tilt = P.tilt + 4;
+        }
+      }
+      if (st === 'idle') {
+        if (mv === 1) T.hop = -Math.abs(Math.sin(t * W)) * 3;                   // gentle bob
+        else if (mv === 2) T.tilt = Math.sin(t * W) * 5;                         // easy sway
+      }
       if (st === 'error') T.stretch -= 0.05;
       if (st === 'listening') T.tilt = P.tilt + Math.sin(t * 2) * 1.5;
     }
