@@ -11,6 +11,28 @@ const groupState = {
   loaded: false,
 };
 
+function _renderInlineMarkdown(text) {
+  // Minimal, safe inline Markdown for AI replies: escape first, then convert
+  // bold / italics / inline code / fenced blocks / links on the escaped text.
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  let out = esc(text || '');
+  const codeBlocks = [];
+  out = out.replace(/```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    codeBlocks.push('<pre class="group-msg-code"><code>' + code.replace(/\n$/, '') + '</code></pre>');
+    return '\u0000CODE' + (codeBlocks.length - 1) + '\u0000';
+  });
+  out = out.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  out = out.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+  out = out.replace(/^###\s+(.+)$/gm, '<strong>$1</strong>');
+  out = out.replace(/^##\s+(.+)$/gm, '<strong>$1</strong>');
+  out = out.replace(/^#\s+(.+)$/gm, '<strong>$1</strong>');
+  out = out.replace(/^[-*]\s+(.+)$/gm, '• $1');
+  out = out.replace(/\n/g, '<br>');
+  out = out.replace(/\u0000CODE(\d+)\u0000/g, (_, i) => codeBlocks[Number(i)]);
+  return out;
+}
+
 function _g(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -235,7 +257,11 @@ function _buildGroupMessage(group, m) {
   head.appendChild(_g('span', 'group-msg-time', _gTime(m.timestamp)));
   const bubble = _g('div', 'group-bubble');
   bubble.style.borderLeftColor = color;
-  bubble.appendChild(_mentionText(m.content || '', group));
+  if (m.author_ai) {
+    bubble.innerHTML = _renderInlineMarkdown(m.content || '');
+  } else {
+    bubble.appendChild(_mentionText(m.content || '', group));
+  }
   const copy = _g('button', 'group-msg-copy', 'Copy');
   copy.type = 'button';
   copy.addEventListener('click', () => {
