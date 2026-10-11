@@ -144,8 +144,8 @@ def pet_mood(status, now: Optional[float] = None) -> str:
     mood = status.mood(now)
     if mood == "idle" and status.idle_seconds(now) > SLEEP_AFTER_SECONDS:
         return "sleeping"
-    if mood == "working" and not status.counts()["pipelines"]:
-        return "thinking"   # sessions waiting on their AI; the gear is for running pipelines
+    if mood == "working" and not status.counts()["pipelines"] and not status.acting(now):
+        return "thinking"   # waiting on the AI; the gear is for pipelines and AIs running commands
     return mood
 
 
