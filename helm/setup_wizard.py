@@ -3,7 +3,7 @@ helm/setup_wizard.py — Embedded HTML for the first-run setup wizard.
 
 Flow:
   Step 0 — Welcome & Personalization (name, AI name)
-  Step 1 — Gemini CLI (optional, free)
+  Step 1 — Antigravity CLI (agy; optional, Google's replacement for the Gemini CLI)
   Step 2 — Telegram Bot (optional)
   Step 3 — Claude + Codex + Ollama (optional)
   Step 4 — PIN Protection
@@ -166,28 +166,23 @@ select option{background:var(--surface);color:var(--text)}
       </div>
     </div>
 
-    <!-- ─── STEP 1: Gemini ─── -->
+    <!-- ─── STEP 1: Antigravity ─── -->
     <div class="step" id="step1">
-      <div class="step-title">Gemini <span class="free-tag">FREE</span> <span style="color:var(--muted);font-size:12px;font-weight:400">(optional)</span></div>
+      <div class="step-title">Antigravity <span style="color:var(--muted);font-size:12px;font-weight:400">(optional)</span></div>
       <div class="step-desc">
-        <strong style="color:var(--text)">Google Gemini CLI</strong> is a free AI backend for RAPR AI.
-        No paid subscription required — just install the CLI and sign in with your Gmail account.
+        <strong style="color:var(--text)">Google Antigravity CLI</strong> (<code>agy</code>) gives RAPR AI
+        Google's Gemini models, plus others such as Claude. It replaces the Gemini CLI, which no longer
+        works with personal Google accounts. Install it and sign in with your Google account.
         You can skip this if you're using Claude or another AI instead.
       </div>
 
-      <div id="gemini-badge" class="status-badge checking">⟳ Checking...</div>
-      <div id="gemini-details"></div>
-
-      <div class="field" id="gemini-key-field" style="display:none">
-        <label>GEMINI_API_KEY <span style="color:var(--muted);font-size:11px">(optional fallback)</span></label>
-        <input id="gemini-key-0" type="password" placeholder="AIzaSy..." autocomplete="off">
-        <small>Only needed if you can't use Gemini CLI. Get a key at <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com/app/apikey</a></small>
-      </div>
-      <div id="gemini-msg"></div>
+      <div id="agy-badge" class="status-badge checking">⟳ Checking...</div>
+      <div id="agy-details"></div>
+      <div id="agy-msg"></div>
 
       <div class="btn-row">
         <button class="btn btn-secondary" onclick="goStep(0)">← Back</button>
-        <button class="btn btn-primary" onclick="saveGeminiAndContinue()">Save & Continue →</button>
+        <button class="btn btn-primary" onclick="continueFromAntigravity()">Continue →</button>
         <button class="btn-skip" onclick="goStep(2)">Skip for now</button>
       </div>
     </div>
@@ -222,7 +217,7 @@ select option{background:var(--surface);color:var(--text)}
     <div class="step" id="step3">
       <div class="step-title">More AI Integrations <span style="color:var(--muted);font-size:12px;font-weight:400">(optional)</span></div>
       <div class="step-desc">
-        Add Claude and Codex as extra AI backends alongside Gemini. Both need their own CLI
+        Add Claude and Codex as extra AI backends alongside Antigravity. Both need their own CLI
         tools and credentials. You can skip this entirely and add them later via your <code>.env</code> file.
       </div>
 
@@ -369,8 +364,8 @@ select option{background:var(--surface);color:var(--text)}
 </div><!-- wizard -->
 
 <script>
-let _geminiStatus = {};
-let _saved = {gemini: false, tg: false, claude: false, codex: false, ollama: false};
+let _agyStatus = {};
+let _saved = {agy: false, tg: false, claude: false, codex: false, ollama: false};
 
 // ── Link to raprai.com (Step 6, optional) ─────────────────────
 async function prepareActivation() {
@@ -449,69 +444,51 @@ async function saveWelcome() {
   setTimeout(() => goStep(1), userName ? 600 : 0);
 }
 
-// ── Gemini check ──────────────────────────────────────────────
-async function checkGemini() {
-  const badge   = document.getElementById('gemini-badge');
-  const details = document.getElementById('gemini-details');
+// ── Antigravity check ─────────────────────────────────────────
+async function checkAntigravity() {
+  const badge   = document.getElementById('agy-badge');
+  const details = document.getElementById('agy-details');
   badge.className   = 'status-badge checking';
   badge.textContent = '⟳ Checking...';
   details.innerHTML = '';
 
   try {
-    const r = await fetch('/integrations/gemini/status');
-    _geminiStatus = await r.json();
+    const r = await fetch('/integrations/antigravity/status');
+    _agyStatus = await r.json();
   } catch (e) {
-    _geminiStatus = {ready: false, cli_installed: false, api_key_set: false};
+    _agyStatus = {ready: false};
   }
 
-  const keyField = document.getElementById('gemini-key-field');
-  if (_geminiStatus.cli_installed) {
-    // CLI present = ready; API key is optional (CLI handles its own auth)
+  if (_agyStatus.ready) {
     badge.className   = 'status-badge ok';
-    badge.textContent = '✓ Gemini CLI ready';
-    keyField.style.display = 'none';
-    _saved.gemini = true;
-  } else {
-    badge.className   = 'status-badge err';
-    badge.textContent = '✗ Gemini CLI not found';
-    // Show API key field as fallback only when CLI is missing
-    keyField.style.display = '';
+    badge.textContent = '✓ Antigravity CLI found';
     details.innerHTML = `
       <div class="alert alert-info">
-        Install the Gemini CLI in a separate terminal, then <strong>relaunch RAPR AI</strong> to detect it.
+        If you haven't yet, run <code>agy</code> once in a terminal to sign in with your Google account.
+      </div>`;
+    _saved.agy = true;
+  } else {
+    badge.className   = 'status-badge err';
+    badge.textContent = '✗ Antigravity CLI not found';
+    details.innerHTML = `
+      <div class="alert alert-info">
+        Install the Antigravity CLI from
+        <a href="https://antigravity.google/docs/cli-using" target="_blank">antigravity.google/docs/cli-using</a>,
+        run <code>agy</code> once to sign in, then <strong>relaunch RAPR AI</strong> to detect it.
         You can skip this step for now and come back later.
-      </div>
-      <div style="font-size:12px;color:var(--dim);margin-bottom:6px;font-weight:600">Run in your terminal:</div>
-      <div class="code-block">npm install -g @google/gemini-cli<button class="code-copy" onclick="copyCode(this)">copy</button></div>`;
+      </div>`;
   }
-  return _geminiStatus;
+  return _agyStatus;
 }
 
-async function saveGeminiAndContinue() {
-  const key = document.getElementById('gemini-key-0').value.trim();
-  const msg = document.getElementById('gemini-msg');
+async function continueFromAntigravity() {
+  const msg = document.getElementById('agy-msg');
   msg.innerHTML = '';
-
-  if (key) {
-    try {
-      await apiSave({GEMINI_API_KEY: key});
-    } catch (e) {
-      msg.innerHTML = '<div class="alert alert-warn">⚠ Could not save — check file permissions.</div>';
-      return;
-    }
-  }
-
-  const st = await checkGemini();
-  if (st.cli_installed) {
-    // CLI installed = ready (API key is optional)
-    _saved.gemini = true;
+  const st = await checkAntigravity();
+  if (st.ready) {
     goStep(2);
-  } else if (key) {
-    // Key provided but no CLI yet
-    msg.innerHTML = '<div class="alert alert-warn">⚠ API key saved, but Gemini CLI is not installed. You can install it later.</div>';
-    setTimeout(() => goStep(2), 1200);
   } else {
-    msg.innerHTML = '<div class="alert alert-warn">⚠ Gemini CLI not found — you can skip this and use Claude or another AI instead.</div>';
+    msg.innerHTML = '<div class="alert alert-warn">⚠ Antigravity CLI not found — you can skip this and use Claude or another AI instead.</div>';
     setTimeout(() => goStep(2), 1500);
   }
 }
@@ -628,7 +605,7 @@ function goStep(n) {
   document.querySelectorAll('.step-dot').forEach((d, i) => {
     d.className = 'step-dot' + (i < n ? ' done' : i === n ? ' active' : '');
   });
-  if (n === 1) checkGemini();
+  if (n === 1) checkAntigravity();
   if (n === 3) checkOptionalIntegrations();
   if (n === 4) checkPinStatus();
   if (n === 5) buildSummary();
@@ -679,7 +656,7 @@ async function savePin() {
 async function buildSummary() {
   // Start with whatever was saved during this wizard session
   let pinSet      = false;
-  let geminiReady = _saved.gemini;
+  let agyReady    = _saved.agy;
   let tgReady     = _saved.tg;
   let claudeReady = _saved.claude;
   let codexReady  = _saved.codex;
@@ -696,7 +673,7 @@ async function buildSummary() {
     ]);
     pinSet      = authSt.pin_set;
     if (setupSt.has_bot_token) tgReady     = true;
-    if (setupSt.gemini_ready)  geminiReady = true;
+    if (setupSt.antigravity_ready) agyReady = true;
     if (setupSt.claude_ready)  claudeReady = true;
     if (setupSt.codex_ready)   codexReady  = true;
     if (setupSt.ollama_ready)  ollamaReady = true;
@@ -708,7 +685,7 @@ async function buildSummary() {
     {label: 'Your Name',      ok: !!userName,   note: userName     ? userName                            : 'Not set'},
     {label: 'AI Assistant',    ok: true,         note: aiName},
     {label: 'PIN Protection',  ok: pinSet,       note: pinSet       ? 'Enabled — login required'         : 'Not set (recommended)'},
-    {label: 'Google Gemini',   ok: geminiReady,  note: geminiReady  ? 'CLI ready'                        : 'Not configured (optional)'},
+    {label: 'Antigravity',     ok: agyReady,     note: agyReady     ? 'CLI found'                        : 'Not configured (optional)'},
     {label: 'Telegram Bot',    ok: tgReady,      note: tgReady      ? 'Configured'                       : 'Not set up (optional)'},
     {label: 'Claude',          ok: claudeReady,  note: claudeReady  ? 'CLI installed & authenticated'    : 'Not configured (optional)'},
     {label: 'OpenAI Codex',    ok: codexReady,   note: codexReady   ? 'CLI ready'                        : 'Not configured (optional)'},
@@ -745,7 +722,7 @@ function copyCode(btn) {
     const st = await fetch('/setup/status').then(r => r.json());
     // Pre-populate _saved with anything already in .env so the summary is accurate
     if (st.has_bot_token)  _saved.tg     = true;
-    if (st.gemini_ready)   _saved.gemini = true;
+    if (st.antigravity_ready) _saved.agy = true;
     if (st.claude_ready)   _saved.claude = true;
     if (st.codex_ready)    _saved.codex  = true;
     if (st.ollama_ready)   _saved.ollama = true;
@@ -766,14 +743,14 @@ function copyCode(btn) {
     } catch(e) {}
 
     // .env exists but not activated — check what still needs setup
-    if (st.gemini_ready && st.has_bot_token) {
-      // Both Gemini and Telegram configured — go to summary
+    if (st.antigravity_ready && st.has_bot_token) {
+      // Both Antigravity and Telegram configured — go to summary
       goStep(5);
-    } else if (st.gemini_ready && !st.has_bot_token) {
-      // Gemini OK but no Telegram — jump to Telegram step
+    } else if (st.antigravity_ready && !st.has_bot_token) {
+      // Antigravity OK but no Telegram — jump to Telegram step
       goStep(2);
-    } else if (!st.gemini_ready && st.has_bot_token) {
-      // Telegram OK but no Gemini — show Gemini step
+    } else if (!st.antigravity_ready && st.has_bot_token) {
+      // Telegram OK but no Antigravity — show Antigravity step
       goStep(1);
     } else {
       // Nothing configured — start from welcome

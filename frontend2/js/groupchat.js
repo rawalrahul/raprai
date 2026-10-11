@@ -522,7 +522,7 @@ async function openGroupModal(group) {
     const aiList = _g('div', 'council-modal-sessions');
     aiList.style.maxHeight = '220px';
     if (!ais.length) {
-      const none = _g('div', null, 'No AI is ready yet. Install one (Claude Code, Gemini CLI, Codex, Ollama…) or add it in Settings.');
+      const none = _g('div', null, 'No AI is ready yet. Install one (Claude Code, Antigravity, Codex, Ollama…) or add it in Settings.');
       none.style.cssText = 'color:var(--muted);font-size:12px';
       aiList.appendChild(none);
     }
@@ -553,7 +553,7 @@ async function openGroupModal(group) {
     }
   });
   if (!rows.length) {
-    const none = _g('div', null, 'No AI sessions open. Start a Claude, Gemini, Codex, Ollama… session first.');
+    const none = _g('div', null, 'No AI sessions open. Start a Claude, Antigravity, Codex, Ollama… session first.');
     none.style.cssText = 'color:var(--muted);font-size:12px';
     list.appendChild(none);
   }

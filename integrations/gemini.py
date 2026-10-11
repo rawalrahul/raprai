@@ -21,6 +21,18 @@ def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
     cmd.append(os.environ.get("GEMINI_APPROVAL_FLAG", "--yolo"))
     return cmd
 
+def SHOW() -> bool:
+    """List Gemini only where its CLI is installed. Google stopped the Gemini CLI
+    for personal accounts (June 2026); Antigravity (agy) replaces it, so a new
+    install offers Antigravity instead."""
+    try:
+        from helm.web_routes.app import _find_cli
+        return _find_cli("gemini")
+    except Exception:
+        import shutil
+        return bool(shutil.which("gemini") or shutil.which("gemini.cmd"))
+
+
 STDIN_PROMPT = True  # signals ai_runner to pipe prompt via stdin
 
 ENV_VARS   = []   # API key is optional — Gemini CLI handles auth internally

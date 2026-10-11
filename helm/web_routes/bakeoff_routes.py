@@ -13,6 +13,7 @@ import helm.state as _st
 router = APIRouter()
 _runs: dict[str, bakeoff.BakeOff] = {}
 _tasks: dict[str, asyncio.Task] = {}
+_procs: dict[str, object] = {}   # attempt folder -> its running AI process
 
 
 class StartBody(BaseModel):
@@ -33,7 +34,22 @@ async def _real_runner(ai: str, prompt: str, cwd: str) -> str:
     sess = {"id": "bakeoff", "ai": ai, "cwd": cwd, "model": (sess or {}).get("model")}
     cmd, stdin_text, extra_env = _build_cmd_for_session(sess, prompt)
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, lambda: _run_subprocess_blocking(cmd, cwd, stdin_text, extra_env))
+    try:
+        return await loop.run_in_executor(None, lambda: _run_subprocess_blocking(
+            cmd, cwd, stdin_text, extra_env, on_start=lambda p: _procs.__setitem__(cwd, p)))
+    finally:
+        _procs.pop(cwd, None)
+
+
+def _stop_running(b: bakeoff.BakeOff) -> None:
+    """Stop AIs still working on a bake-off's copies (e.g. it was discarded mid-run)."""
+    for a in b.attempts:
+        proc = _procs.pop(a.path, None)
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
 
 
 def _runner():
@@ -76,5 +92,6 @@ async def discard(bid: str):
     b = _runs.get(bid)
     if not b:
         return JSONResponse({"error": "not found"}, status_code=404)
+    _stop_running(b)
     bakeoff.discard(b)
     return JSONResponse({"ok": True})

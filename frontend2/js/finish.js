@@ -56,7 +56,7 @@ async function openBakeoffModal() {
   field('Task', task);
 
   const list = _el('div', 'council-modal-sessions');
-  if (ais.length < 2) list.appendChild(_el('div', null, 'A bake-off needs at least two AIs installed (Claude Code, Gemini CLI, Codex, Ollama…).'));
+  if (ais.length < 2) list.appendChild(_el('div', null, 'A bake-off needs at least two AIs installed (Claude Code, Antigravity, Codex, Ollama…).'));
   ais.forEach(ai => {
     const lbl = _el('label', 'council-modal-session-label');
     const cb = document.createElement('input');

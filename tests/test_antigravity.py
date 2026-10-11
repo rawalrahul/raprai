@@ -106,3 +106,27 @@ def test_models_come_from_agy(fake_agy, monkeypatch):
     monkeypatch.setitem(st.integrations, "antigravity", {"build_command": ag.build_command})
     assert helpers._fetch_antigravity_models() == [
         "gemini-3.8-flash-high", "gemini-3.1-pro-high", "claude-sonnet-4-6"]
+
+
+def test_gemini_is_hidden_unless_its_cli_is_installed(tmp_path, monkeypatch):
+    """New installs offer Antigravity; Gemini appears only where its CLI exists."""
+    import helm.state as st
+    import importlib
+    from helm import integrations
+    webapp = importlib.import_module("helm.web_routes.app")   # the module, not the FastAPI app
+    monkeypatch.setattr(st, "integrations", {})
+    monkeypatch.setattr(webapp, "_find_cli", lambda name: False)
+    integrations.load_integrations()
+    assert "gemini" not in st.integrations
+    assert "antigravity" in st.integrations
+    monkeypatch.setattr(webapp, "_find_cli", lambda name: name == "gemini")
+    st.integrations.clear()
+    integrations.load_integrations()
+    assert "gemini" in st.integrations
+
+
+def test_setup_wizard_offers_antigravity_not_gemini():
+    from helm.setup_wizard import _SETUP_HTML
+    assert "Antigravity" in _SETUP_HTML and "checkAntigravity" in _SETUP_HTML
+    assert "npm install -g @google/gemini-cli" not in _SETUP_HTML
+    assert "GEMINI_API_KEY" not in _SETUP_HTML

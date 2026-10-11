@@ -136,12 +136,35 @@ async def tg_codex(update, context):
 
 
 @authorized_only
+async def tg_antigravity(update, context):
+    """Create a new Antigravity (agy) session."""
+    from helm.session_mgr import make_session, session_cwd
+    from helm.broadcast import push_state
+    from helm.ai_runner.core import is_backend_available
+    if "antigravity" not in _st.integrations or not is_backend_available("antigravity"):
+        await update.message.reply_text(
+            "Antigravity CLI (agy) isn't installed on the RAPR computer. "
+            "Install it from antigravity.google/docs/cli-using and run agy once to sign in.")
+        return
+    sess = make_session("antigravity", cwd=session_cwd())
+    _st.focused_id = sess["id"]
+    await push_state()
+    await update.message.reply_text(
+        f"🪐 *{sess['name']}* is ready.\nJust type your task.",
+        parse_mode="Markdown",
+        reply_markup=session_controls_keyboard(),
+    )
+
+
+@authorized_only
 async def tg_gemini(update, context):
     """Create a new Gemini session (if plugin is loaded)."""
     from helm.session_mgr import make_session, session_cwd
     from helm.broadcast import push_state
     if "gemini" not in _st.integrations:
-        await update.message.reply_text("Gemini integration not loaded.")
+        await update.message.reply_text(
+            "The Gemini CLI isn't installed (Google stopped it for personal accounts). "
+            "Use /antigravity instead — Google's replacement.")
         return
     sess = make_session("gemini", cwd=session_cwd())
     _st.focused_id = sess["id"]

@@ -286,7 +286,7 @@ async def _main():
             action_callback, browse_callback, pipeline_callback,
             approval_callback, agent_callback,
             tg_browse, tg_clear, tg_clear_context, tg_claude, tg_cmd,
-            tg_codex, tg_cwd, tg_gemini, tg_history, tg_interrupt,
+            tg_codex, tg_cwd, tg_gemini, tg_antigravity, tg_history, tg_interrupt,
             tg_launch, tg_menu, tg_pipeline, tg_agent, tg_resume, tg_schedule,
             tg_start, tg_status, tg_kelvin, tg_stop, tg_stop_ai, tg_text, tg_timeout,
             tg_voice, tg_file,
@@ -305,6 +305,7 @@ async def _main():
         # AI selection
         tg.add_handler(CommandHandler("claude",  tg_claude))
         tg.add_handler(CommandHandler("gemini",  tg_gemini))
+        tg.add_handler(CommandHandler(["antigravity", "agy"], tg_antigravity))
         tg.add_handler(CommandHandler("codex",   tg_codex))
         # Session controls
         tg.add_handler(CommandHandler("launch",    tg_launch))
@@ -385,7 +386,7 @@ async def _main():
                 action_callback, browse_callback, pipeline_callback,
                 approval_callback, agent_callback,
                 tg_browse, tg_clear, tg_clear_context, tg_claude, tg_cmd,
-                tg_codex, tg_cwd, tg_gemini, tg_history, tg_interrupt,
+                tg_codex, tg_cwd, tg_gemini, tg_antigravity, tg_history, tg_interrupt,
                 tg_launch, tg_menu, tg_pipeline, tg_agent, tg_resume, tg_schedule,
                 tg_start, tg_status, tg_kelvin, tg_stop, tg_stop_ai, tg_text, tg_timeout,
                 tg_voice, tg_file,
@@ -400,6 +401,7 @@ async def _main():
             tg.add_handler(CommandHandler("menu",    tg_menu))
             tg.add_handler(CommandHandler("claude",  tg_claude))
             tg.add_handler(CommandHandler("gemini",  tg_gemini))
+            tg.add_handler(CommandHandler(["antigravity", "agy"], tg_antigravity))
             tg.add_handler(CommandHandler("codex",   tg_codex))
             tg.add_handler(CommandHandler("launch",    tg_launch))
             tg.add_handler(CommandHandler("stop",      tg_stop))

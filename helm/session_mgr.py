@@ -106,6 +106,28 @@ def make_session(ai: Optional[str], cwd: Optional[str] = None,
 _make_session = make_session  # legacy alias
 
 
+async def close_session(sess: dict, ended_as: str = "deleted", source: str = "web") -> None:
+    """Stop a session's running task and remove it from the session list."""
+    from helm.ai_runner import kill_session_proc
+    from helm.file_tracker import emit_session_end_summary
+    kill_session_proc(sess)
+    try:
+        sess["terminal"].stop()
+    except Exception:
+        pass
+    await emit_session_end_summary(sess, ended_as=ended_as, source=source)
+    sid = sess["id"]
+    # Preserve the CWD so the next session starts on the same path, and so
+    # late-arriving messages still log to the right file.
+    if sess.get("cwd"):
+        _st.last_cwd = sess["cwd"]
+    _st.deleted_session_cwds[sid] = sess.get("cwd") or _st.last_cwd
+    _st.sessions.pop(sid, None)
+    if _st.focused_id == sid or _st.focused_id not in _st.sessions:
+        _st.focused_id = max(_st.sessions, key=lambda k: _st.sessions[k]["last_used"],
+                             default=None) if _st.sessions else None
+
+
 def focused_session() -> Optional[dict]:
     return _st.sessions.get(_st.focused_id) if _st.focused_id else None
 

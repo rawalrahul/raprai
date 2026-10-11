@@ -26,7 +26,7 @@ router = APIRouter()
 # Budget helpers
 # ---------------------------------------------------------------------------
 
-_BUDGET_AI_KEYS = ["claude", "gemini", "codex", "ollama", "openai"]
+_BUDGET_AI_KEYS = ["claude", "gemini", "antigravity", "codex", "ollama", "openai"]
 
 # API-based AIs that have per-token costs (dollar caps make sense)
 _API_AIS = {"gemini", "openai"}

@@ -50,8 +50,10 @@ def _build_cmd_for_session(sess: dict, prompt: str) -> tuple[list, str | None, d
 
 
 def _run_subprocess_blocking(cmd: list, cwd: str, stdin_text: str | None,
-                             extra_env: dict | None = None) -> str:
-    """Blocking subprocess run. Returns stdout as string."""
+                             extra_env: dict | None = None, on_start=None) -> str:
+    """Blocking subprocess run. Returns stdout as string.
+    on_start(proc), if given, is called once the process is running (so a caller
+    can stop it)."""
     env = None
     if extra_env:
         env = {**os.environ, **extra_env}
@@ -70,6 +72,8 @@ def _run_subprocess_blocking(cmd: list, cwd: str, stdin_text: str | None,
             **hidden_kwargs(),
         )
         dummy["proc"] = proc
+        if on_start:
+            on_start(proc)
         try:
             stdout, _ = proc.communicate(input=stdin_text, timeout=300)
         except subprocess.TimeoutExpired:

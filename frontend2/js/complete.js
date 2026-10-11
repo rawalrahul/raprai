@@ -1325,7 +1325,7 @@ function _schedPopulateAiSelect(){
 // --- History modal ------------------------------------------------------------------------------------------
 let _histSessions = [];   // full session list loaded from /history
 // AI_COLOR already declared above — reuse it for session cards
-const AI_DISPLAY = {claude:'Claude Code', gemini:'Gemini', codex:'Codex', shell:'Shell'};
+const AI_DISPLAY = {claude:'Claude Code', gemini:'Gemini', antigravity:'Antigravity', codex:'Codex', shell:'Shell'};
 
 function _fmtDate(dateStr, ts){
   // dateStr = YYYY-MM-DD; ts = unix timestamp of last message (optional)
@@ -1623,8 +1623,8 @@ function updateRightSidebar(sessions, focusedId){
         </div>
       </div>
       <div class="rs-actions">
-        <button class="rs-act" onclick="event.stopPropagation();cmd('interrupt')" title="Cancel running task">⏸</button>
-        <button class="rs-act" onclick="event.stopPropagation();if(confirm('Delete this session?'))cmd('delete_session')" title="Delete session">🗑️</button>
+        <button class="rs-act" onclick="event.stopPropagation();cmd('interrupt:${sess.id}')" title="Cancel running task">⏸</button>
+        <button class="rs-act" onclick="event.stopPropagation();if(confirm('Delete this session?'))cmd('delete_session:${sess.id}')" title="Delete session">🗑️</button>
       </div>
     </div>`;
   }).join('');
@@ -2114,19 +2114,19 @@ function saveProviderApiKeys(){
 
 // Known context window defaults per AI key (tokens)
 const _CTX_DEFAULTS = {
-  claude: 1000000, gemini: 1000000, codex: 1000000, openai: 1000000,
+  claude: 1000000, gemini: 1000000, antigravity: 1000000, codex: 1000000, openai: 1000000,
   openclaw: 1000000, opencode: 1000000,
   ollama: 128000, openrouter: 128000, groq: 131072, local_ai: 128000
 };
 
 // Display names/emojis for known AIs (used when integrations haven't loaded yet)
 const _CTX_LABELS = {
-  claude:'Claude Code', gemini:'Gemini', codex:'Codex', openai:'OpenAI / GPT',
+  claude:'Claude Code', gemini:'Gemini', antigravity:'Antigravity', codex:'Codex', openai:'OpenAI / GPT',
   openclaw:'OpenClaw', opencode:'OpenCode',
   ollama:'Ollama (local)', openrouter:'OpenRouter', groq:'Groq', local_ai:'Local AI'
 };
 const _CTX_EMOJI = {
-  claude:'🤖', gemini:'✨', codex:'💻', openai:'🧠', openclaw:'🦞', opencode:'🖥️',
+  claude:'🤖', gemini:'✨', antigravity:'🪐', codex:'💻', openai:'🧠', openclaw:'🦞', opencode:'🖥️',
   ollama:'🦙', openrouter:'🔀', groq:'⚡', local_ai:'🏠'
 };
 
@@ -2296,7 +2296,7 @@ function saveSettings(){
 
 // --- Default Models per AI -------------------------------------------------------------------------------------
 
-const _CLI_ONLY_AIS = new Set(['claude','gemini','codex']);
+const _CLI_ONLY_AIS = new Set(['claude','gemini','antigravity','codex']);
 
 function loadDefaultModels(){
   const container = document.getElementById('default-models-container');
@@ -2428,7 +2428,7 @@ function togglePinSub(){
 
 const _AI_INT_META = {
   claude: { name:'Claude Code', emoji:'🤖', hint:'Install: npm install -g @anthropic-ai/claude-code' },
-  gemini: { name:'Gemini CLI',  emoji:'✨', hint:'Install: npm install -g @google/gemini-cli' },
+  antigravity: { name:'Antigravity', emoji:'🪐', hint:'Install Antigravity CLI: see antigravity.google/docs/cli-using' },
   codex:  { name:'Codex CLI',   emoji:'🧠', hint:'Install: npm install -g @openai/codex' },
   ollama: { name:'Ollama',      emoji:'🦙', hint:'Download from https://ollama.com/download' },
 };
@@ -2740,7 +2740,7 @@ function loadBudget(){
   fetch('/api/budget').then(r=>r.json()).then(cfg=>{
     const en = document.getElementById('budget-enabled');
     if(en) en.value = cfg.enabled ? '1' : '0';
-    ['claude','gemini','codex','ollama'].forEach(ai=>{
+    ['claude','antigravity','codex','ollama'].forEach(ai=>{
       const inp = document.getElementById('budget-'+ai);
       if(inp && cfg[ai] && cfg[ai].daily_cap_min != null) inp.value = cfg[ai].daily_cap_min;
     });
@@ -2754,7 +2754,7 @@ function saveBudget(){
   const en = document.getElementById('budget-enabled');
   body.enabled = en && en.value === '1';
   const warnPct = parseFloat((document.getElementById('budget-warn-pct')||{}).value) || 80;
-  ['claude','gemini','codex','ollama'].forEach(ai=>{
+  ['claude','antigravity','codex','ollama'].forEach(ai=>{
     const inp = document.getElementById('budget-'+ai);
     const val = inp ? inp.value.trim() : '';
     body[ai] = {
@@ -2918,7 +2918,7 @@ function showPipelineApprovalModal(pl){
   }
   promptEl.textContent = promptText;
 
-  const aiOptions = ['claude','gemini','codex','ollama'].map(a =>
+  const aiOptions = ['claude','antigravity','codex','ollama'].map(a =>
     `<option value="${a}">${a}</option>`
   ).join('');
 

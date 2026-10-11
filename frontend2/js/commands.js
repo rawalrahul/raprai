@@ -66,11 +66,11 @@ const CommandPalette = {
       action: () => WS.sendCommand('new_session:claude'),
     },
     {
-      id: 'new-gemini',
-      label: 'New Gemini Session',
+      id: 'new-antigravity',
+      label: 'New Antigravity Session',
       category: 'Sessions',
       shortcut: 'Ctrl+Shift+G',
-      action: () => WS.sendCommand('new_session:gemini'),
+      action: () => WS.sendCommand('new_session:antigravity'),
     },
     {
       id: 'new-ollama',

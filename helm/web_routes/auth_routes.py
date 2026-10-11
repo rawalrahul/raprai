@@ -37,7 +37,7 @@ async def setup_status():
     """Return what's already configured so the wizard can jump to the right step."""
     import asyncio
     from dotenv import dotenv_values
-    from .app import _find_cli
+    from .app import _find_cli, _agy_installed
 
     env_path = user_data_dir() / ".env"
     vals = dotenv_values(env_path) if env_path.exists() else {}
@@ -58,6 +58,7 @@ async def setup_status():
                 pass
         return {
             "gemini_ready":  _find_cli("gemini"),
+            "antigravity_ready": _agy_installed(),
             "claude_ready":  _find_cli("claude"),
             "codex_ready":   codex_ok,
             "ollama_ready":  ollama_ok,

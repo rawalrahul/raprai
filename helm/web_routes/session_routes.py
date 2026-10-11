@@ -286,8 +286,8 @@ async def rescan_integrations():
     # Static metadata for built-in CLIs (name, emoji, install hint)
     _BUILTIN_META = {
         "claude":       {"name": "Claude Code",    "emoji": "🤖", "hint": "Install: npm install -g @anthropic-ai/claude-code"},
-        "gemini":       {"name": "Gemini CLI",     "emoji": "✨", "hint": "Install: npm install -g @google/gemini-cli"},
         "antigravity":  {"name": "Antigravity",    "emoji": "🪐", "hint": "Install Antigravity CLI: see antigravity.google/docs/cli-using"},
+        "gemini":       {"name": "Gemini CLI",     "emoji": "✨", "hint": "Install: npm install -g @google/gemini-cli"},
         "codex":        {"name": "Codex CLI",      "emoji": "🧠", "hint": "Install: npm install -g @openai/codex"},
         "ollama":       {"name": "Ollama",         "emoji": "🦙", "hint": "Download from https://ollama.com/download"},
     }
@@ -310,6 +310,8 @@ async def rescan_integrations():
                         found = (_pl.Path(local_app) / "Antigravity" / "agy.exe").exists()
             else:
                 found = _find_cli(key)
+            if key == "gemini" and not found:
+                continue   # Gemini CLI no longer serves personal accounts; offer Antigravity instead
             item = {
                 "key": key, "name": meta["name"], "emoji": meta["emoji"],
                 "found": found, "hint": meta["hint"] if not found else "",

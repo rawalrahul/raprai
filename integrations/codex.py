@@ -13,8 +13,10 @@ def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
     import os, shlex
     _ext = ".cmd" if sys.platform == "win32" else ""
     # CODEX_AUTO_ARGS overrides the full base args (subcommand + flags) if OpenAI
-    # restructures the CLI invocation (e.g. exec --full-auto -> --ask-for-approval never exec).
-    _default = "exec --skip-git-repo-check --full-auto"
+    # restructures the CLI invocation. Codex 0.16x removed --full-auto; "--sandbox
+    # workspace-write" is what it meant (edit files in the project, no prompts in exec),
+    # and older versions accept it too.
+    _default = "exec --skip-git-repo-check --sandbox workspace-write"
     _base = shlex.split(os.environ.get("CODEX_AUTO_ARGS", _default))
     cmd = [f"codex{_ext}"] + _base
     if model:

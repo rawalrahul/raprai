@@ -135,3 +135,16 @@ def test_api_round_trip(repo, tmp_path, monkeypatch):
     assert client.post(f"/api/bakeoff/{bid}/merge", json={"attempt": 0}).json()["ok"]
     assert (repo / "app.py").read_text() == "# claude\n"
     assert client.post("/api/bakeoff", json={"repo": str(repo), "task": "x", "ais": ["one"]}).status_code == 400
+
+
+def test_discard_stops_ais_still_running(tmp_path):
+    """Discarding a bake-off mid-run used to leave its AIs working in deleted folders."""
+    import subprocess
+    from helm.web_routes import bakeoff_routes as br
+    a = bo.Attempt(ai="claude", path=str(tmp_path / "copy"), branch="")
+    b = bo.BakeOff(id="b1", repo=str(tmp_path), task="t", attempts=[a], is_git=False)
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    br._procs[a.path] = proc
+    br._stop_running(b)
+    assert proc.wait(timeout=10) is not None
+    assert a.path not in br._procs

@@ -84,7 +84,7 @@ def list_text(channel: str) -> str:
 def sessions_text() -> str:
     sess = ai_sessions()
     if not sess:
-        return ("No AI sessions are open. Start some first (e.g. /claude, /gemini, "
+        return ("No AI sessions are open. Start some first (e.g. /claude, /antigravity, "
                 "or from the web UI), then come back to /group new")
     lines = ["Open AI sessions:"]
     for i, s in enumerate(sess, 1):

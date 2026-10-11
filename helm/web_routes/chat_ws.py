@@ -334,22 +334,13 @@ async def handle_web_command(command: str, ws: WebSocket):
             await push_state()
         return
 
-    # --- delete_session ---
-    if command == "delete_session":
-        sess = focused_session()
+    # --- delete_session[:{session_id}] (no id: the focused session) ---
+    if command == "delete_session" or command.startswith("delete_session:"):
+        sid = command.split(":", 1)[1].strip() if ":" in command else ""
+        sess = _st.sessions.get(sid) if sid else focused_session()
         if sess:
-            kill_session_proc(sess)
-            sess["terminal"].stop()
-            await emit_session_end_summary(sess, ended_as="deleted", source="web")
-            sid = sess["id"]
-            # Preserve the CWD so next session starts on the same path
-            if sess.get("cwd"):
-                _st.last_cwd = sess["cwd"]
-            # Cache CWD so late-arriving messages still log to the right file
-            _st.deleted_session_cwds[sid] = sess.get("cwd") or _st.last_cwd
-            del _st.sessions[sid]
-            _st.focused_id = max(_st.sessions, key=lambda k: _st.sessions[k]["last_used"],
-                                 default=None) if _st.sessions else None
+            from helm.session_mgr import close_session
+            await close_session(sess, ended_as="deleted", source="web")
             await push_state()
         return
 
@@ -377,9 +368,10 @@ async def handle_web_command(command: str, ws: WebSocket):
                 session_id=sess["id"])
         return
 
-    # --- interrupt ---
-    if command == "interrupt":
-        sess = focused_session()
+    # --- interrupt[:{session_id}] (no id: the focused session) ---
+    if command == "interrupt" or command.startswith("interrupt:"):
+        sid = command.split(":", 1)[1].strip() if ":" in command else ""
+        sess = _st.sessions.get(sid) if sid else focused_session()
         if sess:
             try:
                 if sess["ai"]:

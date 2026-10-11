@@ -211,6 +211,11 @@ def load_integrations() -> None:
                 mod = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(mod)
                 key = getattr(mod, "KEY", path.stem)
+                # An integration can hide itself, e.g. Gemini when its CLI isn't installed.
+                _show = getattr(mod, "SHOW", None)
+                if callable(_show) and not _show():
+                    logger.info("AI integration %s hidden (not installed)", key)
+                    continue
                 _st.integrations[key] = {
                     "name":          getattr(mod, "NAME",        key.title()),
                     "emoji":         getattr(mod, "EMOJI",       "🤖"),

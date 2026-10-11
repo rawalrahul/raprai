@@ -235,6 +235,15 @@ def _claude_ready() -> bool:
     return _find_cli("claude")
 
 
+def _agy_installed() -> bool:
+    """Return True if the Antigravity CLI (agy) is installed: on PATH, or on Windows
+    at %LOCALAPPDATA%\\Antigravity\\agy.exe."""
+    if _find_cli("agy"):
+        return True
+    local_app = os.environ.get("LOCALAPPDATA", "")
+    return bool(local_app) and (pathlib.Path(local_app) / "Antigravity" / "agy.exe").exists()
+
+
 def _gemini_ready() -> bool:
     """Return True if the Gemini CLI binary is installed (API key is optional)."""
     return _find_cli("gemini")

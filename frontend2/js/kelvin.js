@@ -35,6 +35,7 @@
     rapr:       [C.amber, C.amberDark, C.rib],
     claude:     [C.amber, C.amberDark, C.rib],
     gemini:     ['#6aa6f8', '#3f7fd8', '#2f66b5'],
+    antigravity: ['#6aa6f8', '#3f7fd8', '#2f66b5'],   // Google blue, like Gemini
     codex:      ['#4fd1a1', '#2fae80', '#238a65'],
     openai:     ['#4fd1a1', '#2fae80', '#238a65'],
     ollama:     ['#e9e6df', '#c4bfb4', '#a39d90'],
@@ -341,7 +342,7 @@
   }
 
   function aiName(ai) {
-    var names = { claude: 'Claude', gemini: 'Gemini', codex: 'Codex', openai: 'OpenAI', ollama: 'Ollama',
+    var names = { claude: 'Claude', gemini: 'Gemini', antigravity: 'Antigravity', codex: 'Codex', openai: 'OpenAI', ollama: 'Ollama',
                   openrouter: 'OpenRouter', cursor: 'Cursor', shell: 'Shell' };
     return names[ai] || (ai ? ai.charAt(0).toUpperCase() + ai.slice(1) : 'AI');
   }
@@ -538,7 +539,7 @@
     wrap.appendChild(card);
     wrap.classList.add('has-messages');
     var arts = card.querySelectorAll('.kco-art .kelvin-slot');
-    ['gemini', 'claude', 'codex'].forEach(function (ai, i) {
+    ['antigravity', 'claude', 'codex'].forEach(function (ai, i) {
       var k = mount(arts[i], { overlays: false, track: false, pokeable: false, ai: ai, label: 'Kelvin crew member' });
       k.setState(i === 1 ? 'listening' : 'idle');
     });

@@ -1072,7 +1072,7 @@ def _build_skill_gen_cmd(generator_ai: str, prompt_text: str) -> tuple[list[str]
 
     if generator_ai == "codex":
         _ext = ".cmd" if sys.platform == "win32" else ""
-        return ([f"codex{_ext}", "exec", "--skip-git-repo-check", "--full-auto"], prompt_text)
+        return ([f"codex{_ext}", "exec", "--skip-git-repo-check", "--sandbox", "workspace-write"], prompt_text)
 
     if generator_ai == "ollama":
         model = os.environ.get("OLLAMA_MODEL") or os.environ.get("DEFAULT_MODEL_OLLAMA") or "qwen3:4b"

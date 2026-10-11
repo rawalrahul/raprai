@@ -55,9 +55,30 @@ def _sessions_for_ais(ais: list[str], taken: set[str]) -> tuple[list[dict], Opti
                      if s.get("ai") == ai and s.get("status") != "stopped" and s["id"] not in taken), None)
         if sess is None:
             sess = make_session(ai, cwd=session_cwd())
+            sess["_started_for_group"] = True   # closed again when the group is deleted
         taken.add(sess["id"])
         out.append(sess)
     return out, None
+
+
+def _remember_started_sessions(group: dict, sessions: list[dict]) -> None:
+    """Sessions RAPR started just for this group (the user picked an AI, not an
+    open session) belong to it: deleting the group closes them."""
+    group["started_session_ids"] = [s["id"] for s in sessions if s.pop("_started_for_group", False)]
+
+
+async def _close_started_sessions(group: dict) -> None:
+    from helm.broadcast import push_state
+    from helm.session_mgr import close_session
+    in_other_groups = {m["session_id"] for g in gc.groups.values() for m in g.get("members", [])}
+    closed = False
+    for sid in group.get("started_session_ids") or []:
+        sess = _st.sessions.get(sid)
+        if sess and sid not in in_other_groups:
+            await close_session(sess, ended_as="deleted", source="web")
+            closed = True
+    if closed:
+        await push_state()
 
 
 def _resolve_members(session_ids: list[str], ais: list[str]) -> tuple[list[dict], Optional[str]]:
@@ -129,6 +150,7 @@ async def create_group(req: CreateGroupRequest):
     if err:
         return _err(err)
     group = gc.make_group(req.name, req.about, sessions)
+    _remember_started_sessions(group, sessions)
     from helm.broadcast import push_state
     await push_state()   # sessions started for the group show up in the sidebar
     gc.save_groups()
@@ -183,6 +205,7 @@ async def delete_group(group_id: str):
         return _err("Group not found", 404)
     await gc.stop_group(g)
     gc.groups.pop(group_id, None)
+    await _close_started_sessions(g)
     for channel, gid in list(gc.active_groups.items()):
         if gid == group_id:
             gc.active_groups.pop(channel, None)
@@ -262,6 +285,7 @@ async def create_group_from_crew(req: CrewGroupRequest):
     group = gc.make_group(req.name.strip() or crew["name"], crew["about"],
                           [s for _, s in pairs],
                           roles=[(r["name"], r["prompt"]) for r, _ in pairs])
+    _remember_started_sessions(group, sessions)
     gc.save_groups()
     await gc.broadcast_group(group)
     return JSONResponse({"group": gc._public(group)})

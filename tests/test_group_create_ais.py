@@ -63,3 +63,32 @@ def test_crew_from_ais_and_too_few_is_refused_before_starting_anything(client):
     assert r.status_code == 200, r.text
     roles = {m["role"]: m["ai"] for m in r.json()["group"]["members"]}
     assert roles == {"Author": "claude", "Reviewer": "codex", "Tester": "gemini"}
+
+
+def test_deleting_the_group_closes_the_sessions_it_started(client, monkeypatch):
+    """Sessions started for a group used to stay in the session list after the
+    group was deleted. Sessions the user picked themselves are kept."""
+    import helm.session_mgr as sm
+    import helm.file_tracker as ft
+    async def _no_summary(*a, **k):
+        return None
+    monkeypatch.setattr(ft, "emit_session_end_summary", _no_summary)
+    mine = sm.make_session("gemini", cwd="/tmp")
+    r = client.post("/api/groups", json={"member_session_ids": [mine["id"]], "member_ais": ["claude"]})
+    g = r.json()["group"]
+    started = [m["session_id"] for m in g["members"] if m["ai"] == "claude"]
+    assert g["started_session_ids"] == started and len(_st.sessions) == 2
+    assert client.delete(f"/api/groups/{g['id']}").status_code == 200
+    assert list(_st.sessions) == [mine["id"]]
+
+
+def test_a_session_still_in_another_group_is_kept(client, monkeypatch):
+    import helm.file_tracker as ft
+    async def _no_summary(*a, **k):
+        return None
+    monkeypatch.setattr(ft, "emit_session_end_summary", _no_summary)
+    g1 = client.post("/api/groups", json={"member_ais": ["claude"]}).json()["group"]
+    sid = g1["members"][0]["session_id"]
+    client.post("/api/groups", json={"member_session_ids": [sid]})
+    client.delete(f"/api/groups/{g1['id']}")
+    assert sid in _st.sessions
