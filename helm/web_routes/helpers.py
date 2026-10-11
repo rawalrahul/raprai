@@ -302,6 +302,50 @@ def _fetch_ollama_models() -> list[str]:
     return []
 
 
+def _codex_auth() -> tuple[str, str]:
+    """(how Codex is signed in: "chatgpt", "apikey" or "", ChatGPT plan or "").
+    Read from ~/.codex/auth.json, which Codex writes when you sign in."""
+    try:
+        auth = json.loads((pathlib.Path.home() / ".codex" / "auth.json").read_text(encoding="utf-8"))
+    except Exception:
+        return "", ""
+    tokens = auth.get("tokens") or {}
+    if not tokens:
+        return ("apikey" if auth.get("OPENAI_API_KEY") else ""), ""
+    plan = ""
+    try:
+        part = (tokens.get("id_token") or "").split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+        plan = str((claims.get("https://api.openai.com/auth") or {}).get("chatgpt_plan_type") or "")
+    except Exception:
+        pass
+    return "chatgpt", plan.lower()
+
+
+def codex_cached_models() -> list[str]:
+    """Models Codex itself lists in ~/.codex/models_cache.json that work with how
+    you're signed in: your ChatGPT plan's models, or the API's when you use a key.
+    Empty when there's no cache (callers then don't second-guess the model)."""
+    try:
+        cache = json.loads((pathlib.Path.home() / ".codex" / "models_cache.json").read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    mode, plan = _codex_auth()
+    out = []
+    for m in cache.get("models", []) or []:
+        slug = m.get("slug")
+        if not slug or m.get("visibility") != "list":
+            continue
+        if mode == "chatgpt":
+            plans = m.get("available_in_plans")
+            if plan and isinstance(plans, list) and plan not in plans:
+                continue
+        elif not m.get("supported_in_api", False):
+            continue
+        out.append(slug)
+    return sorted(out, reverse=True)
+
+
 def _fetch_openai_models() -> list[str]:
     """Return available OpenAI/Codex models.
     Priority: (1) ~/.codex/models_cache.json, (2) OAuth JWT from ~/.codex/auth.json,
@@ -318,18 +362,9 @@ def _fetch_openai_models() -> list[str]:
         ], reverse=True)
 
     # ── Method 0: ~/.codex/models_cache.json (fastest — no API call) ─────────
-    cache_path = pathlib.Path.home() / ".codex" / "models_cache.json"
-    if cache_path.exists():
-        try:
-            cache = json.loads(cache_path.read_text(encoding="utf-8"))
-            models = [
-                m["slug"] for m in cache.get("models", [])
-                if m.get("visibility") == "list" and m.get("supported_in_api", False)
-            ]
-            if models:
-                return sorted(models, reverse=True)
-        except Exception:
-            pass
+    models = codex_cached_models()
+    if models:
+        return models
 
     # ── Method 0.5: OAuth JWT from ~/.codex/auth.json ────────────────────────
     auth_path = pathlib.Path.home() / ".codex" / "auth.json"
