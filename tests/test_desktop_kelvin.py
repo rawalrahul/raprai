@@ -67,7 +67,9 @@ def test_flatten_uses_hard_edges_for_the_colour_key():
     from PIL import Image
     frame = Image.new("RGBA", (4, 1))
     frame.putdata([(10, 20, 30, 255), (10, 20, 30, 200), (0, 0, 0, 60), (0, 0, 0, 0)])
-    flat = list(dk.flatten(frame).getdata())
+    flat_img = dk.flatten(frame)
+    get_data = getattr(flat_img, "get_flattened_data", flat_img.getdata)
+    flat = list(get_data())
     assert flat[0] == (10, 20, 30) and flat[1] == (10, 20, 30)   # solid enough: kept
     assert flat[2] == dk.KEY_COLOR and flat[3] == dk.KEY_COLOR   # faint shadow/edge: see-through
 
