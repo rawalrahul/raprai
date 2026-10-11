@@ -50,6 +50,9 @@ def make_session(ai: Optional[str], cwd: Optional[str] = None,
             model = get_model_pref(ai) or _st.default_models.get(ai) or None
         except Exception:
             model = _st.default_models.get(ai) or None
+        if model and ai == "codex" and not codex_model_offered(model):
+            logger.info("codex: saved model %s isn't offered any more, using Codex's default", model)
+            model = None
 
     target_cwd = cwd or _st.last_cwd
     path_id    = path_to_id(target_cwd)
@@ -133,6 +136,17 @@ def focused_session() -> Optional[dict]:
 
 
 _focused_session = focused_session  # legacy alias
+
+
+def codex_model_offered(model: str) -> bool:
+    """False when Codex's own model list exists and doesn't offer this model for
+    how you're signed in (e.g. a model your ChatGPT plan can't use)."""
+    try:
+        from helm.web_routes.helpers import codex_cached_models
+        listed = codex_cached_models()
+    except Exception:
+        return True
+    return not listed or model in listed
 
 
 def session_cwd() -> str:

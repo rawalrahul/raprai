@@ -730,7 +730,7 @@ def _build_prefix(skill_name: str, ai: str = "") -> str:
 # Public injection entry point
 # ---------------------------------------------------------------------------
 
-def inject_skill_prefix(prompt: str, ai: str = "") -> str:
+def inject_skill_prefix(prompt: str, ai: str = "", match_text: Optional[str] = None) -> str:
     """
     Detect the best skill for `prompt`, check it is enabled for `ai`,
     build the prefix, and return the augmented prompt.
@@ -745,8 +745,12 @@ def inject_skill_prefix(prompt: str, ai: str = "") -> str:
     - The registry is empty (skills directory not found)
     - No skill matches the prompt
     - The matched skill is disabled for this AI
+
+    match_text: what to pick the skill from, when `prompt` carries more than the
+    user's own words (RAPR's file-safety rule mentions files and folders, which
+    made every message look like a file-organizing task).
     """
-    skill_name = detect_skill(prompt)
+    skill_name = detect_skill(prompt if match_text is None else match_text)
     if not skill_name:
         return prompt
 

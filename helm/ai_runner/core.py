@@ -516,6 +516,12 @@ if not _is_bundled():
         pass
 
 
+# A CLI saying the chosen model can't be used (wrong plan, retired, unknown).
+_MODEL_REJECTED_RE = re.compile(
+    r"model is not supported when using|model_not_found|"
+    r"The model [`'\"][^`'\"]+[`'\"] does not exist", re.IGNORECASE)
+
+
 def run_ai_popen(cmd: list[str], cwd: str, name: str, sess: dict,
                  timeout_override: float | None = None,
                  stdin_text: str | None = None,
@@ -1291,7 +1297,7 @@ async def _self_heal_with_skill(ai: str, sess: dict, text: str, safe_text: str,
     )
 
     # Retry: re-inject the newly created skill into the prompt
-    enriched_text = inject_skill_prefix(safe_text, ai=ai)
+    enriched_text = inject_skill_prefix(safe_text, ai=ai, match_text=text)
     enriched_text = inject_plugin_context(enriched_text)
 
     if ai == "ollama":
@@ -1379,7 +1385,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
     if ai == "claude":
         await push_thinking(True, "claude", session_id=sid)
         has_history = len(sess["claude_msgs"]) > 0
-        enriched_text = inject_skill_prefix(safe_text, ai="claude")
+        enriched_text = inject_skill_prefix(safe_text, ai="claude", match_text=text)
         enriched_text = inject_plugin_context(enriched_text)
 
         # Inject shared AI memory into prompt
@@ -1597,7 +1603,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
     elif ai in _st.integrations:
         await push_thinking(True, ai, session_id=sid)
         skill_matched = detect_skill(text)
-        enriched_text = inject_skill_prefix(safe_text, ai=ai)
+        enriched_text = inject_skill_prefix(safe_text, ai=ai, match_text=text)
         enriched_text = inject_plugin_context(enriched_text)
 
         # Inject shared AI memory into prompt
@@ -1666,6 +1672,31 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
                 pass
 
         async def _integration_raw(_cmd, _stdin):
+            out = await _integration_raw_once(_cmd, _stdin)
+            # Codex refuses a model your sign-in can't use ("The 'gpt-…' model is not
+            # supported when using Codex with a ChatGPT account"). Forget that model
+            # and run once more on Codex's own default.
+            if (ai == "codex" and sess.get("model") and "--model" in _cmd
+                    and _MODEL_REJECTED_RE.search(out or "")):
+                bad = sess["model"]
+                sess["model"] = None
+                try:
+                    from helm.model_prefs import get_model_pref, set_model_pref
+                    if get_model_pref(ai) == bad:
+                        set_model_pref(ai, None)
+                except Exception:
+                    pass
+                logger.info("codex rejected model %s; retrying with its default", bad)
+                await push_message(
+                    "system",
+                    f"Codex can't use `{bad}` with your sign-in, so RAPR switched this "
+                    f"session to Codex's default model. Use /model to pick another.",
+                    source=source, session_id=sid)
+                i = _cmd.index("--model")
+                out = await _integration_raw_once(_cmd[:i] + _cmd[i + 2:], _stdin)
+            return out
+
+        async def _integration_raw_once(_cmd, _stdin):
             # Each CLI has its own stream-json reader. Any mismatch raises
             # StreamUnavailable and falls back to a blocking run.
             if ai in ("codex", "gemini", "antigravity"):

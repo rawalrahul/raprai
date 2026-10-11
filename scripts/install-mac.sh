@@ -175,7 +175,7 @@ if "$HOME/.rapr-ai/bin/rapr-running"; then
 fi
 mkdir -p "$(dirname "$RAPR_LOG")"
 cd "$RAPR_APP_DIR" || exit 1
-nohup "$RAPR_VENV/bin/python" web_app.py >>"$RAPR_LOG" 2>&1 </dev/null &
+SESSION_CWD="${SESSION_CWD:-$HOME}" nohup "$RAPR_VENV/bin/python" web_app.py >>"$RAPR_LOG" 2>&1 </dev/null &
 echo $! >"$RAPR_PID"
 EOF
   cat >"$BIN/rapr-stop" <<'EOF'
