@@ -466,3 +466,57 @@ def run_gemini_stream(cmd, cwd, sess, emit, stdin_text=None, extra_env=None, tim
     _safe(emit, {"phase": "done"})
     mark_ok("gemini")
     return text
+
+
+def _agy_stream_cmd(cmd: list) -> list:
+    out = list(cmd)
+    if "--output-format" in out:
+        i = out.index("--output-format")
+        if i + 1 < len(out):
+            out[i + 1] = "stream-json"
+        return out
+    return out + ["--output-format", "stream-json"]
+
+
+def run_agy_stream(cmd, cwd, sess, emit, stdin_text=None, extra_env=None, timeout=None) -> str:
+    """Run Antigravity (agy) with --output-format stream-json and return its answer.
+
+    agy prints one JSON object per line, keyed by "event" (not "type" like Gemini):
+      {"event":"step_update","step_update":{"step_index":1,"step_type":"agent_response",
+                                            "state":"ACTIVE","text_delta":"Hi"}}
+      {"event":"result","result":{"status":"SUCCESS","response":"Hi ..."}}
+    Steps other than the user's input and the answer itself are shown as progress.
+    No answer text raises StreamUnavailable, so the caller runs agy normally instead.
+    """
+    scmd = _agy_stream_cmd(cmd)
+    result_text = [""]
+    deltas: list = []
+    seen_steps: set = set()
+
+    def on_event(ev):
+        kind = ev.get("event")
+        if kind == "step_update":
+            su = ev.get("step_update") or {}
+            stype = su.get("step_type") or ""
+            if stype == "agent_response":
+                if isinstance(su.get("text_delta"), str):
+                    deltas.append(su["text_delta"])
+            elif stype and stype != "user_input":
+                idx = su.get("step_index")
+                if idx not in seen_steps:
+                    seen_steps.add(idx)
+                    name = su.get("tool_name") or su.get("name") or stype
+                    _safe(emit, {"phase": "step", "n": len(seen_steps),
+                                 "label": _shorten(str(name).replace("_", " "))})
+        elif kind == "result":
+            r = (ev.get("result") or {}).get("response")
+            if isinstance(r, str) and r.strip():
+                result_text[0] = r
+
+    _stream_cli(scmd, cwd, sess, stdin_text, extra_env, timeout, on_event, tag="agy")
+    text = result_text[0].strip() or "".join(deltas).strip()
+    if not text:
+        raise StreamUnavailable("no response in agy stream")
+    _safe(emit, {"phase": "done"})
+    mark_ok("antigravity")
+    return text

@@ -24,7 +24,8 @@ def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
 STDIN_PROMPT = True  # signals ai_runner to pipe prompt via stdin
 
 ENV_VARS   = []   # API key is optional — Gemini CLI handles auth internally
-SETUP_HINT = "Install: npm install -g @google/gemini-cli"
+SETUP_HINT = ("Install: npm install -g @google/gemini-cli  |  Personal Google accounts no longer "
+              "work with it (since June 2026): use an API key, or use Antigravity (agy) instead")
 
 # Trust the working directory so Gemini CLI doesn't block in headless/automated mode.
 # Equivalent to passing --skip-trust on every invocation.

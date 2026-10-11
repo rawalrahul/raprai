@@ -450,8 +450,39 @@ def _fetch_gemini_model_ids() -> list[str]:
     return []
 
 
+def _agy_cli_models() -> list[str]:
+    """Model IDs from the installed Antigravity CLI's own `agy models` list:
+        gemini-3.1-pro-high       Gemini 3.1 Pro (High)
+        claude-sonnet-4-6         Claude Sonnet 4.6 (Thinking)"""
+    exe = ""
+    try:   # the loaded integration knows where agy lives (PATH or %LOCALAPPDATA%)
+        import helm.state as _st
+        exe = _st.integrations["antigravity"]["build_command"]("x")[0]
+    except Exception:
+        exe = shutil.which("agy") or ""
+    if not exe or not (os.path.isabs(exe) or shutil.which(exe)):
+        return []
+    try:
+        r = subprocess.run([exe, "models"], capture_output=True, text=True,
+                           timeout=20, **hidden_kwargs())
+    except Exception:
+        return []
+    if r.returncode != 0:
+        return []
+    ids = []
+    for line in (r.stdout or "").splitlines():
+        first = line.split()[0] if line.split() else ""
+        if re.fullmatch(r"[a-z0-9][a-z0-9._-]*", first) and len(line.split()) > 1:
+            ids.append(first)
+    return list(dict.fromkeys(ids))
+
+
 def _fetch_antigravity_models() -> list[str]:
-    """Return available models for Antigravity CLI (same Gemini API, different OAuth path)."""
+    """Return available models for Antigravity CLI: its own `agy models` list,
+    else the Gemini API lookup."""
+    found = _agy_cli_models()
+    if found:
+        return found
     # Check Antigravity-specific OAuth creds first (~/.antigravity/oauth_creds.json)
     ag_oauth = pathlib.Path.home() / ".antigravity" / "oauth_creds.json"
     if ag_oauth.exists():

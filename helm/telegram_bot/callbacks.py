@@ -208,14 +208,17 @@ async def action_callback(update, context):
             ai_key = fs["ai"]
             current_model = fs.get("model") or None
 
-            # Claude, Codex and Gemini: the models their installed CLIs report
+            # Claude, Codex, Gemini, Antigravity: the models their installed CLIs report
             # (passed to the CLI as --model); everything else: Ollama's models.
             from helm.web_routes.helpers import (
-                _fetch_claude_models, _fetch_gemini_models, _fetch_openai_models,
+                _fetch_antigravity_models, _fetch_claude_models, _fetch_gemini_models,
+                _fetch_openai_models,
             )
             _fetch = {"claude": _fetch_claude_models, "codex": _fetch_openai_models,
-                      "gemini": _fetch_gemini_models}.get(ai_key, _fetch_ollama_models)
-            ai_label = ai_key.title() if ai_key in ("claude", "codex", "gemini") else "Ollama"
+                      "gemini": _fetch_gemini_models,
+                      "antigravity": _fetch_antigravity_models}.get(ai_key, _fetch_ollama_models)
+            ai_label = (ai_key.title() if ai_key in ("claude", "codex", "gemini", "antigravity")
+                        else "Ollama")
             try:
                 models = await asyncio.to_thread(_fetch)
             except Exception:
@@ -257,7 +260,7 @@ async def action_callback(update, context):
             fs = focused_session()
             if fs:
                 fs["model"] = model_name if model_name else None
-                if fs.get("ai") in ("claude", "gemini", "codex", "ollama"):
+                if fs.get("ai") in ("claude", "gemini", "codex", "antigravity", "ollama"):
                     try:
                         from helm.model_prefs import set_model_pref
                         set_model_pref(fs["ai"], model_name or None)

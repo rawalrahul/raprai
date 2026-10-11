@@ -1667,18 +1667,19 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
                 pass
 
         async def _integration_raw(_cmd, _stdin):
-            # antigravity is a Gemini CLI fork — same stream-json flags. Any
-            # mismatch raises StreamUnavailable and falls back to a blocking run.
+            # Each CLI has its own stream-json reader. Any mismatch raises
+            # StreamUnavailable and falls back to a blocking run.
             if ai in ("codex", "gemini", "antigravity"):
                 try:
                     from helm.ai_runner.streaming import (
                         live_progress_enabled, run_codex_stream, run_gemini_stream,
-                        StreamUnavailable, mark_unavailable,
+                        run_agy_stream, StreamUnavailable, mark_unavailable,
                     )
                     _lp = live_progress_enabled(ai)
                     logger.info("%s: live_progress enabled=%s", ai, _lp)
                     if _lp:
-                        _fn = run_codex_stream if ai == "codex" else run_gemini_stream
+                        _fn = {"codex": run_codex_stream,
+                               "antigravity": run_agy_stream}.get(ai, run_gemini_stream)
                         _to = INTEGRATION_TIMEOUT if INTEGRATION_TIMEOUT > 0 else None
                         try:
                             return await asyncio.to_thread(
@@ -1748,6 +1749,11 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
 
         # Clean stderr noise (Node.js warnings etc.) from integration output
         output = _clean_output(output) or output
+        if ai == "gemini" and output and ("IneligibleTier" in output or ("410" in output and "Gone" in output)):
+            # Google stopped the Gemini CLI for personal accounts in June 2026.
+            output += ("\n\n⚠️ Google no longer serves the Gemini CLI for personal Google "
+                       "accounts. Install Antigravity CLI (agy), Google's replacement, and "
+                       "choose 🪐 Antigravity in RAPR. (A Gemini API key still works here.)")
 
         if not _is_failure(output):
             await push_message("assistant", output, ai=ai, source=source, session_id=sid)
