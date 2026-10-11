@@ -285,11 +285,24 @@ async def rescan_integrations():
 
     # Static metadata for built-in CLIs (name, emoji, install hint)
     _BUILTIN_META = {
-        "claude":       {"name": "Claude Code",    "emoji": "🤖", "hint": "Install: npm install -g @anthropic-ai/claude-code"},
-        "antigravity":  {"name": "Antigravity",    "emoji": "🪐", "hint": "Install Antigravity CLI: see antigravity.google/docs/cli-using"},
-        "gemini":       {"name": "Gemini CLI",     "emoji": "✨", "hint": "Install: npm install -g @google/gemini-cli"},
-        "codex":        {"name": "Codex CLI",      "emoji": "🧠", "hint": "Install: npm install -g @openai/codex"},
-        "ollama":       {"name": "Ollama",         "emoji": "🦙", "hint": "Download from https://ollama.com/download"},
+        "claude":       {"name": "Claude Code",    "emoji": "🤖", "hint": "Install: npm install -g @anthropic-ai/claude-code",
+                         "about": "Anthropic's coding agent. Sign in with your Claude plan or an API key.",
+                         "install": "npm install -g @anthropic-ai/claude-code",
+                         "docs": "https://docs.anthropic.com/en/docs/claude-code/overview"},
+        "antigravity":  {"name": "Antigravity",    "emoji": "🪐", "hint": "Install Antigravity CLI: see antigravity.google/docs/cli-using",
+                         "about": "Google's coding agent (Gemini models, plus Claude). Replaces the Gemini CLI.",
+                         "install": "", "docs": "https://antigravity.google/docs/cli-using"},
+        "gemini":       {"name": "Gemini CLI",     "emoji": "✨", "hint": "Install: npm install -g @google/gemini-cli",
+                         "about": "Google's older CLI. Personal accounts no longer work; use an API key or Antigravity.",
+                         "install": "npm install -g @google/gemini-cli",
+                         "docs": "https://github.com/google-gemini/gemini-cli"},
+        "codex":        {"name": "Codex CLI",      "emoji": "🧠", "hint": "Install: npm install -g @openai/codex",
+                         "about": "OpenAI's coding agent. Sign in with your ChatGPT plan or an API key.",
+                         "install": "npm install -g @openai/codex",
+                         "docs": "https://github.com/openai/codex"},
+        "ollama":       {"name": "Ollama",         "emoji": "🦙", "hint": "Download from https://ollama.com/download",
+                         "about": "Run open models on your own computer. Free and private.",
+                         "install": "", "docs": "https://ollama.com/download"},
     }
 
     def _run_rescan():
@@ -316,6 +329,9 @@ async def rescan_integrations():
                 "key": key, "name": meta["name"], "emoji": meta["emoji"],
                 "found": found, "hint": meta["hint"] if not found else "",
                 "models": [],
+                "about": meta["about"], "install": meta["install"], "docs": meta["docs"],
+                # Startable from the catalog only if RAPR loaded it (Gemini is hidden when absent).
+                "startable": found and (key == "claude" or key in _st.integrations),
             }
             if key == "ollama" and found:
                 try:
@@ -359,6 +375,10 @@ async def rescan_integrations():
                 "found":  found,
                 "hint":   info.get("setup_hint", "") if not found else "",
                 "models": [],
+                "about":  info.get("about", ""),
+                "install": info.get("install", ""),
+                "docs":   info.get("docs", ""),
+                "startable": found,
             })
 
         # Keep flat legacy keys for backward compat + add rich _items list

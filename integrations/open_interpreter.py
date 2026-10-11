@@ -74,3 +74,8 @@ SETUP_HINT: str = (
     "Set OPENAI_API_KEY or ANTHROPIC_API_KEY in .env  |  "
     "Local models: interpreter --local"
 )
+
+# Catalog (Settings → AI Integrations)
+ABOUT   = 'Lets a model run code on your computer to get things done.'
+INSTALL = 'pip install open-interpreter'
+DOCS    = 'https://docs.openinterpreter.com'

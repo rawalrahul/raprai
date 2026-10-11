@@ -27,3 +27,8 @@ STDIN_PROMPT = True  # signals ai_runner to pipe prompt via stdin
 
 ENV_VARS   = []   # API key is optional — Codex CLI handles auth internally
 SETUP_HINT = "Install: npm install -g @openai/codex"
+
+# Catalog (Settings → AI Integrations)
+ABOUT   = "OpenAI's coding agent. Sign in with your ChatGPT plan or an API key."
+INSTALL = 'npm install -g @openai/codex'
+DOCS    = 'https://github.com/openai/codex'

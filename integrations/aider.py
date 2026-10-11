@@ -32,3 +32,8 @@ SETUP_HINT: str = (
     "Set ANTHROPIC_API_KEY or OPENAI_API_KEY in .env  |  "
     "Aider picks the key that matches the model selected"
 )
+
+# Catalog (Settings → AI Integrations)
+ABOUT   = 'Open-source pair programmer in your terminal; works with most model providers.'
+INSTALL = 'pip install aider-chat'
+DOCS    = 'https://aider.chat/docs/install.html'

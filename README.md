@@ -1,551 +1,102 @@
-# RAPR AI — Multi-Session AI Control Platform
+<div align="center">
 
-Run Claude Code, Gemini, Codex, Ollama, and any custom AI CLI as **parallel independent sessions** — controlled from a local web UI in your browser and/or Telegram on your phone. Both channels stay in sync. Every session gets its own terminal, its own working directory, and its own conversation history.
+<img src="frontend2/assets/kelvin/avatar.png" width="96" alt="Kelvin, the RAPR AI penguin">
 
-RAPR AI is free and open source under the [MIT License](LICENSE). Use it, fork it, experiment with it, and contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+# RAPR AI
+
+**Run Claude Code, Codex, Antigravity, Ollama and more side by side, let them work together in group chats, and control them from your browser, Telegram or WhatsApp.**
+
+[![Latest release](https://img.shields.io/github/v/release/rawalrahul/rapr-releases?label=release)](https://github.com/rawalrahul/rapr-releases/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+![Windows | macOS | Linux server](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux%20server-blue)
+[![GitHub stars](https://img.shields.io/github/stars/rawalrahul/raprai?style=social)](https://github.com/rawalrahul/raprai/stargazers)
+
+[Website](https://raprai.com) · [Install](#install) · [Features](#what-you-can-do) · [Full guide](docs/guide.md) · [Contributing](CONTRIBUTING.md)
+
+<img src="docs/assets/demo-group-chat.gif" width="860" alt="A group chat in RAPR AI: Claude builds a /health endpoint, Antigravity reviews it, Codex updates the tests">
+
+<sub>A group chat: Claude builds it, Antigravity reviews it, Codex updates the tests. (Demo recorded with scripted replies.)</sub>
+
+</div>
 
 ---
+
+## Why RAPR AI
+
+You probably already pay for one or two AI coding agents, and each lives in its own terminal. RAPR AI puts them all in one place:
+
+- **Use them together, not one at a time.** Put Claude Code, Codex and Antigravity in one group chat. Ask once; they answer, review each other's work and hand off with `@mentions`.
+- **Leave your desk.** Every session is reachable from your phone through Telegram or WhatsApp, and you get a notification when an AI needs your approval.
+- **Bring the AIs you already have.** RAPR runs the official command-line tools with your own sign-ins, so your existing plans and limits just work. There's nothing to sign up for.
+- **Free and open source** under the MIT license. Everything runs on your computer (or your own server).
+
+## What you can do
+
+| | |
+|---|---|
+| 💬 **Group chats** | Several AIs in one conversation. `@mention` who should answer, or `@all`. Ready-made **crews** give each AI a job: code review, research, launch, debate. |
+| 🧪 **Bake-off** | Give the same task to several AIs. Each works in its own copy of your project; compare the diffs, test results and time, then merge the winner. |
+| 🧭 **Smart routing** | Choose "Auto" and RAPR picks the AI for each task: free local models for easy work, the strongest coding agent for hard work, skipping any AI that's over budget. |
+| 📱 **Phone control** | Telegram bot and WhatsApp (scan a QR code, no Business API). Start sessions, send tasks, approve actions, get files back. |
+| 🖥️ **Parallel sessions** | Many sessions at once, each with its own AI, folder and history. Resume any past conversation. |
+| 🛡️ **Your rules** | Decide what always needs a yes, what is never allowed and what can run on its own. Every decision is logged. |
+| 🧠 **Shared memory & playbooks** | What one AI learns is available to the others. RAPR keeps how-to notes from past tasks. |
+| ☁️ **Your own server** | One command installs RAPR on any Linux server (Oracle's free tier works) with a free public address, so it runs while your laptop is off. |
+
+## Works with
+
+**Coding agents** (they use your own sign-in): Claude Code · Codex · Antigravity · Copilot CLI · Cursor · OpenCode · Droid · Qwen Code · Kiro (Amazon Q) · Aider · Goose · Kilo Code · OpenClaw · Open Interpreter
+
+**Free and local:** Claude Code and Codex on a local model through Ollama, plus Ollama on its own
+
+**Models through an API key:** Groq · OpenRouter · GitHub Models · LM Studio and any OpenAI-compatible server
+
+**Anything else:** add any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com) in Settings → Agents over ACP, or any command-line AI in Settings → AI Integrations.
+
+Install the tools you want, and RAPR finds them. **Settings → AI Integrations** lists every supported AI with its install command.
+
+## Install
+
+**Windows:** download the installer from [raprai.com](https://raprai.com) or the [latest release](https://github.com/rawalrahul/rapr-releases/releases/latest), run it, and follow the setup page that opens.
+> Windows SmartScreen may warn because the installer isn't code-signed yet: click **More info → Run anyway**.
+
+**macOS:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/rawalrahul/raprai/main/scripts/install-mac.sh | bash
+```
+This adds a **RAPR AI** app to your Applications and a `rapr` command.
+
+**Linux server** (Ubuntu/Debian, x86 or ARM):
+```bash
+curl -fsSL https://raw.githubusercontent.com/rawalrahul/raprai/main/scripts/install-server.sh | bash
+```
+RAPR runs in Docker and prints a public address to open. `rapr url`, `rapr logs` and `rapr update` manage it. See [docs/cloud-setup.md](docs/cloud-setup.md).
+
+**From source:** see the [full guide](docs/guide.md#prerequisites).
+
+On first launch, a short setup page asks for a PIN and (optionally) a Telegram bot. Then pick an AI and start a session.
 
 ## How it works
 
 ```
-Browser (http://localhost:8000)  ←── WebSocket ──┐
-                                                  ├── Session Manager ── Session 1: Claude Code  (C:\projects\webapp)
-Telegram App (your phone)        ←── Bot API  ────┘                  ├── Session 2: Ollama       (C:\projects\data)
-                                        ↑                            ├── Session 3: Gemini       (C:\projects\api)
-                                   web_app.py                        └── Session 4: Shell         (C:\scripts)
-                             (single Python process)
+ Browser  ─┐                                     ┌─ Claude Code  (~/projects/web)
+ Telegram ─┼─▶  RAPR AI  (one Python process) ──┼─ Codex        (~/projects/web)
+ WhatsApp ─┘    sessions · group chats · rules   ├─ Antigravity  (~/projects/api)
+                                                 └─ Ollama       (offline)
 ```
 
-- **Multi-session** — run Claude Code, Gemini, Codex, Ollama, custom AIs, and a raw shell at the same time, each with its own directory and history
-- **Focused session** — Telegram always routes to the session you last tapped. Switch focus with one button tap
-- **Group chats** — put several AIs (Claude, Gemini, Codex, Ollama, …) in one conversation. Ask once and they all answer, reading and building on each other's replies; `@mention` a member to choose who answers, and any member can pull another in with an @mention. Works from the web UI, Telegram (`/group`) and WhatsApp
-- **WhatsApp control** — link RAPR to WhatsApp by scanning a QR code (free, no Business API) and talk to your sessions and group chats from your "Message yourself" chat
-- **Web UI** — chat bubbles, session picker chip, directory bar, per-session badges, thinking indicator
-- **Full sync** — web messages forwarded to Telegram, Telegram messages shown in browser, both always in sync
-- **File auto-send** — any AI-generated file (PDF, image, video, code) sent to Telegram as a proper attachment the moment it's created
-- **Chat history** — every session auto-saved; browse, view, resume with context, rename, or delete from web UI or Telegram
-- **Shared AI memory** — knowledge learned in one AI session is available to all others via persistent memory store
-- **Computer use** — AI controls your desktop: mouse, keyboard, windows, and apps via 13 built-in tools. Tier 1 works with any AI (Claude, Gemini, Codex, Ollama) via tool injection. Tier 2 uses native vision APIs so Claude, Gemini, and Codex see the screen after every action and respond in real time
-- **RAPR Packages** — browse, search, and one-click install MCP servers, skills, and plugins
-- **Cloud backup** — automatic database backups to OneDrive, Google Drive, Dropbox, or a local folder with scheduling and job history
-- **Custom AI management** — add or remove AI integrations from the Settings UI without editing files or restarting
+RAPR starts each AI's own command-line tool in the folder you choose and streams its replies to every channel. Your chats, settings and keys stay in RAPR's data folder on your machine; keys are encrypted.
 
----
+## Documentation
 
-## Prerequisites
-
-| Requirement | Notes |
-|-------------|-------|
-| Windows 10/11 | Uses Windows-specific subprocess flags |
-| Python 3.10+ | [python.org](https://www.python.org/downloads/) — tick "Add to PATH" during install |
-| A Telegram account | To create the bot and receive messages |
-| Claude Code installed | `claude` must be on your PATH (or whichever AI CLIs you want to use) |
-
----
-
-## Step 1 — Create a Telegram Bot
-
-1. Open Telegram and search for **@BotFather**
-2. Send `/newbot`
-3. Choose a name (e.g. `My RAPR AI`)
-4. Choose a username ending in `bot` (e.g. `my_raprai_bot`)
-5. BotFather replies with a token:
-   ```
-   123456789:ABCDefgh-XXXXXXXXXXXXXXXXXXXXXXX
-   ```
-   Copy it — you'll need it in Step 3.
-
-6. *(Optional)* Give your bot Kelvin's face: send `/setuserpic` to **@BotFather**, pick your bot, and upload `frontend2/assets/kelvin/avatar.png`.
-
-> **Desktop Kelvin.** On Windows a small Kelvin sits on your desktop. Drag him anywhere, scroll the mouse wheel over him to resize (small, medium, large), hover and click ✕ to hide him, or right-click for *Hide for 1 hour* and *Show → Only while AI works* (he then appears only when an AI is working or needs your approval). The same choices are in the tray menu (**Kelvin on desktop**) and **Settings → Personalization**.
-
-> **Kelvin stickers.** Kelvin, the RAPR AI penguin, can also send a sticker when a long task or pipeline finishes, when a run fails, and alongside approval requests. It's off by default: turn on **Settings → Personalization → Kelvin stickers on Telegram**.
-
----
-
-## Step 2 — Find your Telegram User ID
-
-1. Open Telegram and search for **@userinfobot**
-2. Send `/start`
-3. It replies with your numeric user ID (e.g. `987654321`)
-
-   Copy it — this whitelists only you to control the bot.
-
----
-
-## Step 3 — Set up the project
-
-Open a Command Prompt in the project folder and run:
-
-```bat
-setup.bat
-```
-
-This will:
-- Check that Python is installed
-- Install all Python dependencies (`python-telegram-bot`, `fastapi`, `uvicorn`, `python-dotenv`)
-- Copy `.env.example` → `.env`
-
----
-
-## Step 4 — Configure `.env`
-
-Open `.env` in any text editor and fill in the required values (or use the setup wizard at `http://localhost:8000/setup` on first run):
-
-```env
-TELEGRAM_BOT_TOKEN=123456789:ABCDefgh-XXXXXXXXXXXXXXXXXXXXXXX
-ALLOWED_USER_IDS=987654321
-```
-
-> **Note:** API keys and tokens are automatically migrated to an encrypted vault on first run. After migration, `.env` entries show `vault-managed` as a placeholder — the real values are Fernet-encrypted in SQLite.
-
-All available settings:
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `TELEGRAM_BOT_TOKEN` | ✅ | Token from @BotFather (Step 1) |
-| `ALLOWED_USER_IDS` | ✅ | Your user ID from @userinfobot (Step 2). Comma-separate for multiple users. |
-| `SESSION_CWD` | — | Default working directory when a new session is created (defaults to the folder where you run the script) |
-| `OUTPUT_IDLE_TIMEOUT` | — | Seconds of silence before assuming output is done (default: `1.5`) |
-| `OUTPUT_MAX_WAIT` | — | Hard cap in seconds before returning whatever was received (default: `60`) |
-| `OUTPUT_NO_RESPONSE` | — | Seconds to wait if no output arrives at all (default: `5`) |
-| `WEB_PORT` | — | Port for the web UI (default: `8000`) |
-| `WEB_HOST` | — | Host to bind the web server to (default: `127.0.0.1`) |
-| `CLAUDE_TIMEOUT` | — | Max seconds to wait for any AI response (default: `600`). Increase for long tasks. |
-
----
-
-## Step 5 — Run
-
-Double-click **`launch.bat`**, or run it from the command line:
-
-```bat
-:: Start with the default working directory (from .env or the script folder)
-launch.bat
-
-:: Start in a specific project folder
-launch.bat C:\projects\myapp
-launch.bat "C:\My Projects\website"
-```
-
-Your browser opens automatically at **http://localhost:8000**. The Telegram bot is active at the same time.
-
-> **Tip — per-project shortcuts:** Right-click `launch.bat` → *Create shortcut*, open the shortcut properties, and append your project path to the **Target** field:
-> ```
-> C:\...\raprai\launch.bat  C:\projects\website
-> ```
-> Give each shortcut a different name and pin them to your taskbar.
-
----
-
-## Sessions — the core concept
-
-RAPR AI is built around sessions. Each session is an independent process with its own AI, working directory, and conversation history. You can run as many as you like simultaneously.
-
-**Focused session** — only one session is "focused" at a time. All typing (in Telegram or the web UI) goes to the focused session. You can switch focus at any moment.
-
-**Session states:**
-- 🟢 Running (shell, no AI active)
-- 🟡 Running with an AI (Claude / Gemini / Codex)
-- 🔴 Stopped
-
-**Resuming a stopped session** — you can restart any stopped session. You can also switch it to a different AI when you resume — e.g. start a session with Claude Code, stop it, resume it under Gemini.
-
----
-
-## Web UI
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│  ◈ RAPR AI                                   ≡  ●      │  ← header (history / connection)
-│──────────────────────────────────────────────────────────────│
-│  📁  2 sessions ·  C:\projects\webapp              [🔍]      │  ← dir bar (focused session CWD)
-│──────────────────────────────────────────────────────────────│
-│                                                              │
-│                                 You   [🤖 Claude #1]  12:34 │
-│                    ┌──────────────────────────────────┐      │
-│                    │  refactor the auth module        │      │
-│                    └──────────────────────────────────┘      │
-│                                                              │
-│  Claude Code  🤖 Claude #1                          12:34   │
-│  ┌──────────────────────────────────────────────────┐        │
-│  │  I'll start by reading the current auth files…   │        │
-│  └──────────────────────────────────────────────────┘        │
-│                                                              │
-│  🤖 Claude #1…  ● ● ●                                        │  ← per-session thinking indicator
-│                                                              │
-│──────────────────────────────────────────────────────────────│
-│  [🤖 Claude #1 ▾]  Type a message…                  [Send]  │  ← session picker + input
-└──────────────────────────────────────────────────────────────┘
-```
-
-### Session picker chip (bottom-left)
-
-Click the chip (shows the focused session's emoji and name) to open the sessions menu:
-
-- **Active sessions** — all running/stopped sessions listed. Tick marks the focused one. Tap any to switch focus.
-- **New Session** — create a new session with Claude Code, any loaded integration, or a raw shell.
-- **Focused Session controls** — interrupt, stop, or clear history for the current session.
-
-### Changing the working directory
-
-Click the path in the directory bar, type a new path, and press **Enter**. This changes the CWD for the focused session only. Other sessions keep their own directories.
-
----
-
-## Telegram — how multi-session works
-
-Telegram stays simple. There is always one focused session. All your messages go there.
-
-**To switch which session you're talking to:**
-Tap the **📋 Sessions** button (or send `/status`) → tap any session from the list.
-
-**To create a new session:**
-Tap **➕ New Session** → pick an AI.
-
-**Session controls keyboard** — appears below most session-related replies:
-
-| Button | What it does |
-|--------|-------------|
-| **📋 All Sessions** | Lists all sessions; tap one to focus it |
-| **📁 Change Dir** | Opens the folder browser for the focused session |
-| **🔀 Switch AI** | Changes the AI of the focused session (restarts terminal) |
-| **⏸ Interrupt** | Sends Ctrl+C to the focused session |
-| **⏹ Stop Session** | Stops the focused session (keeps history) |
-| **🗑 End & Delete** | Stops and permanently removes the focused session |
-
----
-
-## Commands
-
-### Telegram commands
-
-**Session management**
-
-| Command | What it does |
-|---------|-------------|
-| `/launch` | Creates a new raw shell session |
-| `/claude` | Creates a new Claude Code session |
-| `/gemini` | Creates a new Gemini session |
-| `/codex` | Creates a new Codex session |
-| `/status` | Lists all sessions with status, AI, and directory |
-| `/kelvin` | Is RAPR on? Uptime, what's running, approvals waiting, next schedule, keep-awake. No reply means RAPR is off or the PC is asleep |
-| `/stop` | Stops the focused session |
-| `/interrupt` | Sends Ctrl+C to the focused session |
-| `/stop_ai` | Removes the AI from the focused session (keeps terminal running as shell) |
-| `/clear` | Clears the Claude conversation history for the focused session |
-
-**Group chats**
-
-| Command | What it does |
-|---------|-------------|
-| `/group` | Lists your group chats as buttons; tap one to enter it, or ➕ New group to tick AI sessions and create one |
-| `/group <number>` | Enters that group: your messages (typed or voice) now go to every member, and each reply comes back signed by the AI that wrote it |
-| `/group new <name>: 1 3` | Creates a group from AI sessions 1 and 3 (`/group new` lists them) |
-| `/group who` / `/group stop` / `/group leave` | Members, stop the replies in progress, back to a single session (tapping a session also leaves) |
-
-Inside a group, start a message with `@Name` (or `@all`) to choose who answers.
-
-**Directory control**
-
-| Command | What it does |
-|---------|-------------|
-| `/cwd` | Shows the focused session's current working directory |
-| `/cwd <path>` | Changes the focused session's working directory |
-| `/browse` | Opens the interactive folder browser |
-
-**Utility**
-
-| Command | What it does |
-|---------|-------------|
-| `/cmd <text>` | Runs a shell command in the focused session |
-| `/timeout` | Shows the current AI response timeout |
-| `/timeout <seconds>` | Sets the AI response timeout |
-| `/start` | Shows help text |
-
-**Chat history**
-
-| Command | What it does |
-|---------|-------------|
-| `/history` | Shows your last 5 saved messages |
-| `/history <n>` | Shows last n messages, max 20 |
-| `/resume` | Creates a new session with context from your most recent saved session |
-| `/resume <date>` | Creates a new session with context from a specific date |
-| `/clear_context` | Discards any pending resume context |
-
-### Natural language shortcuts
-
-You don't need to memorise commands. These plain-text phrases work too:
-
-| Type this | What happens |
-|-----------|-------------|
-| `menu` / `help` / `?` | Opens the main menu |
-| `sessions` / `list sessions` | Shows all sessions |
-| `new claude` / `start claude` | Creates a new Claude Code session |
-| `new gemini` / `start gemini` | Creates a new Gemini session |
-| `stop` / `kill` / `quit` | Stops the focused session |
-| `interrupt` / `cancel` / `ctrl+c` | Sends Ctrl+C |
-| `resume` / `continue` | Resumes the most recent saved session |
-| `folder` / `cwd` / `directory` | Shows the current directory |
-| `status` / `session status` | Lists all sessions |
-
----
-
-## Working with multiple sessions
-
-The real power is running sessions in parallel. A typical multi-session workflow:
-
-```
-1. Create a Claude Code session in C:\projects\webapp
-   → Ask Claude to plan a refactor
-
-2. Without stopping Claude, create a Gemini session in C:\projects\data
-   → Ask Gemini to analyse the database schema in parallel
-
-3. Claude finishes → switch back to it, review the plan
-   → Files appear in Telegram from both sessions independently
-
-4. Stop the Gemini session
-   → Claude session keeps running, history preserved
-
-5. Resume the Gemini session later with a different working directory
-   → Pick Codex as the AI this time
-```
-
-Each session's files, CWD, and conversation history are completely independent. Stopping one never affects another.
-
----
-
-## Group chats
-
-Open **👥 Group Chats** in the header (or the sidebar section), pick any of your open AI sessions, and chat with all of them at once.
-
-- Each message gets up to 3 rounds and 10 replies. Members answer one at a time and see the whole conversation, so they build on each other instead of repeating.
-- `@Name` (full name, name without spaces, or first word) or `@all` picks who answers; a member can pull another in the same way. A member with nothing to add replies `(pass)` and stays quiet.
-- A new message or **Stop** ends the replies in progress. Groups are saved, and a member keeps answering from its saved AI/model/folder even after its session is closed.
-- The same group can be used from the web UI, Telegram and WhatsApp at once; every app that's in the group sees every message.
-- Kelvin shows a crew for the group while it answers: one Kelvin per member in its AI's beanie, working, done or waiting. It also counts as work for the tray, keep-awake, `/kelvin` and the "done" sticker.
-
----
-
-## WhatsApp
-
-Free WhatsApp control through [neonize](https://github.com/krypton-byte/neonize) (whatsmeow): RAPR joins your WhatsApp as a linked device, the same way WhatsApp Web does. No Meta developer account, no per-message fees.
-
-1. **Settings → WhatsApp → Link WhatsApp**.
-2. On your phone: WhatsApp → Settings → **Linked devices** → **Link a device**, and scan the QR code.
-3. Open your **"Message yourself"** chat and type. Your message goes to the focused session (or the group chat you're in) and the reply comes back there.
-
-| Message | What it does |
-|---------|-------------|
-| any text | Sent to the focused session, or to your group chat |
-| `/sessions`, `/use 2` | List sessions, switch to session 2 |
-| `/new claude` | Start a session (any AI: `gemini`, `codex`, `ollama`, …) |
-| `/group …` | Group chats, same commands as on Telegram |
-| `/status`, `/help` | What's running; the command list |
-
-RAPR only acts on your "Message yourself" chat and on numbers you add under **Also accept messages from** (for when RAPR is linked to a spare number). Chats with other people, groups and statuses are ignored. **Unlink** in Settings, or removing the device on your phone, disconnects it. WhatsApp's terms don't cover unofficial clients, so a dedicated or spare number is the safest choice.
-
----
-
-## File Auto-Send
-
-When an AI creates a file in the session's working directory, RAPR AI detects it and sends it to Telegram automatically. The message includes which session produced the file.
-
-| File type | Extensions | Telegram action |
-|-----------|-----------|----------------|
-| Photo | `.png` `.jpg` `.jpeg` `.gif` `.webp` `.bmp` | Sent as photo |
-| Animated GIF | `.gif` | Sent as animation |
-| Video | `.mp4` `.mov` `.avi` `.mkv` `.webm` | Sent as video |
-| Document | `.pdf` `.pptx` `.ppt` `.docx` `.doc` `.xlsx` `.xls` `.csv` `.html` `.htm` `.zip` `.tar` `.gz` `.txt` `.md` | Sent as document |
-
-Files up to **50 MB** are supported. The web UI also shows a clickable link at `http://localhost:8000/files/<filename>`.
-
----
-
-## Chat History
-
-Every session is auto-saved to the SQLite database (`raprai.db`). Nothing to configure.
-
-### Web UI — 📂 History button
-
-Click the history icon in the header to open the modal. Each saved session shows its name (or date) and message count.
-
-Click a session row to expand it:
-
-| Button | What it does |
-|--------|-------------|
-| **👁 View** | Replays the session in the chat window (read-only). Click **↩ Back to Live** to return. |
-| **▶ Resume with context** | Creates a new session with the last 10 exchanges injected as context. |
-| **✎ Rename** | Sets a custom name (e.g. *"Portfolio site project"*). Press **Enter** to save. |
-| **🗑** | Permanently deletes that day's log file. |
-
-### Telegram
-
-```
-You:  /resume
-Bot:  ✅ Resumed: "Portfolio site project" (10 exchanges loaded)
-      📁 Directory restored: C:\projects\myapp
-      🤖 Claude Code re-activated — just type to continue.
-
-You:  now add dark mode to the navbar
-Bot:  📎 Context injected. Thinking…
-      (Claude responds with full context of the previous session)
-```
-
-### Notes
-
-- History is not AI memory — each CLI is stateless. Resume works by loading conversation summaries and recent messages as context for your next session.
-- All data is stored in `raprai.db` (SQLite with WAL mode). Legacy `chat_logs/` files are auto-migrated on first run.
-- Custom session names are stored in the database alongside chat history.
-- Use the Cloud Backup feature (Settings → Cloud Backup) to back up the database to OneDrive, Google Drive, Dropbox, or a local folder.
-
----
-
-## Adding AI integrations
-
-RAPR AI supports two ways to add new AI integrations:
-
-### From the Settings UI (recommended)
-
-Open Settings (gear icon) → scroll to "Add Custom AI Integration" → fill in the key, name, command template, and optional fields → click Add. The new AI appears immediately in the session picker — no restart needed.
-
-Command templates support `{prompt}` and `{model}` placeholders. Enable "Pipe prompt via stdin" if your CLI reads from stdin instead of command-line arguments.
-
-### From the integrations/ folder
-
-Drop a `.py` file into the `integrations/` folder and restart. Each file defines KEY, NAME, EMOJI, COLOR, and a `build_command(prompt)` function. See `integrations/_template.py` for the format.
-
----
-
-## Shared AI Memory
-
-RAPR AI maintains a persistent memory store that all AI sessions share. Knowledge learned in one AI session is available to all others.
-
-**How it works:** Relevant memories are automatically injected into AI prompts based on keyword matching. Memories can be added manually or extracted automatically at session end.
-
-**Adding memories:**
-- Type `/remember <fact>` in any chat session
-- Use the Memory panel in the sidebar to quick-add entries
-- Memories are auto-extracted from session transcripts when a session ends
-
-**Memory categories:** preference, fact, project, person, decision, instruction
-
-**Memory panel:** Open from the sidebar to browse, search, pin, archive, or delete memories. Pinned memories are always injected into AI prompts.
-
----
-
-## RAPR Packages
-
-Browse, search, and one-click install packages (MCP servers, skills, plugins) from the unified RAPR Packages sidebar panel. The Installed tab shows all detected skills, plugins, and MCP servers in one view. The Browse tab lets you discover and install new packages from the catalog.
-
-Upload `.raprpkg` files to install from local packages. Each `.raprpkg` is a ZIP with a `manifest.json` describing the package type, dependencies, and metadata. Installs are atomic with automatic rollback on failure.
-
----
-
-## Cloud Backup
-
-Back up the full RAPR AI database to cloud storage or a local folder. Configure from Settings → Cloud Backup.
-
-Supported providers: OneDrive, Google Drive, Dropbox, and local/network folder. Each provider uses OAuth 2.0 for authentication (tokens stored in the encrypted vault). The local provider requires no authentication — just set a folder path.
-
-No OAuth apps are bundled: to use OneDrive, Google Drive or Dropbox, register your own app with the provider and set its credentials in `.env` (`BACKUP_GDRIVE_CLIENT_ID`, `BACKUP_GDRIVE_CLIENT_SECRET`, etc. — see `.env.example`) or in Settings → Cloud Backup.
-
-Schedule automatic backups (daily or weekly at a chosen time), or trigger a manual backup with the "Backup Now" button. Each backup is a ZIP containing the SQLite database, a SHA-256 checksum, and a manifest with table row counts. Job history shows status, size, and timestamps for recent backups.
-
----
-
-## Running on startup (optional)
-
-To start automatically when you log into Windows:
-
-1. Press `Win + R`, type `shell:startup`, press Enter
-2. Create a shortcut pointing to:
-   ```
-   pythonw "C:\path\to\raprai\web_app.py"
-   ```
-   (`pythonw` runs Python without a visible console window.)
-
----
-
-## Project files
-
-```
-RAPR-AI/
-├── web_app.py            # Main entry point (Web UI + Telegram bot + session manager)
-├── requirements.txt      # Python dependencies
-├── .env                  # Your config (secrets auto-migrated to encrypted vault)
-├── .env.example          # Config template
-├── setup.bat             # One-time setup (install deps, create .env)
-├── launch.bat            # Daily launcher — accepts optional path argument
-├── helm/                 # Core application package
-│   ├── ai_runner/        # AI session management (core.py, ollama.py)
-│   ├── frontend/         # Modular web UI (template.html, styles.css, JS modules)
-│   ├── packages/         # RAPR Packages system (installer, catalog)
-│   ├── mcp/              # MCP server management
-│   ├── web_routes/       # FastAPI route modules
-│   ├── db.py             # SQLite database (WAL mode, FTS5)
-│   ├── cloud_backup/     # Cloud backup system (OneDrive, GDrive, Dropbox, local)
-│   ├── db_migrate.py     # Schema migrations (currently v8)
-│   ├── integrations.py   # AI integration loader (file-based + custom JSON)
-│   ├── memory.py         # Shared AI memory system (encrypted at rest)
-│   ├── token_vault.py    # Fernet-encrypted credential vault
-│   ├── security.py       # Security constants and helpers
-│   ├── plugins.py        # Plugin system
-│   └── skills.py         # Skill registry
-├── integrations/         # AI plugin definitions (one .py per AI)
-│   ├── _template.py      # Template for new integrations
-│   ├── gemini.py
-│   └── codex.py
-├── raprai.db             # SQLite database (auto-created)
-├── README.md             # This file
-└── chat_logs/            # Legacy (migrated to SQLite)
-```
-
----
-
-## Troubleshooting
-
-**Bot doesn't respond**
-- Check the console for errors
-- Make sure `TELEGRAM_BOT_TOKEN` is correct in `.env`
-- Only user IDs listed in `ALLOWED_USER_IDS` can use the bot
-
-**Web UI not opening**
-- Make sure port 8000 is free (`WEB_PORT` in `.env` to change it)
-- Navigate to `http://localhost:8000` manually if the browser didn't open
-
-**Session says "stopped" when I try to type**
-- Tap the session in the list → choose **Resume** and pick an AI to restart it
-
-**Files not being sent to Telegram**
-- The file must be created inside the session's working directory
-- Files over 50 MB cannot be sent via Telegram Bot API
-- Send any message to the bot first if you've only been using the web UI — the bot needs to know your chat ID
-
-**Output is cut off**
-- Long output is split into multiple messages automatically (3,800 chars each)
-- Increase `OUTPUT_MAX_WAIT` in `.env` if responses are being truncated
-
-**Claude/Codex/Gemini not found**
-- Make sure the CLI is installed and on your system PATH
-- Test by opening `cmd.exe` manually and typing `claude` (or `codex`/`gemini`)
-
-**Working directory change not taking effect**
-- Make sure the path exists before switching
-- Use full absolute paths (e.g. `C:\Users\me\projects`) not relative ones
-- Each session has its own CWD — changing it in one session doesn't affect others
-
-**Switching AI on a session clears the conversation history**
-- This is intentional. A new AI needs a clean slate; the old history is still in the daily log file.
-
----
+- [Full guide](docs/guide.md): Telegram setup, every command, sessions, history, files, memory, packages and backups
+- [Run it on your own server](docs/cloud-setup.md)
+- [Release notes](release-notes/)
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) to get set up, and [SECURITY.md](SECURITY.md) to report a vulnerability privately.
+Ideas, bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), and look for issues labelled **good first issue**. If RAPR AI is useful to you, a ⭐ helps other people find it.
 
 ## License
 
-RAPR AI is released under the [MIT License](LICENSE).
+[MIT](LICENSE): use it, fork it, build on it.

@@ -25,3 +25,8 @@ SETUP_HINT: str = (
     "Configure provider: goose configure  |  "
     "Set ANTHROPIC_API_KEY or OPENAI_API_KEY in .env"
 )
+
+# Catalog (Settings → AI Integrations)
+ABOUT   = "Block's open-source agent; bring any model provider."
+INSTALL = ''
+DOCS    = 'https://block.github.io/goose/docs/getting-started/installation'

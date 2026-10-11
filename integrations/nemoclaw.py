@@ -134,3 +134,8 @@ SETUP_HINT: str = (
     "Get a free NVIDIA API key from https://build.nvidia.com  |  "
     "Set NEMOCLAW_SANDBOX=your-sandbox-name in .env"
 )
+
+# Catalog (Settings → AI Integrations)
+ABOUT   = "OpenClaw in NVIDIA's sandbox (Windows + WSL). Free NVIDIA API key."
+INSTALL = ''
+DOCS    = 'https://build.nvidia.com'

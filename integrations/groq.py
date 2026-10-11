@@ -32,3 +32,8 @@ SETUP_HINT = (
     "Popular models: openai/gpt-oss-120b, openai/gpt-oss-20b (faster). "
     "Current list: console.groq.com/docs/models"
 )
+
+# Catalog (Settings → AI Integrations)
+ABOUT   = "Very fast open models (gpt-oss) through Groq's API, with a free tier. Needs an API key."
+INSTALL = ''
+DOCS    = 'https://console.groq.com/keys'

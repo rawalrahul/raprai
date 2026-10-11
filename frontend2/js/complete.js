@@ -52,6 +52,8 @@ async function loadIntegrations(){
       AI_LABEL[key] = name;
       _integrationKeys[key] = name;
       AI_COLOR[key] = 'var(--' + key + ')';
+      // Only AIs that are set up go in the menu; the rest are in the catalog below.
+      if(!ready) continue;
       // Inject "New Session: ..." button before Shell mode
       const btn = document.createElement('button');
       btn.className = 'ai-menu-item';
@@ -62,6 +64,13 @@ async function loadIntegrations(){
       btn.onclick = () => { cmd('new_session:'+key); closeAiMenu(); };
       shellBtn.parentNode.insertBefore(btn, shellBtn);
     }
+    // "Add more AIs" opens the catalog (Settings → AI Integrations).
+    const more = document.createElement('button');
+    more.className = 'ai-menu-item';
+    more.dataset.newAi = '__catalog';
+    more.innerHTML = '<span class="menu-dot" style="background:transparent">➕</span>Add more AIs…';
+    more.onclick = () => { closeAiMenu(); openAiCatalog(); };
+    shellBtn.parentNode.insertBefore(more, shellBtn);
     const styleEl = document.createElement('style');
     styleEl.id = 'dynamic-integration-styles';
     styleEl.textContent = css;
@@ -2038,6 +2047,14 @@ openSchedules = function(){
 
 // --- Settings panel --------------------------------------------------------------------------------------------
 
+function openAiCatalog(){
+  openSettings();
+  setTimeout(() => {
+    const el = document.getElementById('ai-int-list');
+    if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+  }, 150);
+}
+
 function openSettings(){
   const m = document.getElementById('settings-modal');
   m.style.display = 'flex';
@@ -2442,21 +2459,35 @@ function _renderIntegrationList(data){
     hint: !data[key] ? meta.hint : '',
     models: key === 'ollama' && Array.isArray(data.ollama_models) ? data.ollama_models : [],
   }));
-  const rows = items.map(item => {
+  // Catalog: installed AIs first, each with what it is, how to install it and a way to start it.
+  const sorted = items.slice().sort((x, y) => (y.found === true) - (x.found === true));
+  const rows = sorted.map(item => {
     const found = item.found;
-    const dotCls = found ? 'ok' : 'miss';
-    let hint = '';
-    if(!found && item.hint) hint = `<span class="ai-int-hint" title="${escHtml(item.hint)}">${escHtml(item.hint)}</span>`;
-    else if(found && Array.isArray(item.models) && item.models.length){
-      hint = `<span class="ai-int-hint" style="color:var(--dim)">${item.models.join(', ')}</span>`;
+    const key = escHtml(item.key);
+    const status = `<span class="ai-cat-status ${found ? 'ok' : ''}">${found ? '✓ Ready' : 'Not set up'}</span>`;
+    const about = item.about ? `<div class="ai-cat-about">${escHtml(item.about)}</div>` : '';
+    const acts = [];
+    if(found && item.startable){
+      acts.push(`<button class="ai-cat-btn primary" onclick="cmd('new_session:${key}');if(typeof closeSettings==='function')closeSettings()">▶ Start session</button>`);
     }
-    return `<div class="ai-int-row">
-      <span class="ai-int-dot ${dotCls}"></span>
-      <span class="ai-int-name">${escHtml((item.emoji||'🤖')+' '+item.name)}</span>
-      ${hint}
-      <span style="font-size:11px;color:${found?'#22c55e':'#6b7280'};white-space:nowrap">
-        ${found ? '✓ Detected' : '✗ Not found'}
-      </span>
+    if(found && Array.isArray(item.models) && item.models.length){
+      acts.push(`<span class="ai-cat-note">${escHtml(item.models.join(', '))}</span>`);
+    }
+    if(!found && item.install){
+      acts.push(`<code class="ai-cat-cmd">${escHtml(item.install)}</code><button class="ai-cat-btn" onclick="navigator.clipboard&&navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='Copied'">Copy</button>`);
+    } else if(!found && item.hint && !item.docs){
+      acts.push(`<span class="ai-cat-note">${escHtml(item.hint)}</span>`);
+    }
+    if(item.docs){
+      acts.push(`<a class="ai-cat-link" href="${escHtml(item.docs)}" target="_blank" rel="noopener">${found ? 'Docs' : 'How to install'} ↗</a>`);
+    }
+    return `<div class="ai-int-row ai-cat-row">
+      <span class="ai-int-dot ${found ? 'ok' : 'miss'}"></span>
+      <div class="ai-cat-main">
+        <div class="ai-cat-head"><span class="ai-int-name">${escHtml((item.emoji||'🤖')+' '+item.name)}</span>${status}</div>
+        ${about}
+        ${acts.length ? `<div class="ai-cat-actions">${acts.join('')}</div>` : ''}
+      </div>
     </div>`;
   });
   list.innerHTML = rows.join('');

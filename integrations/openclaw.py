@@ -79,3 +79,8 @@ SETUP_HINT: str = (
     "Set OPENCLAW_AGENT=<name> to use a different agent profile  |  "
     "Set OPENCLAW_MODEL=<model> to pin a specific model"
 )
+
+# Catalog (Settings → AI Integrations)
+ABOUT   = 'Open-source personal agent; uses your own provider logins.'
+INSTALL = 'npm install -g openclaw'
+DOCS    = 'https://docs.openclaw.ai'

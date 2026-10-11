@@ -1854,3 +1854,20 @@ select option,
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* AI catalog (Settings → AI Integrations) */
+.ai-cat-row { align-items: flex-start; }
+.ai-cat-row .ai-int-dot { margin-top: 6px; }
+.ai-cat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ai-cat-head { display: flex; align-items: center; gap: 8px; }
+.ai-cat-status { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.ai-cat-status.ok { color: var(--color-success, #22c55e); }
+.ai-cat-about { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.ai-cat-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ai-cat-cmd { font-family: var(--font-mono, monospace); font-size: 11px; padding: 3px 6px;
+  border-radius: 4px; background: var(--surface2, rgba(127,127,127,.12)); overflow-wrap: anywhere; }
+.ai-cat-btn { font-size: 11px; padding: 3px 9px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--border, rgba(127,127,127,.3)); background: transparent; color: var(--text); }
+.ai-cat-btn.primary { background: var(--accent, #f2b33d); border-color: transparent; color: #1b1712; font-weight: 600; }
+.ai-cat-link { font-size: 11px; color: var(--accent, #06b6d4); text-decoration: none; }
+.ai-cat-note { font-size: 11px; color: var(--muted); }

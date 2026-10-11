@@ -104,7 +104,8 @@ def add_custom(entry: dict) -> str:
         "claude", "ollama", "shell",
         "gemini", "antigravity", "codex", "openrouter", "groq",
         "local_ai", "github_models", "nemoclaw", "openclaw",
-        "cursor", "kilocode",
+        "cursor", "kilocode", "claude_ollama", "codex_ollama",
+        "opencode", "droid", "qwen_code", "copilot",
     }
     if key in _RESERVED:
         raise ValueError(f"Cannot override built-in AI: {key}")
@@ -225,6 +226,11 @@ def load_integrations() -> None:
                     "setup_hint":    getattr(mod, "SETUP_HINT",  ""),
                     "stdin_prompt":  getattr(mod, "STDIN_PROMPT", False),
                     "process_env":   getattr(mod, "PROCESS_ENV",  {}),
+                    # Catalog (Settings → AI Integrations): one-line description,
+                    # install command and docs link.
+                    "about":         getattr(mod, "ABOUT",        ""),
+                    "install":       getattr(mod, "INSTALL",      ""),
+                    "docs":          getattr(mod, "DOCS",         ""),
                 }
                 logger.info("Loaded AI integration: %s (%s)",
                             key, _st.integrations[key]["name"])

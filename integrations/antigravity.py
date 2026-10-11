@@ -77,3 +77,8 @@ STDIN_PROMPT = False  # agy doesn't read stdin in print mode; the prompt is the 
 ENV_VARS   = []       # auth handled by agy itself (Google sign-in)
 SETUP_HINT = ("Install Antigravity CLI (agy), Google's replacement for the Gemini CLI: "
               "see antigravity.google/docs/cli-using, then sign in by running agy once.")
+
+# Catalog (Settings → AI Integrations)
+ABOUT   = "Google's coding agent (Gemini models, plus Claude). Replaces the Gemini CLI."
+INSTALL = ''
+DOCS    = 'https://antigravity.google/docs/cli-using'

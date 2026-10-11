@@ -52,3 +52,8 @@ SETUP_HINT = (
     "Save it as GITHUB_TOKEN in Settings > LLM Provider Setup. "
     "Models: openai/gpt-4o-mini, openai/gpt-4.1, meta/Llama-3.3-70B-Instruct, microsoft/Phi-4."
 )
+
+# Catalog (Settings → AI Integrations)
+ABOUT   = 'GPT, Llama, Phi and more through GitHub, with a free allowance. Needs a GitHub token (Models: read).'
+INSTALL = ''
+DOCS    = 'https://github.com/marketplace/models'

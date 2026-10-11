@@ -42,3 +42,8 @@ SETUP_HINT = ("Install: npm install -g @google/gemini-cli  |  Personal Google ac
 # Trust the working directory so Gemini CLI doesn't block in headless/automated mode.
 # Equivalent to passing --skip-trust on every invocation.
 PROCESS_ENV = {"GEMINI_CLI_TRUST_WORKSPACE": "true"}
+
+# Catalog (Settings → AI Integrations)
+ABOUT   = "Google's older CLI. Personal accounts no longer work; use an API key or Antigravity."
+INSTALL = 'npm install -g @google/gemini-cli'
+DOCS    = 'https://github.com/google-gemini/gemini-cli'

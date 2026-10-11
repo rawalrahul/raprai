@@ -66,3 +66,8 @@ SETUP_HINT: str = (
     "Set OLLAMA_MODEL=model-name in .env to switch models  |  "
     "Available models: deepseek-r1:8b  qwen3:4b  qwen2.5-coder:7b"
 )
+
+# Catalog (Settings → AI Integrations)
+ABOUT   = 'Run open models on your own computer. Free and private.'
+INSTALL = ''
+DOCS    = 'https://ollama.com/download'

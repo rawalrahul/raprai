@@ -36,3 +36,8 @@ SETUP_HINT = (
     "Set API key for your model provider (e.g. ANTHROPIC_API_KEY)  |  "
     "Model format: provider/model-id (e.g. anthropic/claude-sonnet-4-6)"
 )
+
+# Catalog (Settings → AI Integrations)
+ABOUT   = 'Open-source coding agent with 500+ models.'
+INSTALL = 'npm install -g @kilocode/cli'
+DOCS    = 'https://www.npmjs.com/package/@kilocode/cli'

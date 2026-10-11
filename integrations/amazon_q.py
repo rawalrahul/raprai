@@ -33,3 +33,8 @@ SETUP_HINT: str = (
     "Auth: kiro-cli login (free AWS Builder ID — no credit card)  |  "
     "No API key needed — Amazon Q handles auth internally"
 )
+
+# Catalog (Settings → AI Integrations)
+ABOUT   = "AWS's coding agent (Kiro CLI, formerly Amazon Q). Free with an AWS Builder ID."
+INSTALL = ''
+DOCS    = 'https://kiro.dev/docs/cli/'

@@ -32,3 +32,8 @@ SETUP_HINT = (
     "Save your OpenRouter API key in Settings > LLM Provider Setup. "
     "Supports Claude, GPT, Gemini, Llama, Mistral, DeepSeek, and more."
 )
+
+# Catalog (Settings → AI Integrations)
+ABOUT   = 'Hundreds of models (many free) through one API key.'
+INSTALL = ''
+DOCS    = 'https://openrouter.ai/keys'

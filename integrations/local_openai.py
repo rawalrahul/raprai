@@ -53,3 +53,8 @@ SETUP_HINT = (
     "http://localhost:1337; llama.cpp commonly uses http://localhost:8080. "
     "Set LOCAL_AI_API_KEY if your server requires authentication."
 )
+
+# Catalog (Settings → AI Integrations)
+ABOUT   = 'Any local OpenAI-compatible server: LM Studio, Jan, llama.cpp…'
+INSTALL = ''
+DOCS    = 'https://lmstudio.ai'

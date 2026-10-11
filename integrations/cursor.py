@@ -49,3 +49,8 @@ SETUP_HINT = (
     "Set CURSOR_API_KEY env var  |  "
     "If 'agent' conflicts, set CURSOR_CLI_BIN to the full path"
 )
+
+# Catalog (Settings → AI Integrations)
+ABOUT   = "Cursor's coding agent from the terminal. Needs a Cursor account."
+INSTALL = 'curl https://cursor.com/install -fsSL | bash'
+DOCS    = 'https://cursor.com/docs/cli/headless'
