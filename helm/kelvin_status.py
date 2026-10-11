@@ -23,6 +23,7 @@ ASSET_DIR = PROJECT_ROOT / "frontend2" / "assets" / "kelvin"
 
 MOODS = ("idle", "working", "approval", "done", "error")
 DONE_SECONDS = 8
+STEP_SECONDS = 20     # an AI that ran a step (a command, a file edit) this recently is "working"
 ERROR_SECONDS = 30
 
 # Badge background per mood: idle navy, working amber, approval blue, done green, error red.
@@ -44,6 +45,7 @@ class KelvinStatus:
         self._approvals: dict[str, str] = {}
         self._pipelines: set[str] = set()
         self._groups: set[str] = set()      # group chats with a room turn running
+        self._steps: dict[str, float] = {}  # session -> when its AI last ran a step
         self.started_at = time.time()
         self._last_event = time.time()
         self._done_until = 0.0
@@ -71,6 +73,14 @@ class KelvinStatus:
                     self._busy.add(sid)
                 else:
                     self._busy.discard(sid)
+                    self._steps.pop(sid, None)
+            elif kind == "activity":
+                # Live progress from Codex, Antigravity and Gemini: "run command", "write to file"…
+                sid = data.get("session_id") or "_"
+                if data.get("phase") == "step":
+                    self._steps[sid] = now
+                elif data.get("phase") == "done":
+                    self._steps.pop(sid, None)
             elif kind == "approval_request":
                 req = data.get("approval") or {}
                 rid = str(req.get("id") or len(self._approvals))
@@ -121,6 +131,12 @@ class KelvinStatus:
             if now < self._done_until:
                 return "done"
             return "idle"
+
+    def acting(self, now: Optional[float] = None) -> bool:
+        """True while a busy AI is running steps (commands, edits), not just thinking."""
+        now = now or time.time()
+        with self._lock:
+            return any(sid in self._busy and now - t < STEP_SECONDS for sid, t in self._steps.items())
 
     def active(self) -> bool:
         """True while there is real work in flight (busy sessions, running pipelines, waiting approvals)."""

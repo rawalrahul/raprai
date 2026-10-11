@@ -151,3 +151,21 @@ def test_mode_and_size_are_saved(monkeypatch, tmp_path):
     assert dk.pet_mode() == "always"
     monkeypatch.delenv("KELVIN_DESKTOP_SIZE")
     monkeypatch.delenv("KELVIN_DESKTOP_PET")
+
+
+def test_kelvin_works_while_the_ai_runs_steps():
+    """An AI running commands shows the working Kelvin, not the thinking one."""
+    st = KelvinStatus()
+    st.observe({"type": "thinking", "active": True, "session_id": "a"})
+    assert dk.pet_mood(st) == "thinking"
+    st.observe({"type": "activity", "session_id": "a", "phase": "step", "label": "run command"})
+    assert dk.pet_mood(st) == "working"
+    # No new step for a while: back to thinking.
+    from helm.kelvin_status import STEP_SECONDS
+    assert dk.pet_mood(st, time.time() + STEP_SECONDS + 1) == "thinking"
+    st.observe({"type": "activity", "session_id": "a", "phase": "step", "label": "write to file"})
+    st.observe({"type": "activity", "session_id": "a", "phase": "done"})
+    assert dk.pet_mood(st) == "thinking"
+    st.observe({"type": "activity", "session_id": "a", "phase": "step", "label": "run command"})
+    st.observe({"type": "thinking", "active": False, "session_id": "a"})
+    assert dk.pet_mood(st) in ("idle", "done")
