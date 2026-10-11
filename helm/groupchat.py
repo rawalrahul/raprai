@@ -484,6 +484,11 @@ async def run_room_turn(group_id: str, token: str) -> None:
 
 async def send_user_message(group: dict, text: str, source: str = "web") -> dict:
     """Post the user's message and start a new room turn (ending any running one)."""
+    try:   # "@codex …" adds Codex to the group if it isn't a member yet
+        from helm.mention_router import add_mentioned_members
+        await add_mentioned_members(group, text)
+    except Exception as exc:
+        logger.warning("groupchat: adding mentioned AIs failed: %s", exc)
     _kill_running(group)
     msg = make_message("user", text, source=source)
     append_message(group, msg)

@@ -653,6 +653,14 @@ function openGroupSection() {
   renderGroupConversation(true);
 }
 
+/** "@codex …" in the main chat made (or grew) a group chat: show it. */
+async function groupOpenFromServer(d) {
+  if (!d || !d.group_id) return;
+  document.getElementById('group-wrapper')?.classList.add('open');
+  await loadGroups();
+  await openGroup(d.group_id);
+}
+
 function closeGroupSection() {
   document.getElementById('group-wrapper')?.classList.remove('open');
 }

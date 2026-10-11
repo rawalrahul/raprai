@@ -753,6 +753,22 @@ async def tg_text(update, context):
     if await handle_group_text(update, text):
         return
 
+    # --- "@codex …": start that AI, or bring it into a group with the open session ---
+    from helm.mention_router import parse_leading
+    if parse_leading(text):
+        async def _tg_mention(_text: str = text, _update=update) -> None:
+            from helm.mention_router import route
+            try:
+                reply = await route(_text, "telegram")
+                if reply is None:
+                    reply = await process_message(_text, source="telegram")
+                await tg_send_chunks(_update, reply, reply_markup=session_controls_keyboard())
+            except Exception as exc:
+                logger.warning("tg mention error: %s", exc)
+                await _update.message.reply_text(f"⚠️ Error: {exc}")
+        asyncio.create_task(_tg_mention())
+        return
+
     # --- Natural language shortcuts ---
     if low in ("menu", "help", "options", "?"):
         await tg_menu.__wrapped__(update, context)

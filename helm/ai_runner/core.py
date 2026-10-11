@@ -614,6 +614,17 @@ async def process_message(text: str, source: str = "web",
     """
     from helm.file_tracker import snapshot_dir, handle_diff
 
+    # "@codex …" at the start: start that AI, or bring it into a group chat.
+    if session_id is None or session_id == _st.focused_id:
+        try:
+            from helm.mention_router import route as _route_mentions
+            _routed = await _route_mentions(text, source)
+        except Exception as exc:
+            logger.warning("mention routing failed: %s", exc)
+            _routed = None
+        if _routed is not None:
+            return _routed
+
     sid  = session_id or _st.focused_id
     sess = _st.sessions.get(sid) if sid else None
 
@@ -1343,6 +1354,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
 
     Raises no exceptions — errors are returned as string output.
     """
+    sess["last_task_cwd"] = cwd   # see mention_router: has the session moved folder since?
     # ── Tier 2 native computer-use runners ─────────────────────────────────
     # When COMPUTER_USE=true AND COMPUTER_USE_TIER2=true AND the selected
     # AI has its API key, bypass the CLI path entirely and use the

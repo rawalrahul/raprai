@@ -128,8 +128,12 @@ async def handle(channel: str, text: str) -> list[str]:
     if low in ("/stop", "stop"):
         return ["Nothing to stop here. In a group, /group stop stops the replies."]
 
-    if not _st.focused_id or _st.focused_id not in _st.sessions:
-        return ["No session is focused.\n\n" + sessions_text()]
     from helm.ai_runner import process_message
+    if not _st.focused_id or _st.focused_id not in _st.sessions:
+        from helm.mention_router import route as route_mentions
+        routed = await route_mentions(text, channel)       # "@codex …" starts Codex
+        if routed is not None:
+            return [routed]
+        return ["No session is focused.\n\n" + sessions_text()]
     reply = await process_message(text, source=channel)
     return [reply or "(no output)"]
