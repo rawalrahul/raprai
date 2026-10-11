@@ -118,3 +118,28 @@
 .gk-quip { font-size: 12px; color: var(--muted); font-style: italic; padding: 4px 10px; border-radius: 12px;
   border: 1px dashed var(--border); max-width: 100%; }
 .gk-quip[hidden] { display: none; }
+
+/* Scenes (big Kelvins): every loop lasts 1.2 s or a divisor, so Desktop Kelvin's strips repeat cleanly */
+.kv-code, .kv-speed, .kv-dust, .kv-bulb, .kv-q, .kv-fall, .kv-note, .kv-sun { transform-box: fill-box; transform-origin: center; }
+.kv-c2 { animation-delay: -.4s !important; }
+.kv-c3 { animation-delay: -.8s !important; }
+.kv-s2 { animation-delay: -.2s !important; }
+.kv-s3 { animation-delay: -.4s !important; }
+.kv-code { animation: kv-code 1.2s linear infinite; }
+@keyframes kv-code { 0% { transform: translateY(6px); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateY(-28px); opacity: 0; } }
+.kv-speed { animation: kv-speed .6s linear infinite; }
+@keyframes kv-speed { 0% { transform: translateX(14px); opacity: 0; } 30% { opacity: 1; } 100% { transform: translateX(-12px); opacity: 0; } }
+.kv-dust { animation: kv-dust .6s ease-out infinite; }
+@keyframes kv-dust { 0% { transform: translate(0, 0) scale(.4); opacity: .8; } 100% { transform: translate(-14px, -6px) scale(1.4); opacity: 0; } }
+.kv-bulb { animation: kv-bulb 1.2s ease-in-out infinite; }
+@keyframes kv-bulb { 0%, 35% { opacity: 0; } 50%, 100% { opacity: .55; } }
+.kv-q { animation: kv-q 1.2s ease-in-out infinite; }
+@keyframes kv-q { 0%, 100% { transform: translateY(0) rotate(-10deg); } 50% { transform: translateY(-6px) rotate(10deg); } }
+.kv-fall { animation: kv-fall 1.2s linear infinite; }
+@keyframes kv-fall { 0% { transform: translateY(-10px) rotate(0deg); } 100% { transform: translateY(205px) rotate(360deg); } }
+.kv-note { animation: kv-note 1.2s ease-out infinite; }
+@keyframes kv-note { 0% { transform: translate(0, 8px); opacity: 0; } 25% { opacity: 1; } 100% { transform: translate(8px, -22px); opacity: 0; } }
+.kv-sun { animation: kv-sun 1.2s linear infinite; }
+@keyframes kv-sun { to { transform: rotate(45deg); } }
+:root[data-kelvin="still"] .kv-prop, :root[data-kelvin="still"] .kv-prop * { animation: none !important; }
+@media (prefers-reduced-motion: reduce) { .kv-prop, .kv-prop * { animation: none !important; } }
