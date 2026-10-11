@@ -102,3 +102,19 @@
 :root[data-kelvin="hidden"] .kco-art { display: none; }
 .kco-text { font-size: 12.5px; color: var(--muted); flex: 1; min-width: 180px; }
 .kco-text b { color: inherit; }
+
+/* Group chat team: one Kelvin per member, inside the group chat */
+.group-kelvins { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 16px;
+  border-bottom: 1px solid var(--border-dim, var(--border)); }
+:root[data-kelvin="hidden"] .group-kelvins { display: none !important; }
+.gk-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.gk-m { display: grid; grid-template-columns: 30px auto; grid-template-rows: auto auto; column-gap: 6px;
+  align-items: center; padding: 3px 8px 3px 3px; border-radius: 9px; border: 1px solid transparent; }
+.gk-m[data-mood="working"] { border-color: var(--border); }
+.gk-art { grid-row: 1 / 3; width: 30px; height: 34px; }
+.gk-name { grid-column: 2; font-size: 12px; font-weight: 600; white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.gk-tag { grid-column: 2; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.gk-m[data-mood="done"] .gk-tag::before { content: "✓ "; color: var(--ok, #34d399); }
+.gk-quip { font-size: 12px; color: var(--muted); font-style: italic; padding: 4px 10px; border-radius: 12px;
+  border: 1px dashed var(--border); max-width: 100%; }
+.gk-quip[hidden] { display: none; }

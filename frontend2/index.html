@@ -16,9 +16,9 @@
 <link rel="stylesheet" href="/css/design-system.css?v=3">
 <link rel="stylesheet" href="/css/original.css?v=3">
 <link rel="stylesheet" href="/css/premium.css?v=3">
-<link rel="stylesheet" href="/css/overhaul.css?v=1">
+<link rel="stylesheet" href="/css/overhaul.css?v=2">
 <link rel="stylesheet" href="/css/impeccable.css?v=3">
-<link rel="stylesheet" href="/css/kelvin.css?v=3">
+<link rel="stylesheet" href="/css/kelvin.css?v=5">
 <link rel="stylesheet" href="/css/groupchat.css?v=3">
 <link rel="stylesheet" href="/css/header.css?v=1">
 </head>
@@ -1237,14 +1237,16 @@ Example:
       <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
     </svg>
   </span>
+  <span class="dir-label">Project</span>
   <span id="session-badge" class="session-badge" title="Focused session"></span>
-  <span id="cwd-display" title="Click to change directory" onclick="startCwdEdit()">—</span>
-  <input id="cwd-input" placeholder="Enter full path and press Enter..."
-         onkeydown="cwdKey(event)" onblur="cancelCwdEdit()">
-  <button class="dir-browse-btn" onclick="openBrowse()" title="Browse folders">
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+  <span id="cwd-display" title="The project folder your AI works in. Click to type a different path." onclick="startCwdEdit()">—</span>
+  <input id="cwd-input" placeholder="Type or paste your project folder, then press Enter..."
+         onkeydown="cwdKey(event)" onblur="cancelCwdEdit()" aria-label="Project folder">
+  <button class="dir-browse-btn" onclick="openBrowse()" title="Choose the project folder your AI works in" aria-label="Choose project">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
     </svg>
+    <span class="dir-browse-text">Choose project</span>
   </button>
 </div>
 
@@ -1271,7 +1273,7 @@ Example:
   <div id="kelvin-hello">
     <span class="kelvin-slot" id="kelvin-hello-art"></span>
     <div class="kelvin-hello-title">Kelvin is here</div>
-    <div class="kelvin-hello-sub">Pick an AI below and say hello. Kelvin shows what it's doing while it works.</div>
+    <div class="kelvin-hello-sub">Choose your project at the top, then pick an AI below and say hello. Kelvin shows what it's doing while it works.</div>
   </div>
 </div>
 <div id="thinking" role="status" aria-live="polite">
@@ -1343,14 +1345,15 @@ Example:
 <div class="modal-overlay" id="browse-modal" onclick="closeBrowse(event)" role="dialog" aria-modal="true" aria-labelledby="browse-modal-title">
   <div class="modal-box browse-box">
     <div class="modal-header">
-      <span class="modal-title" id="browse-modal-title">Browse Directory</span>
-      <button class="modal-close" onclick="closeBrowseModal()" aria-label="Close directory browser">✖</button>
+      <span class="modal-title" id="browse-modal-title">Choose your project</span>
+      <button class="modal-close" onclick="closeBrowseModal()" aria-label="Close folder browser">✖</button>
     </div>
+    <div id="browse-hint" class="browse-hint"></div>
     <div id="browse-crumb" class="browse-crumb" aria-label="Current directory breadcrumb"></div>
     <div class="modal-body" id="browse-list" role="listbox" aria-label="Directory contents"></div>
     <div class="browse-footer">
       <button class="sess-action-btn" onclick="closeBrowseModal()">Cancel</button>
-      <button class="sess-action-btn resume" onclick="selectBrowsePath()">✓ Select This Folder</button>
+      <button class="sess-action-btn resume" id="browse-select-btn" onclick="selectBrowsePath()">✓ Use this project</button>
     </div>
   </div>
 </div>
@@ -1664,8 +1667,8 @@ Example:
   </div>
 </div>
 
-<script src="/js/kelvin.js?v=4"></script>
-<script src="/js/complete.js?v=12"></script>
+<script src="/js/kelvin.js?v=5"></script>
+<script src="/js/complete.js?v=14"></script>
 <script src="/js/ai_list.js?v=1"></script>
 <script src="/js/packages.js?v=4"></script>
 <script src="/js/memory.js?v=2"></script>
@@ -1673,7 +1676,7 @@ Example:
 <script src="/js/backup.js?v=2"></script>
 <script src="/js/agents.js?v=12"></script>
 <script src="/js/council.js?v=10"></script>
-<script src="/js/groupchat.js?v=4"></script>
+<script src="/js/groupchat.js?v=5"></script>
 <script src="/js/whatsapp.js?v=2"></script>
 <script src="/js/voices.js?v=2"></script>
 <script src="/js/finish.js?v=2"></script>

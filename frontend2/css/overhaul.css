@@ -1929,3 +1929,13 @@ header { gap: 12px !important; }
   transition: opacity .15s ease, background .15s ease;
 }
 .msg-speak-btn:hover { opacity: 1; background: var(--bg-surface, rgba(255,255,255,.05)); }
+
+/* Project folder bar: say plainly that this is the project the AI works on */
+.dir-bar .dir-label { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--dim, var(--muted)); }
+.dir-bar .dir-browse-btn {
+  gap: 6px; padding: 4px 10px !important; border: 1px solid var(--border) !important;
+  color: var(--text) !important; font-size: 12px; font-weight: 600; white-space: nowrap; flex-shrink: 0;
+}
+.dir-bar .dir-browse-btn:hover { border-color: var(--accent, #f2b33d) !important; color: var(--text) !important; }
+@media (max-width: 640px) { .dir-bar .dir-browse-text { display: none; } }
+.browse-hint { padding: 8px 16px 0; font-size: 12.5px; color: var(--muted); line-height: 1.45; }

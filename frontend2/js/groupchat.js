@@ -282,6 +282,13 @@ function _renderTyping() {
   el.appendChild(document.createTextNode(' ' + (m ? m.name + ' is replying…' : 'The group is thinking…')));
 }
 
+/** Kelvin decorates the chat; a problem there must never break the group chat. */
+function _groupKelvins(host, group) {
+  try {
+    if (window.KelvinUI && KelvinUI.mountGroupTeam) KelvinUI.mountGroupTeam(host, group);
+  } catch (e) { console.warn('Kelvin team:', e); }
+}
+
 function _renderGroupHeaderState() {
   const stop = document.getElementById('group-stop-btn');
   // `hidden`, not style.display: a global rule forces display on every button.
@@ -299,6 +306,7 @@ function renderGroupConversation(scrollToEnd) {
   while (pane.firstChild) pane.removeChild(pane.firstChild);
 
   const g = groupState.active;
+  _groupKelvins(null, null);
   if (!g) {
     const empty = _g('div', 'group-empty');
     empty.appendChild(_g('div', 'group-empty-icon', '👥'));
@@ -340,6 +348,12 @@ function renderGroupConversation(scrollToEnd) {
   header.appendChild(actions);
   pane.appendChild(header);
   if (g.about) pane.appendChild(_g('div', 'group-about', g.about));
+
+  // Kelvin team: one penguin per member, showing who's replying.
+  const team = _g('div', 'group-kelvins');
+  team.setAttribute('aria-hidden', 'true');
+  pane.appendChild(team);
+  _groupKelvins(team, g);
 
   // Messages
   const list = _g('div', 'group-messages');

@@ -452,7 +452,7 @@ function applyState(s){
 function applyCwd(path){
   const el = document.getElementById('cwd-display');
   el.textContent = path;
-  el.title = 'Working directory: ' + path + '\nClick to change';
+  el.title = 'Project folder: ' + path + '\nYour AI works inside this folder. Click to type a different path.';
 }
 
 // --- AI Menu ---------------------------------------------------------------------------------------------------
@@ -506,6 +506,13 @@ function cwdKey(e){
 let _browsePath = '', _browseTarget = 'cwd'; // 'cwd' or 'sched-cwd' or 'sb-sched-cwd'
 async function openBrowse(target){
   _browseTarget = target || 'cwd';
+  // The main folder bar picks the project the AI works on; other forms just need a folder.
+  const project = _browseTarget === 'cwd';
+  document.getElementById('browse-modal-title').textContent = project ? 'Choose your project' : 'Choose a folder';
+  document.getElementById('browse-hint').textContent = project
+    ? 'Open the folder of the project you want to work on, then click "Use this project". Your AI starts in this folder and works on its files.'
+    : 'Open the folder you want, then click "Use this folder".';
+  document.getElementById('browse-select-btn').textContent = project ? '✓ Use this project' : '✓ Use this folder';
   // Try the native Windows folder-picker first (only works on the server machine)
   try {
     const res = await fetch('/browse/native');
@@ -524,7 +531,9 @@ async function openBrowse(target){
   if(_browseTarget === 'cwd'){
     _browsePath = document.getElementById('cwd-display').textContent;
   } else {
-    _browsePath = document.getElementById(_browseTarget).value || _session_cwd();
+    // Empty field: start from the current project (there was no _session_cwd helper).
+    const cur = document.getElementById('cwd-display').textContent;
+    _browsePath = document.getElementById(_browseTarget).value || (cur === '—' ? '' : cur);
   }
   if(_browsePath === '—') _browsePath = '';
   await loadBrowse(_browsePath);
@@ -576,6 +585,12 @@ let _thinkingMsgIdx = 0;
 
 // Fun one-liners + feature discovery tips (prefixed with 💡)
 const _thinkingMessages = [
+  // ── Kelvin, the RAPR penguin ──
+  "Kelvin is typing with both flippers...",
+  "Kelvin is sliding through your code belly-first...",
+  "Kelvin is checking under the iceberg...",
+  "Fish break later, answer first...",
+  "Kelvin is waddling between files...",
   // ── Fun one-liners ──
   "Crunching the numbers...",
   "Consulting the digital oracle...",

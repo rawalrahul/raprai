@@ -150,6 +150,7 @@
     var q = function (s) { return Array.prototype.slice.call(svg.querySelectorAll(s)); };
     var inst = {
       host: host, svg: svg, state: opts.state || 'idle', poke: 0,
+      phase: Math.random() * 10, variant: 0,
       blinkAt: performance.now() + 1500 + Math.random() * 2500,
       rig: svg.querySelector('[data-rig]'), shadow: svg.querySelector('[data-shadow]'), beak: svg.querySelector('[data-beak]'),
       eyes: q('[data-eye]').map(function (g) {
@@ -173,24 +174,41 @@
     instances.push(inst);
     start();
     return {
-      setState: function (s) { if (STATES[s]) inst.state = s; },
+      setState: function (s) {
+        if (!STATES[s] || s === inst.state) return;
+        inst.state = s;
+        inst.variant = Math.floor(Math.random() * 3);   // a different move each time
+      },
       destroy: function () { instances = instances.filter(function (i) { return i !== inst; }); host.innerHTML = ''; },
     };
   }
 
   function step(inst, now, dt) {
-    var st = inst.state, P = STATES[st], t = now / 1000, sp = inst.sp, calm = isStill();
+    var st = inst.state, P = STATES[st], t = now / 1000 + inst.phase, sp = inst.sp, calm = isStill();
     var poked = now - inst.poke < 700;
     var T = { hop: 0, stretch: 0, tilt: P.tilt, open: P.open, happy: P.happy, slant: P.slant, mOpen: P.mOpen, perk: P.perk, eyeScale: P.eyeScale, gx: 0, gy: 0 };
     if (!calm) {
       T.stretch = st === 'sleeping' ? Math.sin(t * 1.6) * 0.035 : Math.sin(t * 2.4) * 0.02;
-      if (st === 'working') { T.hop = -Math.abs(Math.sin(t * 6)) * 3; T.stretch += Math.sin(t * 12) * 0.015; }
-      if (st === 'done') {
-        var ph = (t * 1.25) % 1;
-        T.hop = ph < 0.45 ? -Math.sin(ph / 0.45 * Math.PI) * 16 : 0;
-        T.stretch += (ph < 0.06 || (ph > 0.42 && ph < 0.5)) ? -0.08 : 0.02;
-        T.perk = 0.4 + Math.sin(t * 9) * 0.7;
+      if (st === 'working') {
+        if (inst.variant === 1) {            // waddle side to side
+          T.tilt = Math.sin(t * 5) * 7; T.hop = -Math.abs(Math.sin(t * 5)) * 2;
+        } else if (inst.variant === 2) {     // typing with both flippers
+          T.perk = 0.3 + Math.sin(t * 16) * 0.6; T.hop = -Math.abs(Math.sin(t * 8)) * 1.5;
+        } else {                             // busy little hops
+          T.hop = -Math.abs(Math.sin(t * 6)) * 3; T.stretch += Math.sin(t * 12) * 0.015;
+        }
       }
+      if (st === 'done') {
+        if (inst.variant === 1) {            // happy wiggle
+          T.tilt = Math.sin(t * 9) * 9; T.perk = 0.6 + Math.sin(t * 9) * 0.5;
+        } else {                             // jump for joy
+          var ph = (t * 1.25) % 1;
+          T.hop = ph < 0.45 ? -Math.sin(ph / 0.45 * Math.PI) * 16 : 0;
+          T.stretch += (ph < 0.06 || (ph > 0.42 && ph < 0.5)) ? -0.08 : 0.02;
+          T.perk = 0.4 + Math.sin(t * 9) * 0.7;
+        }
+      }
+      if (st === 'thinking' && inst.variant === 1) T.tilt = P.tilt + Math.sin(t * 1.3) * 6;   // ponder, head swaying
       if (st === 'error') T.stretch -= 0.05;
       if (st === 'listening') T.tilt = P.tilt + Math.sin(t * 2) * 1.5;
     }
@@ -302,9 +320,11 @@
     var now = Date.now();
     var timers = [ui.doneUntil, ui.listenUntil, ui.errorUntil, ui.pipelineEndedAt + CREW_LINGER_MS];
     Object.keys(ui.stepDoneAt).forEach(function (id) { timers.push(ui.stepDoneAt[id] + STEP_CELEBRATE_MS); });
+    Object.keys(team.doneAt).forEach(function (id) { timers.push(team.doneAt[id] + TEAM_DONE_MS); });
     var next = timers.filter(function (t) { return t > now; });
     if (next.length) expiryTimer = setTimeout(render, Math.min.apply(null, next) - now + 20);
     renderCrew();
+    renderTeam();
     var s = computeState();
     if (s === ui.current) return;
     ui.current = s;
@@ -553,7 +573,104 @@
     if (typeof window.scroll === 'function') window.scroll();
   }
 
+  // ---------------------------------------------------------------------------
+  // Group chat team: one Kelvin per member, shown inside the open group chat
+  // ---------------------------------------------------------------------------
+
+  var QUIPS = {
+    working: ['Typing with both flippers…', 'Sliding through the code on my belly…', 'Fish break later, work now.',
+              'Do not disturb: penguin at work.', 'Waddling between files…', 'Polishing every semicolon…'],
+    listening: ['Listening closely…', 'Taking notes on an ice cube…', 'Waiting for my turn, politely.'],
+    done: ['Flipper five! 🐟', 'Nailed it.', 'Done. Fish time?', 'Slid it home.'],
+    sleeping: ['Zzz… dreaming of fish.', 'Napping on an iceberg.'],
+  };
+  var TEAM_DONE_MS = 4000;
+  var team = { host: null, gid: null, sig: '', members: {}, doneAt: {}, quipAt: 0, quip: '', quipMood: '' };
+
+  function teamDestroy() {
+    Object.keys(team.members).forEach(function (id) { team.members[id].k.destroy(); });
+    team.members = {};
+    team.sig = '';
+  }
+
+  function teamMood(m, live, now) {
+    if (live && live.speaking === m.id) return 'working';
+    if (now - (team.doneAt[m.id] || 0) < TEAM_DONE_MS) return 'done';
+    if (live) return 'listening';
+    if (now - ui.lastEvent > SLEEP_AFTER_MS) return 'sleeping';
+    return 'idle';
+  }
+
+  function renderTeam() {
+    var host = team.host;
+    if (!host || !host.isConnected) return;
+    var now = Date.now(), live = ui.groups[team.gid] || null, quipFor = null;
+    Object.keys(team.members).forEach(function (id) {
+      var mem = team.members[id], mood = teamMood(mem.m, live, now);
+      mem.k.setState(mood);
+      mem.node.setAttribute('data-mood', mood);
+      mem.tag.textContent = { working: 'replying', done: 'replied', listening: 'listening', sleeping: 'napping' }[mood] ||
+                            (mem.m.role || mem.ai);
+      if (mood === 'working' || (!quipFor && mood === 'done')) quipFor = { mem: mem, mood: mood };
+    });
+    var bubble = host.querySelector('.gk-quip');
+    if (!bubble) return;
+    if (!quipFor) { bubble.hidden = true; team.quipMood = ''; return; }
+    // A new line every 6 seconds, or straight away when someone else speaks.
+    var key = quipFor.mood + '|' + quipFor.mem.m.id;
+    if (key !== team.quipMood || now - team.quipAt > 6000) {
+      var lines = QUIPS[quipFor.mood], pick = team.quip;
+      while (lines.length > 1 && pick === team.quip) pick = lines[Math.floor(Math.random() * lines.length)];
+      team.quip = pick;
+      team.quipMood = key;
+      team.quipAt = now;
+    }
+    bubble.hidden = false;
+    bubble.textContent = quipFor.mem.m.name + ': ' + team.quip;
+  }
+
+  /** Show the members of an open group chat as a row of Kelvins (host null = closed). */
+  function mountGroupTeam(host, group) {
+    if (!host || !group) { teamDestroy(); team.host = null; team.gid = null; return; }
+    var members = group.members || [];
+    var sig = group.id + '|' + members.map(function (m) { return m.id + ':' + m.ai; }).join(',');
+    if (team.host === host && team.sig === sig) { renderTeam(); return; }
+    teamDestroy();
+    if (team.gid !== group.id) team.doneAt = {};
+    team.host = host; team.gid = group.id; team.sig = sig;
+    if (group.status === 'running' && !ui.groups[group.id]) {
+      ui.groups[group.id] = { name: group.name, members: members, speaking: group.speaking, replied: {} };
+    }
+    host.textContent = '';
+    var row = document.createElement('div');
+    row.className = 'gk-row';
+    members.forEach(function (m) {
+      var node = document.createElement('div');
+      node.className = 'gk-m';
+      var art = document.createElement('span');
+      art.className = 'kelvin-slot gk-art';
+      var name = document.createElement('span');
+      name.className = 'gk-name';
+      name.textContent = m.name;
+      if (m.color) name.style.color = m.color;
+      var tag = document.createElement('span');
+      tag.className = 'gk-tag';
+      node.appendChild(art); node.appendChild(name); node.appendChild(tag);
+      row.appendChild(node);
+      var k = mount(art, { overlays: false, track: false, ai: m.ai, label: 'Kelvin: ' + m.name });
+      team.members[m.id] = { m: m, k: k, node: node, tag: tag, ai: aiName(m.ai) };
+    });
+    var bubble = document.createElement('div');
+    bubble.className = 'gk-quip';
+    bubble.hidden = true;
+    host.appendChild(row);
+    host.appendChild(bubble);
+    renderTeam();
+  }
+
   var KelvinUI = {
+    mountGroupTeam: mountGroupTeam,
+
     init: function () {
       applyMode(readMode());
       slot('kelvin-header', { overlays: false, label: 'Kelvin, the RAPR AI penguin' });
@@ -617,6 +734,7 @@
           }
           break;
         case 'group_message':
+          if (d.message && d.message.role === 'member' && d.group_id === team.gid) team.doneAt[d.message.author] = now;
           if (d.message && d.message.role === 'member' && ui.groups[d.group_id]) ui.groups[d.group_id].replied[d.message.author] = true;
           else if (d.message && d.message.role === 'user' && ui.groups[d.group_id]) ui.groups[d.group_id].replied = {};
           break;
