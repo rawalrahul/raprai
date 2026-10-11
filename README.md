@@ -57,28 +57,40 @@ Install the tools you want, and RAPR finds them. **Settings → AI Integrations*
 
 ## Install
 
-**Windows:** in PowerShell, run
+One command on each platform. It installs the latest version, and the same command updates it later.
+
+**Windows 10/11** (in PowerShell):
 ```powershell
 irm https://raw.githubusercontent.com/rawalrahul/raprai/main/scripts/install-windows.ps1 | iex
 ```
-This adds **RAPR AI** to your Start menu and desktop and a `rapr` command, and always installs the latest version.
-Prefer a classic installer? Download it from [raprai.com](https://raprai.com) or the [latest release](https://github.com/rawalrahul/rapr-releases/releases/latest). Windows SmartScreen may warn because it isn't code-signed yet: click **More info → Run anyway**.
+Adds **RAPR AI** to your Start menu and desktop, plus a `rapr` command. Python 3.12 is installed for you if it's missing.
 
-**macOS:**
+**macOS 12+** (in Terminal):
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rawalrahul/raprai/main/scripts/install-mac.sh | bash
 ```
-This adds a **RAPR AI** app to your Applications and a `rapr` command.
+Adds a **RAPR AI** app to your Applications, plus a `rapr` command.
 
-**Linux server** (Ubuntu/Debian, x86 or ARM):
+**Linux server** (Ubuntu/Debian, x86 or ARM, over SSH):
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rawalrahul/raprai/main/scripts/install-server.sh | bash
 ```
-RAPR runs in Docker and prints a public address to open. `rapr url`, `rapr logs` and `rapr update` manage it. See [docs/cloud-setup.md](docs/cloud-setup.md).
+RAPR runs in Docker and prints a free public address to open. See [docs/cloud-setup.md](docs/cloud-setup.md).
+
+On first launch, a short setup page asks for a PIN and, optionally, a Telegram bot. Then pick an AI and start a session.
+
+### Update and uninstall
+
+| | Windows / macOS | Linux server |
+|---|---|---|
+| **Update** | `rapr update` (or run the install command again) | `rapr update` |
+| **Uninstall** | `rapr uninstall`: type `yes` to keep your chats and settings, `all` to delete them | `rapr remove` |
+| **Start / stop** | `rapr start` / `rapr stop` (or the RAPR AI app) | `rapr restart` |
+| **Status and logs** | `rapr status`, `rapr logs` | `rapr status`, `rapr logs`, `rapr url` |
+
+Your chats and settings live in `%LOCALAPPDATA%\RAPR AI` (Windows) or `~/Library/Application Support/RAPR AI` (Mac), so updating keeps them. Used the old Windows `.exe` installer? Run the Windows command: it uses the same folder, so everything carries over. Then remove the old app in Windows Settings → Apps.
 
 **From source:** see the [full guide](docs/guide.md#prerequisites).
-
-On first launch, a short setup page asks for a PIN and (optionally) a Telegram bot. Then pick an AI and start a session.
 
 ## How it works
 
