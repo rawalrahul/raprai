@@ -506,13 +506,7 @@ async def _main():
                         pass
         except Exception:
             pass
-        # 4. Flush pending telemetry so install/usage events aren't lost
-        try:
-            from helm.device_link import flush_telemetry
-            flush_telemetry()
-        except Exception:
-            pass
-        # 5. Close database connections
+        # 4. Close database connections
         try:
             from helm.db import close_all
             close_all()
@@ -621,17 +615,6 @@ async def _main():
     from helm.updater import auto_check_loop
     asyncio.create_task(auto_check_loop())
 
-    # Start device link sync loop (syncs connections + flushes telemetry every 30 min)
-    from helm.device_link import device_sync_loop, track_usage
-    asyncio.create_task(device_sync_loop())
-
-    # Track app launch
-    try:
-        from helm.version import APP_VERSION
-        track_usage("app", "launched", {"version": APP_VERSION})
-    except Exception:
-        pass
-
     if _st.telegram_app:
         from telegram import Update
         try:
@@ -679,12 +662,6 @@ def main():
     except Exception as exc:
         logger.critical("Fatal error: %s", exc, exc_info=True)
     finally:
-        # Flush telemetry before anything else so events aren't lost
-        try:
-            from helm.device_link import flush_telemetry
-            flush_telemetry()
-        except Exception:
-            pass
         # Graceful shutdown — stop AI processes, close DB, flush logs
         try:
             import asyncio as _aio

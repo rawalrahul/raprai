@@ -33,7 +33,6 @@ from .memory_routes import router as memory_router
 from .backup_routes import router as backup_router
 from .chrome_ws import router as chrome_ws_router
 from .update_routes import router as update_router
-from .device_routes import router as device_router
 from .agent_routes import router as agent_router
 from .council_routes import router as council_router
 from .groupchat_routes import router as groupchat_router
@@ -67,7 +66,6 @@ app.include_router(memory_router)
 app.include_router(backup_router)
 app.include_router(chrome_ws_router)
 app.include_router(update_router)
-app.include_router(device_router)
 app.include_router(agent_router)
 app.include_router(council_router)
 app.include_router(groupchat_router)

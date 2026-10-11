@@ -123,16 +123,6 @@ async def ws_endpoint(websocket: WebSocket):
                 except Exception as exc:
                     logger.warning("Could not route agent input from focused session: %s", exc)
 
-                # Track chat message usage
-                try:
-                    from helm.device_link import track_usage
-                    track_usage("chat", "message_sent", {
-                        "source": "web",
-                        "ai": sess.get("ai") if sess else None,
-                        "model": sess.get("model") if sess else None,
-                    })
-                except Exception:
-                    pass
 
                 async def _fire_and_forward(
                     _text: str = content,
@@ -246,12 +236,6 @@ async def handle_web_command(command: str, ws: WebSocket):
         await push_state()
         label = sess["emoji"] + " " + sess["name"]
 
-        # Track session creation
-        try:
-            from helm.device_link import track_usage
-            track_usage("session", "created", {"ai": ai_key or "shell", "model": chosen_model})
-        except Exception:
-            pass
         actual_model = sess.get("model")
         if chosen_model:
             model_note = f" [{chosen_model}]"

@@ -1089,19 +1089,6 @@ async def process_message(text: str, source: str = "web",
         except Exception:
             pass
 
-        # Track AI usage for telemetry
-        try:
-            from helm.device_link import track_usage
-            track_usage("ai_response", "completed", {
-                "ai": actual_ai,
-                "model": sess.get("model") if sess else None,
-                "elapsed_sec": round(elapsed, 1),
-                "input_tokens": _tok_in,
-                "output_tokens": _tok_out,
-                "source": source,
-            })
-        except Exception:
-            pass
 
         # Audit: log any destructive file commands in the AI output
         if output:

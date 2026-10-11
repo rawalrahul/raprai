@@ -44,7 +44,7 @@ _PUBLIC_PREFIXES = ("/login", "/static", "/health", "/manifest.json", "/sw.js", 
 # settings (bot tokens, allowed users, custom instructions, the linked account),
 # so leaving them open would let anyone who can reach RAPR, e.g. on a server,
 # take it over.
-_FIRST_RUN_PREFIXES = ("/setup", "/prefs", "/activate", "/device")
+_FIRST_RUN_PREFIXES = ("/setup", "/prefs")
 
 # Plugin connect/OAuth routes are opened in popup windows which may not share
 # the session cookie. These are localhost-only and protected by OAuth state tokens.
@@ -87,7 +87,7 @@ class _AuthMiddleware(BaseHTTPMiddleware):
         if any(path == p or path.startswith(p + "/") for p in _FIRST_RUN_PREFIXES):
             if _auth.check_auth(request):      # true while no PIN is set
                 return await call_next(request)
-            if request.method == "GET" and path in ("/setup", "/activate"):
+            if request.method == "GET" and path == "/setup":
                 return RedirectResponse(url="/login", status_code=303)
             from fastapi.responses import JSONResponse
             return JSONResponse({"error": "log in first"}, status_code=401)
@@ -586,23 +586,6 @@ async def agent_run_window(run_id: str):
   </script>
 </body>
 </html>""")
-
-
-@app.get("/activate", response_class=HTMLResponse)
-async def activate_gate():
-    """Page to link RAPR to a raprai.com account (optional; Settings links here).
-
-    If it's already linked, go straight to the main app.
-    """
-    try:
-        from helm.device_link import get_device_token
-        if get_device_token():
-            return RedirectResponse(url="/")
-    except Exception:
-        pass
-
-    from helm.setup_wizard import _ACTIVATE_HTML
-    return HTMLResponse(content=_ACTIVATE_HTML)
 
 
 @app.get("/health")
