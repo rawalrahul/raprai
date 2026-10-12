@@ -124,3 +124,9 @@ try:
 except ImportError:
     _Croniter = None        # type: ignore[assignment]
     CRONITER_OK = False
+
+
+def chat_apps_sync() -> bool:
+    """Settings → "Keep chat apps in sync" (CHAT_APPS_SYNC, on by default): every linked
+    chat app gets every session exchange and group message, not only the one you used."""
+    return os.environ.get("CHAT_APPS_SYNC", "1").strip().lower() not in ("0", "false", "no", "off")
