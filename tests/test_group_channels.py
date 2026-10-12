@@ -136,6 +136,39 @@ def test_group_started_on_whatsapp_reaches_telegram_and_the_app(env):
     assert "telegram" not in gc.active_groups                            # Telegram isn't switched over
 
 
+@pytest.mark.parametrize("source", ["web", "telegram", "whatsapp"])
+def test_every_linked_app_gets_every_group_message_wherever_it_started(env, source):
+    """Started from the app, Telegram or WhatsApp: the user's message and every reply
+    reach all the other linked apps, and the RAPR app always shows the group."""
+    apps = ("telegram", "whatsapp", "discord")
+    sent = {ch: [] for ch in apps}
+
+    def sender(ch):
+        async def _s(group, text):
+            sent[ch].append(text)
+        return _s
+    for ch in apps:
+        gc.register_channel(ch, sender(ch))
+    g = gc.make_group("Team", "", [_st.sessions["s1"], _st.sessions["s2"]])
+    if source != "web":
+        gc.set_active_group(source, g["id"])          # that app is in the group
+
+    run(gc.send_user_message(g, "plan the launch", source=source))
+    run(gc._relay(g, gc.make_message("member", "on it", g["members"][0])))
+    run(gc._relay(g, gc.make_message("member", "reviewed", g["members"][1])))
+
+    for ch in apps:
+        if ch == source:
+            assert sent[ch] == ["🤖 Claude #1:\non it", "🤖 Gemini #2:\nreviewed"]    # only the replies
+        else:
+            assert len(sent[ch]) == 3, (ch, sent[ch])
+            assert "plan the launch" in sent[ch][0]
+            assert "on it" in sent[ch][1] and "reviewed" in sent[ch][2]
+    # The app gets every message as a live event either way.
+    assert sum(1 for e in env.events if e.get("type") == "group_message") >= 1
+    assert any(e.get("type") == "group_open" for e in env.events) == (source != "web")
+
+
 def test_messages_typed_in_the_app_do_not_reopen_it(env):
     g = gc.make_group("Team", "", [_st.sessions["s1"]])
     run(gc.send_user_message(g, "hello", source="web"))
