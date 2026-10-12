@@ -110,6 +110,38 @@ def test_messages_relay_to_other_channels_not_back_to_sender(env):
     assert sent["whatsapp"][-1] == "🤖 Claude #1:\nhi!"
 
 
+def test_group_started_on_whatsapp_reaches_telegram_and_the_app(env):
+    """A group used from WhatsApp only: Telegram (not in the group) still gets every
+    message, labelled with the group and, once, how to join; the app is told to open it."""
+    sent = {"telegram": [], "whatsapp": []}
+
+    def sender(ch):
+        async def _s(group, text):
+            sent[ch].append(text)
+        return _s
+    gc.register_channel("telegram", sender("telegram"))
+    gc.register_channel("whatsapp", sender("whatsapp"))
+    g = gc.make_group("Team", "", [_st.sessions["s1"], _st.sessions["s2"]])
+    gc.set_active_group("whatsapp", g["id"])
+
+    assert run(gch.send_to_active_group("whatsapp", "say hi")) is True
+    assert {"type": "group_open", "group_id": g["id"]} in env.events     # the app shows the group
+    assert sent["whatsapp"] == []                                        # not echoed back
+    assert sent["telegram"][0].startswith("👥 Team\n🧑 You (from WhatsApp):\nsay hi")
+    assert "/group 1 to join in" in sent["telegram"][0]
+
+    run(gc._relay(g, gc.make_message("member", "hi!", g["members"][0])))
+    assert sent["whatsapp"][-1] == "🤖 Claude #1:\nhi!"                  # in the group: as before
+    assert sent["telegram"][-1] == "👥 Team\n🤖 Claude #1:\nhi!"        # labelled, hint only once
+    assert "telegram" not in gc.active_groups                            # Telegram isn't switched over
+
+
+def test_messages_typed_in_the_app_do_not_reopen_it(env):
+    g = gc.make_group("Team", "", [_st.sessions["s1"]])
+    run(gc.send_user_message(g, "hello", source="web"))
+    assert not any(e.get("type") == "group_open" for e in env.events)
+
+
 def test_active_group_persists_and_clears_on_delete(env):
     g = gc.make_group("Team", "", [_st.sessions["s1"]])
     gc.set_active_group("telegram", g["id"])
