@@ -393,15 +393,33 @@ def format_for_channel(msg: dict) -> str:
     return msg["content"]
 
 
+_join_hinted: set = set()    # (channel, group id) already told how to join in
+
+
+def _join_hint(group: dict) -> str:
+    try:
+        from helm.groupchat_channels import ordered_groups
+        n = next(i for i, g in enumerate(ordered_groups(), 1) if g["id"] == group["id"])
+        return f"\n\n(Group chat. Send /group {n} to join in from here.)"
+    except Exception:
+        return "\n\n(Group chat. Send /group to join in from here.)"
+
+
 async def _relay(group: dict, msg: dict) -> None:
-    for channel, gid in list(active_groups.items()):
-        if gid != group["id"] or channel == msg.get("source"):
+    """Send a group message to every linked chat app except the one it came from.
+    Apps that are in the group get it as is; the others get the group's name on
+    top (and, the first time, how to join in), and keep talking to their session."""
+    for channel, sender in list(_channel_senders.items()):
+        if channel == msg.get("source"):
             continue
-        sender = _channel_senders.get(channel)
-        if not sender:
-            continue
+        text = format_for_channel(msg)
+        if active_groups.get(channel) != group["id"]:
+            text = f"👥 {group['name']}\n{text}"
+            if (channel, group["id"]) not in _join_hinted:
+                _join_hinted.add((channel, group["id"]))
+                text += _join_hint(group)
         try:
-            await sender(group, format_for_channel(msg))
+            await sender(group, text)
         except Exception as exc:
             logger.warning("groupchat: relay to %s failed: %s", channel, exc)
 
@@ -493,6 +511,9 @@ async def send_user_message(group: dict, text: str, source: str = "web") -> dict
     _kill_running(group)
     msg = make_message("user", text, source=source)
     append_message(group, msg)
+    if source != "web":
+        # Sent from a chat app: show this group in the RAPR app too.
+        await _broadcast({"type": "group_open", "group_id": group["id"]})
     await _broadcast({"type": "group_message", "group_id": group["id"], "message": msg})
     await _relay(group, msg)
     token = uuid4().hex

@@ -667,9 +667,10 @@ function openGroupSection() {
   renderGroupConversation(true);
 }
 
-/** "@codex …" in the main chat made (or grew) a group chat: show it. */
+/** A group was started or used ("@codex …" in the main chat, or from WhatsApp/Telegram): show it. */
 async function groupOpenFromServer(d) {
   if (!d || !d.group_id) return;
+  if (_groupPanelOpen() && groupState.activeId === d.group_id) return;   // already showing it
   document.getElementById('group-wrapper')?.classList.add('open');
   await loadGroups();
   await openGroup(d.group_id);
