@@ -1120,6 +1120,8 @@ async def process_message(text: str, source: str = "web",
             _sess_lock.release()
         await push_state()  # flip session back to idle
         await tg_progress_notify(sess, output, elapsed, source, prompt_text=text)
+        from .helpers import mirror_to_chat_apps
+        await mirror_to_chat_apps(sess, output, source, prompt_text=text)
         if not _is_failure(output):
             from helm.kelvin_stickers import done_sticker_for_task
             done_sticker_for_task(elapsed, output, source)

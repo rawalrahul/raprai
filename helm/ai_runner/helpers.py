@@ -129,8 +129,8 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
 
     running = [s for s in _st.sessions.values() if s["status"] == "running"]
     multi   = len(running) >= 2
-    # WhatsApp is mirrored to Telegram like the web UI is.
-    web_src = source in ("web", "whatsapp")
+    # The web UI and the other chat apps are mirrored to Telegram.
+    web_src = source in ("web",) + _CHAT_APPS
 
     if not multi and not web_src:
         return  # single session via Telegram — reply already serves as notification
@@ -143,7 +143,7 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
             try:
                 await _st.telegram_app.bot.send_message(
                     chat_id=_st.telegram_chat_id,
-                    text=(f"📱 You (WhatsApp): {prompt_text}" if source == "whatsapp"
+                    text=(f"📱 You ({_APP_NAMES.get(source, source)}): {prompt_text}" if source != "web"
                           else f"🖥️ You (web): {prompt_text}"),
                 )
             except Exception:
@@ -208,6 +208,45 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
 
 
 _tg_progress_notify = tg_progress_notify  # legacy alias
+
+
+# ---------------------------------------------------------------------------
+# Keep every linked chat app in sync with a session (Telegram is handled above)
+# ---------------------------------------------------------------------------
+
+_CHAT_APPS = ("whatsapp", "discord", "slack")
+_APP_NAMES = {"web": "the app", "telegram": "Telegram", "whatsapp": "WhatsApp",
+              "discord": "Discord", "slack": "Slack"}
+_MIRROR_PROMPT_MAX = 500
+
+
+async def mirror_to_chat_apps(sess: dict, output: str, source: str, prompt_text: str = "") -> None:
+    """Send a finished session exchange (your message and the AI's reply) to every
+    linked chat app except the one it came from, so they all stay in sync.
+    Uses the senders the chat apps register for group chats; each one does nothing
+    when its app isn't linked. Telegram has its own mirror (tg_progress_notify)."""
+    if not sess or source == "agent" or sess.get("agent_silent_telegram"):
+        return
+    try:
+        import helm.groupchat as gc
+        senders = [(ch, fn) for ch, fn in list(gc._channel_senders.items())
+                   if ch in _CHAT_APPS and ch != source]
+    except Exception:
+        return
+    if not senders:
+        return
+    clean = (_clean_output(output) if output else "") or (output or "")
+    prompt = (prompt_text or "").strip()
+    if len(prompt) > _MIRROR_PROMPT_MAX:
+        prompt = prompt[:_MIRROR_PROMPT_MAX] + "…"
+    head = f"{sess.get('emoji') or '🤖'} {sess.get('name') or 'AI'}"
+    text = head + (f"\n🧑 You (from {_APP_NAMES.get(source, source)}): {prompt}" if prompt else "")
+    text += f"\n\n{clean.strip()}" if clean.strip() else ""
+    for channel, send in senders:
+        try:
+            await send({}, text)
+        except Exception as exc:
+            logger.warning("mirror to %s failed: %s", channel, exc)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
