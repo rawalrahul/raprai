@@ -223,3 +223,37 @@ def test_other_ais_get_no_pythonpath_change(monkeypatch):
     assert env["X"] == "1" and "PYTHONPATH" not in env
     env = child_env([sys.executable, "-m", "helm.x"])
     assert env["PYTHONPATH"].split(os.pathsep)[0] == ROOT
+
+
+def _api_cmd(url):
+    return [sys.executable, "-m", "helm.ai_runner._openai_compat_cli",
+            "--base-url", url, "--model", "m", "--api-key-env", "TEST_KEY"]
+
+
+def test_api_ai_in_a_group_chat_runs_from_any_folder(fake_api, tmp_path, monkeypatch):
+    """Group chats launch members themselves (not through run_ai_popen)."""
+    import helm.groupchat as gc
+    import helm.council.runner as runner
+    url, _ = fake_api
+    monkeypatch.setattr(gc, "_runtime_session", lambda m: {"cwd": str(tmp_path)})
+    monkeypatch.setattr(runner, "_build_cmd_for_session",
+                        lambda sess, prompt: (_api_cmd(url), prompt, {"TEST_KEY": "sk-test"}))
+    out = gc._run_member_blocking({}, {"id": "m1"}, "ping")
+    assert out.strip() == "pong", out
+
+
+def test_api_ai_in_council_and_bakeoff_runs_from_any_folder(fake_api, tmp_path):
+    """AI Council and Bake-off use council.runner._run_subprocess_blocking."""
+    from helm.council.runner import _run_subprocess_blocking
+    url, _ = fake_api
+    out = _run_subprocess_blocking(_api_cmd(url), str(tmp_path), "ping", {"TEST_KEY": "sk-test"})
+    assert out.strip() == "pong", out
+
+
+def test_every_ai_launch_uses_child_env():
+    """No AI launch builds its environment by hand (that skipped the PYTHONPATH fix)."""
+    import pathlib, re
+    hits = [str(f) for f in pathlib.Path(ROOT, "helm").rglob("*.py")
+            if re.search(r"\{\*\*_?os\.environ, \*\*extra_env\}", f.read_text(encoding="utf-8"))
+            and f.name != "paths.py"]
+    assert hits == []

@@ -295,7 +295,8 @@ def _run_member_blocking(group: dict, member: dict, prompt: str) -> str:
     cwd = sess.get("cwd") or _st.last_cwd
     if not os.path.isdir(cwd):
         cwd = os.path.expanduser("~")
-    env = {**os.environ, **extra_env} if extra_env else None
+    from helm.paths import child_env
+    env = child_env(cmd, extra_env)
     try:
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
