@@ -409,9 +409,13 @@ async def _relay(group: dict, msg: dict) -> None:
     """Send a group message to every linked chat app except the one it came from.
     Apps that are in the group get it as is; the others get the group's name on
     top (and, the first time, how to join in), and keep talking to their session."""
+    from helm.config import chat_apps_sync
+    sync = chat_apps_sync()
     for channel, sender in list(_channel_senders.items()):
         if channel == msg.get("source"):
             continue
+        if not sync and active_groups.get(channel) != group["id"]:
+            continue   # sync off: only the chat apps that are in the group
         text = format_for_channel(msg)
         if active_groups.get(channel) != group["id"]:
             text = f"👥 {group['name']}\n{text}"

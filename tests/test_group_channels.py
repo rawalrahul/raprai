@@ -169,6 +169,22 @@ def test_every_linked_app_gets_every_group_message_wherever_it_started(env, sour
     assert any(e.get("type") == "group_open" for e in env.events) == (source != "web")
 
 
+def test_sync_off_relays_only_to_apps_in_the_group(env, monkeypatch):
+    monkeypatch.setenv("CHAT_APPS_SYNC", "0")
+    sent = {"telegram": [], "whatsapp": []}
+
+    def sender(ch):
+        async def _s(group, text):
+            sent[ch].append(text)
+        return _s
+    gc.register_channel("telegram", sender("telegram"))
+    gc.register_channel("whatsapp", sender("whatsapp"))
+    g = gc.make_group("Team", "", [_st.sessions["s1"]])
+    gc.set_active_group("whatsapp", g["id"])
+    run(gc._relay(g, gc.make_message("member", "hi!", g["members"][0])))
+    assert sent == {"telegram": [], "whatsapp": ["🤖 Claude #1:\nhi!"]}
+
+
 def test_messages_typed_in_the_app_do_not_reopen_it(env):
     g = gc.make_group("Team", "", [_st.sessions["s1"]])
     run(gc.send_user_message(g, "hello", source="web"))

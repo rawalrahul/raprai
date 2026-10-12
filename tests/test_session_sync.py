@@ -78,3 +78,37 @@ def test_a_real_session_reply_is_mirrored(tmp_path, monkeypatch, apps):
     assert "Fixed the bug" in out
     assert len(apps["whatsapp"]) == 1 and "fix the login bug" in apps["whatsapp"][0]
     assert "Fixed the bug" in apps["whatsapp"][0] and len(apps["discord"]) == 1
+
+
+def test_switch_off_stops_session_mirroring(apps, monkeypatch):
+    monkeypatch.setenv("CHAT_APPS_SYNC", "0")
+    asyncio.run(mirror_to_chat_apps(SESS, "done", "web", prompt_text="do it"))
+    assert all(m == [] for m in apps.values())
+
+
+def test_switch_off_stops_telegram_mirroring_of_other_apps(monkeypatch):
+    """Off: Telegram only hears about its own messages."""
+    import helm.state as st
+    from helm.ai_runner.helpers import tg_progress_notify
+    calls = []
+
+    class Bot:
+        async def send_message(self, **kw):
+            calls.append(kw)
+    monkeypatch.setattr(st, "telegram_app", type("A", (), {"bot": Bot()})(), raising=False)
+    monkeypatch.setattr(st, "telegram_chat_id", 42, raising=False)
+    monkeypatch.setattr(st, "sessions", {"s1": {**SESS, "status": "running", "busy": False}}, raising=False)
+    monkeypatch.setenv("CHAT_APPS_SYNC", "0")
+    asyncio.run(tg_progress_notify({**SESS}, "done", 3, "web", prompt_text="do it"))
+    assert calls == []
+    monkeypatch.setenv("CHAT_APPS_SYNC", "1")
+    asyncio.run(tg_progress_notify({**SESS}, "done", 3, "web", prompt_text="do it"))
+    assert any("do it" in c.get("text", "") for c in calls)
+
+
+def test_the_switch_is_a_saved_setting():
+    from helm.web_routes.app import _SETTINGS_KEYS
+    assert "CHAT_APPS_SYNC" in _SETTINGS_KEYS
+    html = open(os.path.join(ROOT, "frontend2", "index.html"), encoding="utf-8").read()
+    js = open(os.path.join(ROOT, "frontend2", "js", "complete.js"), encoding="utf-8").read()
+    assert 'id="st-CHAT_APPS_SYNC"' in html and js.count("'CHAT_APPS_SYNC'") == 2

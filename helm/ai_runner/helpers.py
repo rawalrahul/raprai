@@ -119,6 +119,9 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
         return
     if source == "agent" or (sess or {}).get("agent_silent_telegram"):
         return
+    from helm.config import chat_apps_sync
+    if source != "telegram" and not chat_apps_sync():
+        return   # sync off: Telegram only hears about its own messages
 
     # Resolve the controls keyboard once — attached to the final message
     try:
@@ -225,7 +228,8 @@ async def mirror_to_chat_apps(sess: dict, output: str, source: str, prompt_text:
     linked chat app except the one it came from, so they all stay in sync.
     Uses the senders the chat apps register for group chats; each one does nothing
     when its app isn't linked. Telegram has its own mirror (tg_progress_notify)."""
-    if not sess or source == "agent" or sess.get("agent_silent_telegram"):
+    from helm.config import chat_apps_sync
+    if not sess or source == "agent" or sess.get("agent_silent_telegram") or not chat_apps_sync():
         return
     try:
         import helm.groupchat as gc

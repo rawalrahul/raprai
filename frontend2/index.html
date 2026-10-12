@@ -592,6 +592,15 @@ Example:
           </select>
         </div>
         <div class="settings-row">
+          <label for="st-CHAT_APPS_SYNC">Keep chat apps in sync
+            <small>On: every linked chat app (Telegram, WhatsApp, Discord, Slack) gets every conversation and group chat, wherever you started it. Off: each chat app only gets replies to what you sent from it, and group chats only post to the apps that joined them. The RAPR app always shows everything.</small>
+          </label>
+          <select class="settings-input" id="st-CHAT_APPS_SYNC" style="width:auto">
+            <option value="1">On</option>
+            <option value="0">Off</option>
+          </select>
+        </div>
+        <div class="settings-row">
           <label for="st-TELEGRAM_KELVIN_STICKERS">Kelvin stickers on Telegram
             <small>Kelvin sends a sticker when a long task or pipeline finishes, when a run fails, and with approval requests. Saved with the other settings.</small>
           </label>
@@ -1668,7 +1677,7 @@ Example:
 </div>
 
 <script src="/js/kelvin.js?v=7"></script>
-<script src="/js/complete.js?v=14"></script>
+<script src="/js/complete.js?v=15"></script>
 <script src="/js/ai_list.js?v=1"></script>
 <script src="/js/packages.js?v=4"></script>
 <script src="/js/memory.js?v=2"></script>
@@ -1680,7 +1689,7 @@ Example:
 <script src="/js/whatsapp.js?v=2"></script>
 <script src="/js/voices.js?v=2"></script>
 <script src="/js/finish.js?v=2"></script>
-<script src="/js/cloud.js?v=1"></script>
+<script src="/js/cloud.js?v=2"></script>
 <script src="/js/safety.js?v=3"></script>
 <script src="/js/demos.js?v=2"></script>
 <script>
