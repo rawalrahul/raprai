@@ -542,7 +542,8 @@ def run_ai_popen(cmd: list[str], cwd: str, name: str, sess: dict,
         _timeout: float | None = timeout_override if timeout_override > 0 else None
     else:
         _timeout = CLAUDE_TIMEOUT if CLAUDE_TIMEOUT > 0 else None
-    _env = {**_os.environ, **extra_env} if extra_env else None
+    from helm.paths import child_env
+    _env = child_env(cmd, extra_env)
     try:
         proc = subprocess.Popen(
             cmd,
