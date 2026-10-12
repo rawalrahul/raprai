@@ -201,3 +201,25 @@ def test_model_lists_come_from_the_installed_clis(tmp_path, monkeypatch):
     assert helpers._fetch_claude_models()[:3] == ["zeta", "opus", "sonnet"]
     assert helpers._fetch_gemini_models() == ["auto", "ultra"]
     assert helpers._fetch_antigravity_models() == []   # agy isn't the gemini command
+
+
+def test_api_ai_runs_from_any_project_folder(fake_api, tmp_path):
+    """Sessions start in the project folder, not the app folder, so `python -m helm…`
+    used to fail with "No module named 'helm'" (Groq on Windows, 2.0.3)."""
+    from helm.ai_runner.core import run_ai_popen
+    url, seen = fake_api
+    cmd = [sys.executable, "-m", "helm.ai_runner._openai_compat_cli",
+           "--base-url", url, "--model", "m", "--api-key-env", "TEST_KEY"]
+    out = run_ai_popen(cmd, str(tmp_path), "groq", {}, 30, stdin_text="ping",
+                       extra_env={"TEST_KEY": "sk-test"})
+    assert out.strip() == "pong", out
+
+
+def test_other_ais_get_no_pythonpath_change(monkeypatch):
+    from helm.paths import child_env
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    assert child_env(["claude", "-p"]) is None
+    env = child_env(["aider"], {"X": "1"})
+    assert env["X"] == "1" and "PYTHONPATH" not in env
+    env = child_env([sys.executable, "-m", "helm.x"])
+    assert env["PYTHONPATH"].split(os.pathsep)[0] == ROOT

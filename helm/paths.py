@@ -93,3 +93,24 @@ def packages_staging_dir() -> pathlib.Path:
 # Backward compatibility aliases
 helmpack_cache_dir = packages_cache_dir
 helmpack_staging_dir = packages_staging_dir
+
+
+def child_env(cmd, extra_env=None):
+    """Environment for an AI subprocess, or None to inherit RAPR's unchanged.
+
+    A command that runs RAPR's own Python (``python -m helm.ai_runner…``, used by
+    Groq, OpenRouter, GitHub Models and local servers) needs RAPR's code on its
+    path: sessions start in the project folder, not the app folder, so
+    ``-m helm…`` can't find RAPR from the working directory. Other AIs get no
+    PYTHONPATH change, so RAPR's folders can't shadow a Python-based AI's modules.
+    """
+    own_python = bool(cmd) and os.path.normcase(os.path.abspath(str(cmd[0]))) == \
+        os.path.normcase(os.path.abspath(sys.executable))
+    if not own_python:
+        return {**os.environ, **extra_env} if extra_env else None
+    env = {**os.environ, **(extra_env or {})}
+    root = str(PROJECT_ROOT)
+    parts = [x for x in env.get("PYTHONPATH", "").split(os.pathsep) if x]
+    if root not in parts:
+        env["PYTHONPATH"] = os.pathsep.join([root] + parts)
+    return env
