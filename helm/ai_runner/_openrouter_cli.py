@@ -20,7 +20,19 @@ _DEFAULT_MODEL = "openrouter/free"
 _TIMEOUT = 120  # seconds
 
 
+def _use_utf8() -> None:
+    """RAPR writes the prompt and reads the reply as UTF-8. On Windows a piped
+    Python defaults to the ANSI code page (cp1252), which can't print emoji
+    ("UnicodeEncodeError: 'charmap' codec can't encode character")."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main() -> None:
+    _use_utf8()
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not api_key:
         print("(error: OPENROUTER_API_KEY not set — add it in Settings → API Keys)",

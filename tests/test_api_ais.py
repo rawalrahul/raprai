@@ -257,3 +257,43 @@ def test_every_ai_launch_uses_child_env():
             if re.search(r"\{\*\*_?os\.environ, \*\*extra_env\}", f.read_text(encoding="utf-8"))
             and f.name != "paths.py"]
     assert hits == []
+
+
+def test_api_ai_handles_emoji_on_a_windows_code_page(tmp_path):
+    """On Windows a piped Python defaults to cp1252: a reply with "👋" crashed the
+    helper ("'charmap' codec can't encode character"), and a non-English prompt
+    reached the API garbled. PYTHONIOENCODING=cp1252 recreates that here."""
+    from helm.ai_runner.core import run_ai_popen
+    got = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            got.append(body["messages"][-1]["content"])
+            out = json.dumps({"choices": [{"message": {"content": "Hi 👋 Namaste नमस्ते"}}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(out)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{srv.server_port}/v1"
+        cmd = [sys.executable, "-m", "helm.ai_runner._openai_compat_cli",
+               "--base-url", url, "--model", "m", "--api-key-env", "TEST_KEY"]
+        out = run_ai_popen(cmd, str(tmp_path), "groq", {}, 30, stdin_text="héllo café 👋",
+                           extra_env={"TEST_KEY": "sk-test", "PYTHONIOENCODING": "cp1252"})
+        assert out.strip() == "Hi 👋 Namaste नमस्ते", out
+        assert got == ["héllo café 👋"], got
+    finally:
+        srv.shutdown()
+
+
+def test_every_rapr_helper_switches_to_utf8():
+    for name in ("_openai_compat_cli.py", "_openrouter_cli.py"):
+        src = open(os.path.join(ROOT, "helm", "ai_runner", name), encoding="utf-8").read()
+        assert "_use_utf8()" in src.split("def main()", 1)[1].split("\n", 2)[1], name

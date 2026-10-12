@@ -32,7 +32,19 @@ def _user_agent() -> str:
     return f"RAPR-AI/{APP_VERSION} (+https://raprai.com)"
 
 
+def _use_utf8() -> None:
+    """RAPR writes the prompt and reads the reply as UTF-8. On Windows a piped
+    Python defaults to the ANSI code page (cp1252), which can't print emoji
+    ("UnicodeEncodeError: 'charmap' codec can't encode character")."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main() -> None:
+    _use_utf8()
     args = sys.argv[1:]
 
     def _arg(flag: str, default: str = "") -> str:
