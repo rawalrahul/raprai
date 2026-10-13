@@ -1,7 +1,8 @@
 /**
  * Group Chats — several AIs and you in one conversation.
  * Talk to all of them, or @mention who should answer. Members see each other's
- * replies and can build on them. Uses DOM APIs (no innerHTML with user data).
+ * replies and can build on them. Uses DOM APIs; the one innerHTML (AI replies'
+ * Markdown) is built from text that is HTML-escaped first.
  */
 
 const groupState = {
@@ -10,6 +11,31 @@ const groupState = {
   active: null,        // full group with messages
   loaded: false,
 };
+
+function _renderInlineMarkdown(text) {
+  // Minimal, safe inline Markdown for AI replies: escape first, then convert
+  // bold / italics / inline code / fenced blocks / headings / bullets on the escaped text.
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  let out = esc(text || '');
+  const codeBlocks = [];
+  out = out.replace(/```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    codeBlocks.push('<pre class="group-msg-code"><code>' + code.replace(/\n$/, '') + '</code></pre>');
+    return '\u0000CODE' + (codeBlocks.length - 1) + '\u0000';
+  });
+  out = out.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  out = out.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  // Not between word characters, so maths like 2*3*4 keeps its asterisks.
+  out = out.replace(/(^|[^*\w])\*([^*\n]+)\*(?![\w*])/g, '$1<em>$2</em>');
+  out = out.replace(/^###\s+(.+)$/gm, '<strong>$1</strong>');
+  out = out.replace(/^##\s+(.+)$/gm, '<strong>$1</strong>');
+  out = out.replace(/^#\s+(.+)$/gm, '<strong>$1</strong>');
+  out = out.replace(/^[-*]\s+(.+)$/gm, '• $1');
+  out = out.replace(/\n/g, '<br>');
+  // A code block is its own block: drop the line break on each side so it doesn't leave a gap.
+  out = out.replace(/(?:<br>)?(\u0000CODE\d+\u0000)(?:<br>)?/g, '$1');
+  out = out.replace(/\u0000CODE(\d+)\u0000/g, (_, i) => codeBlocks[Number(i)]);
+  return out;
+}
 
 function _g(tag, cls, text) {
   const e = document.createElement(tag);
@@ -235,7 +261,12 @@ function _buildGroupMessage(group, m) {
   head.appendChild(_g('span', 'group-msg-time', _gTime(m.timestamp)));
   const bubble = _g('div', 'group-bubble');
   bubble.style.borderLeftColor = color;
-  bubble.appendChild(_mentionText(m.content || '', group));
+  if (m.author_ai) {
+    bubble.innerHTML = _renderInlineMarkdown(m.content || '');
+    _colorMentions(bubble, group);
+  } else {
+    bubble.appendChild(_mentionText(m.content || '', group));
+  }
   const copy = _g('button', 'group-msg-copy', 'Copy');
   copy.type = 'button';
   copy.addEventListener('click', () => {
@@ -250,6 +281,17 @@ function _buildGroupMessage(group, m) {
 }
 
 /** Text node(s) with @mentions of members highlighted. */
+// Colour @mentions in already-rendered Markdown, leaving code untouched.
+function _colorMentions(root, group) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.parentElement && n.parentElement.closest('code, pre')
+      ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  const nodes = [];
+  while (walker.nextNode()) if (walker.currentNode.nodeValue.includes('@')) nodes.push(walker.currentNode);
+  for (const n of nodes) n.replaceWith(_mentionText(n.nodeValue, group));
+}
+
 function _mentionText(text, group) {
   const frag = document.createDocumentFragment();
   const re = /(?<!\w)@[\w#-]+/g;
