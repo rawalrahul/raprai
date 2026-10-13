@@ -226,3 +226,11 @@ def test_desktop_kelvin_switches_moves_while_a_mood_lasts(monkeypatch):
     for prev, cur in zip(shown, shown[1:]):
         if cur[1] != prev[1]:
             assert cur[2] == 0
+
+
+def test_kelvin_works_while_a_group_chat_answers():
+    st = KelvinStatus()
+    st.observe({"type": "group_status", "group_id": "g1", "status": "running"})
+    assert dk.pet_mood(st) == "working"
+    st.observe({"type": "group_status", "group_id": "g1", "status": "idle"})
+    assert dk.pet_mood(st) in ("done", "idle")
