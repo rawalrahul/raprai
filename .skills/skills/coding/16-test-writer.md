@@ -276,10 +276,10 @@ test('handles null input', () => {
 describe('Password Validator', () => {
   test('accepts password with 8+ chars, uppercase, lowercase, number, symbol', () => {
     // Arrange
-    const password = 'MyPass123!';
+    const input = 'MyPass123!';
 
     // Act
-    const isValid = validatePassword(password);
+    const isValid = validatePassword(input);
 
     // Assert
     expect(isValid).toBe(true);
