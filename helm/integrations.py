@@ -58,8 +58,8 @@ def _build_command_fn(command_template: str, stdin_prompt: bool = False):
     """
     def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
         tpl = command_template
-        python_token = "__RAPR_PYTHON_EXE__"
-        tpl = tpl.replace("{python}", python_token)
+        python_marker = "__RAPR_PYTHON_EXE__"
+        tpl = tpl.replace("{python}", python_marker)
         if model:
             tpl = tpl.replace("{model}", model)
         else:
@@ -78,7 +78,7 @@ def _build_command_fn(command_template: str, stdin_prompt: bool = False):
                 part = part.strip('"')
             if not part:
                 continue
-            cleaned.append(sys.executable if part == python_token else part)
+            cleaned.append(sys.executable if part == python_marker else part)
         return cleaned
     return build_command
 

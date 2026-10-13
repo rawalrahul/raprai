@@ -54,9 +54,8 @@ def _run_subprocess_blocking(cmd: list, cwd: str, stdin_text: str | None,
     """Blocking subprocess run. Returns stdout as string.
     on_start(proc), if given, is called once the process is running (so a caller
     can stop it)."""
-    env = None
-    if extra_env:
-        env = {**os.environ, **extra_env}
+    from helm.paths import child_env
+    env = child_env(cmd, extra_env)   # RAPR's own helpers (Groq…) need RAPR on their path
     dummy = {"proc": None}
     try:
         proc = subprocess.Popen(

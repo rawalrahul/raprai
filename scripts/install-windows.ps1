@@ -168,6 +168,8 @@ except SystemExit:
     raise
 except Exception:
     pass
+# New sessions open in your home folder, not RAPR's own app folder.
+os.environ.setdefault('SESSION_CWD', os.path.expanduser('~'))
 os.chdir(APP)
 sys.path.insert(0, APP)
 sys.argv = [os.path.join(APP, 'web_app.py')]

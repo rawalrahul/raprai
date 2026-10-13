@@ -68,8 +68,11 @@ async def send_group_text(_group: dict, text: str) -> None:
         return
     from helm.ai_runner import forward_to_telegram
     chunks = [text[i:i + _MAX_LEN] for i in range(0, len(text), _MAX_LEN)] or [text]
+    joined = (gc.active_group(CHANNEL) or {}).get("id") == _group.get("id")
     for i, chunk in enumerate(chunks):
-        await forward_to_telegram(chunk, reply_markup=in_group_keyboard() if i == len(chunks) - 1 else None)
+        # In-group buttons only when Telegram is in this group; otherwise the usual ones.
+        last = i == len(chunks) - 1
+        await forward_to_telegram(chunk, reply_markup=in_group_keyboard() if (last and joined) else None)
 
 
 def register() -> None:

@@ -452,7 +452,7 @@ function applyState(s){
 function applyCwd(path){
   const el = document.getElementById('cwd-display');
   el.textContent = path;
-  el.title = 'Working directory: ' + path + '\nClick to change';
+  el.title = 'Project folder: ' + path + '\nYour AI works inside this folder. Click to type a different path.';
 }
 
 // --- AI Menu ---------------------------------------------------------------------------------------------------
@@ -506,6 +506,13 @@ function cwdKey(e){
 let _browsePath = '', _browseTarget = 'cwd'; // 'cwd' or 'sched-cwd' or 'sb-sched-cwd'
 async function openBrowse(target){
   _browseTarget = target || 'cwd';
+  // The main folder bar picks the project the AI works on; other forms just need a folder.
+  const project = _browseTarget === 'cwd';
+  document.getElementById('browse-modal-title').textContent = project ? 'Choose your project' : 'Choose a folder';
+  document.getElementById('browse-hint').textContent = project
+    ? 'Open the folder of the project you want to work on, then click "Use this project". Your AI starts in this folder and works on its files.'
+    : 'Open the folder you want, then click "Use this folder".';
+  document.getElementById('browse-select-btn').textContent = project ? '✓ Use this project' : '✓ Use this folder';
   // Try the native Windows folder-picker first (only works on the server machine)
   try {
     const res = await fetch('/browse/native');
@@ -524,7 +531,9 @@ async function openBrowse(target){
   if(_browseTarget === 'cwd'){
     _browsePath = document.getElementById('cwd-display').textContent;
   } else {
-    _browsePath = document.getElementById(_browseTarget).value || _session_cwd();
+    // Empty field: start from the current project (there was no _session_cwd helper).
+    const cur = document.getElementById('cwd-display').textContent;
+    _browsePath = document.getElementById(_browseTarget).value || (cur === '—' ? '' : cur);
   }
   if(_browsePath === '—') _browsePath = '';
   await loadBrowse(_browsePath);
@@ -576,6 +585,12 @@ let _thinkingMsgIdx = 0;
 
 // Fun one-liners + feature discovery tips (prefixed with 💡)
 const _thinkingMessages = [
+  // ── Kelvin, the RAPR penguin ──
+  "Kelvin is typing with both flippers...",
+  "Kelvin is sliding through your code belly-first...",
+  "Kelvin is checking under the iceberg...",
+  "Fish break later, answer first...",
+  "Kelvin is waddling between files...",
   // ── Fun one-liners ──
   "Crunching the numbers...",
   "Consulting the digital oracle...",
@@ -2192,7 +2207,7 @@ function loadSettings(){
                   'CLAUDE_TIMEOUT','SESSION_DAYS','WEB_PORT','WEB_HOST',
                   'HEARTBEAT_ENABLED','HEARTBEAT_AI',
                   'AI_MAX_RETRIES','AI_AUTO_SWITCH',
-                  'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD','TELEGRAM_KELVIN_STICKERS','KELVIN_KEEP_AWAKE','KELVIN_DESKTOP_PET','KELVIN_DESKTOP_SIZE','KELVIN_DAILY_CHECKIN',
+                  'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD','TELEGRAM_KELVIN_STICKERS','CHAT_APPS_SYNC','KELVIN_KEEP_AWAKE','KELVIN_DESKTOP_PET','KELVIN_DESKTOP_SIZE','KELVIN_DAILY_CHECKIN',
                   'LOCAL_AI_URL','LOCAL_AI_MODEL',
                   'COMPUTER_USE','COMPUTER_USE_TIER2','OMNIPARSER_ENABLED'];
     keys.forEach(k=>{
@@ -2279,7 +2294,7 @@ function saveSettings(){
                 'CLAUDE_TIMEOUT','SESSION_DAYS','WEB_PORT','WEB_HOST',
                 'HEARTBEAT_ENABLED','HEARTBEAT_AI',
                 'AI_MAX_RETRIES','AI_AUTO_SWITCH',
-                'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD','TELEGRAM_KELVIN_STICKERS','KELVIN_KEEP_AWAKE','KELVIN_DESKTOP_PET','KELVIN_DESKTOP_SIZE','KELVIN_DAILY_CHECKIN',
+                'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD','TELEGRAM_KELVIN_STICKERS','CHAT_APPS_SYNC','KELVIN_KEEP_AWAKE','KELVIN_DESKTOP_PET','KELVIN_DESKTOP_SIZE','KELVIN_DAILY_CHECKIN',
                 'LOCAL_AI_URL','LOCAL_AI_MODEL',
                 'COMPUTER_USE','COMPUTER_USE_TIER2','OMNIPARSER_ENABLED'];
   const body = {};

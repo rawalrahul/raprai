@@ -66,20 +66,30 @@ const STICKERS = ['done', 'error', 'approval', 'working', 'idle'];
     host.style.width = w + 'px';
     host.style.height = h + 'px';
   }, [PET_W, PET_H]);
-  for (const mood of ['idle', 'working', 'thinking', 'approval', 'done', 'error', 'sleeping']) {
-    await page.evaluate((m) => {
-      const host = document.getElementById('s');
-      host.innerHTML = '';
-      window.__pet = Kelvin.mount(host, { pokeable: false, track: false });
-      window.__pet.setState(m);
-    }, mood);
-    await page.waitForTimeout(600); // let springs settle into the pose
-    const frames = [];
-    for (let i = 0; i < PET_FRAMES; i++) {
-      frames.push(await page.locator('#s').screenshot({ omitBackground: true }));
-      await page.waitForTimeout(PET_STEP_MS);
+  // Moods with several moves get one strip per move: pet-<mood>.png, pet-<mood>-1.png, pet-<mood>-2.png.
+  // RAPR_PET_MOODS=idle,working renders just those (the other assets are still rewritten).
+  const MOVES = { idle: 3, working: 3, thinking: 3, done: 3, approval: 1, error: 1, sleeping: 1 };
+  const only = (process.env.RAPR_PET_MOODS || '').split(',').filter(Boolean);
+  for (const mood of Object.keys(MOVES).filter((m) => !only.length || only.includes(m))) {
+    for (let move = 0; move < MOVES[mood]; move++) {
+      await page.evaluate(([m, v]) => {
+        const host = document.getElementById('s');
+        host.innerHTML = '';
+        window.__pet = Kelvin.mount(host, { pokeable: false, track: false, variant: v });
+        window.__pet.setState(m);
+      }, [mood, move]);
+      await page.waitForTimeout(600); // let springs settle into the pose
+      const frames = [];
+      const t0 = Date.now();
+      for (let i = 0; i < PET_FRAMES; i++) {
+        // Keep frames exactly PET_STEP_MS apart, however long a screenshot takes.
+        const wait = t0 + i * PET_STEP_MS - Date.now();
+        if (wait > 0) await page.waitForTimeout(wait);
+        frames.push(await page.locator('#s').screenshot({ omitBackground: true }));
+      }
+      const name = move ? `pet-${mood}-${move}` : `pet-${mood}`;
+      fs.writeFileSync(path.join(OUT, `${name}.frames.json`), JSON.stringify(frames.map((b) => b.toString('base64'))));
     }
-    fs.writeFileSync(path.join(OUT, `pet-${mood}.frames.json`), JSON.stringify(frames.map((b) => b.toString('base64'))));
   }
   await page.evaluate(() => document.documentElement.setAttribute('data-kelvin', 'still'));
 

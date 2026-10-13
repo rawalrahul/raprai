@@ -9,6 +9,7 @@
 [![Latest release](https://img.shields.io/github/v/release/rawalrahul/rapr-releases?label=release)](https://github.com/rawalrahul/rapr-releases/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 ![Windows | macOS | Linux server](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux%20server-blue)
+[![Listed in awesome-ai-plugins](https://img.shields.io/badge/listed%20in-awesome--ai--plugins-fc60a8)](https://github.com/hashgraph-online/awesome-ai-plugins#tools--integrations)
 [![GitHub stars](https://img.shields.io/github/stars/rawalrahul/raprai?style=social)](https://github.com/rawalrahul/raprai/stargazers)
 
 [Website](https://raprai.com) · [Install](#install) · [Features](#what-you-can-do) · [Full guide](docs/guide.md) · [Contributing](CONTRIBUTING.md)

@@ -44,6 +44,7 @@ SLEEP_AFTER_SECONDS = 10 * 60
 POKE_MS = 1200
 DRAG_THRESHOLD = 4
 PET_MOODS = ("idle", "working", "thinking", "approval", "done", "error", "sleeping")
+MOVE_SECONDS = 7                  # a different move for the same mood after this long
 
 SIZES = {"small": 0.5, "medium": 0.75, "large": 1.0}
 SIZE_ORDER = ("small", "medium", "large")
@@ -144,15 +145,36 @@ def pet_mood(status, now: Optional[float] = None) -> str:
     mood = status.mood(now)
     if mood == "idle" and status.idle_seconds(now) > SLEEP_AFTER_SECONDS:
         return "sleeping"
-    if mood == "working" and not status.counts()["pipelines"]:
-        return "thinking"   # sessions waiting on their AI; the gear is for running pipelines
+    if mood == "working" and not status.counts()["pipelines"] and not status.acting(now):
+        return "thinking"   # waiting on the AI; the gear is for pipelines and AIs running commands
     return mood
 
 
-def load_strip(mood: str, box: Optional[tuple] = None):
-    """Return the RGBA frames for one mood from its sprite strip, scaled to box."""
+def strip_path(mood: str, move: int = 0):
+    """pet-<mood>.png is the first move; pet-<mood>-1.png, -2.png… are the others."""
+    return ASSET_DIR / (f"pet-{mood}.png" if not move else f"pet-{mood}-{move}.png")
+
+
+def move_count(mood: str) -> int:
+    """How many moves (sprite strips) this mood has."""
+    n = 1
+    while strip_path(mood, n).exists():
+        n += 1
+    return n
+
+
+def next_move(current: int, count: int, rnd=None) -> int:
+    """A different move from the current one (the same one when there's only one)."""
+    import random
+    if count <= 1:
+        return 0
+    return (current + 1 + (rnd or random).randrange(count - 1)) % count
+
+
+def load_strip(mood: str, box: Optional[tuple] = None, move: int = 0):
+    """Return the RGBA frames for one mood (and move) from its sprite strip, scaled to box."""
     from PIL import Image
-    strip = Image.open(ASSET_DIR / f"pet-{mood}.png").convert("RGBA")
+    strip = Image.open(strip_path(mood, move)).convert("RGBA")
     count = max(1, strip.width // PET_W)
     frames = [strip.crop((i * PET_W, 0, (i + 1) * PET_W, PET_H)) for i in range(count)]
     if box and tuple(box) != (PET_W, PET_H):
@@ -203,6 +225,8 @@ class DesktopKelvin:
         self._frames: dict = {}
         self._mood = None
         self._frame = 0
+        self._move = 0
+        self._move_since = 0.0
         self._poke_until = 0.0
         self._press = None
         self._dragged_to = None
@@ -300,14 +324,15 @@ class DesktopKelvin:
 
     # -- animation -----------------------------------------------------------
 
-    def _frames_for(self, mood: str):
-        if mood not in self._frames:
+    def _frames_for(self, mood: str, move: int = 0):
+        key = (mood, move)
+        if key not in self._frames:
             from PIL import ImageTk
             bg = KEY_COLOR if self.transparent else FALLBACK_BG
             box = pet_box(self._size)
-            self._frames[mood] = [ImageTk.PhotoImage(flatten(f, bg), master=self.root)
-                                  for f in load_strip(mood, box)]
-        return self._frames[mood]
+            self._frames[key] = [ImageTk.PhotoImage(flatten(f, bg), master=self.root)
+                                 for f in load_strip(mood, box, move)]
+        return self._frames[key]
 
     def _apply_size(self, size: str) -> None:
         """Switch to a new size, keeping the bottom-right corner in place."""
@@ -348,9 +373,15 @@ class DesktopKelvin:
                     self.root.attributes("-topmost", True)
                 self._shown = want
             if want:
+                now = time.time()
                 if mood != self._mood:
+                    import random
                     self._mood, self._frame = mood, 0
-                frames = self._frames_for(mood)
+                    self._move, self._move_since = random.randrange(move_count(mood)), now
+                elif now - self._move_since > MOVE_SECONDS and self._frame % len(self._frames_for(mood, self._move)) == 0:
+                    # Same mood for a while: switch to another move at the end of a loop.
+                    self._move, self._move_since, self._frame = next_move(self._move, move_count(mood)), now, 0
+                frames = self._frames_for(mood, self._move)
                 self.label.configure(image=frames[self._frame % len(frames)])
                 self._frame += 1
         except Exception as exc:

@@ -67,7 +67,9 @@ def test_flatten_uses_hard_edges_for_the_colour_key():
     from PIL import Image
     frame = Image.new("RGBA", (4, 1))
     frame.putdata([(10, 20, 30, 255), (10, 20, 30, 200), (0, 0, 0, 60), (0, 0, 0, 0)])
-    flat = list(dk.flatten(frame).getdata())
+    flat_img = dk.flatten(frame)
+    get_data = getattr(flat_img, "get_flattened_data", flat_img.getdata)
+    flat = list(get_data())
     assert flat[0] == (10, 20, 30) and flat[1] == (10, 20, 30)   # solid enough: kept
     assert flat[2] == dk.KEY_COLOR and flat[3] == dk.KEY_COLOR   # faint shadow/edge: see-through
 
@@ -151,3 +153,76 @@ def test_mode_and_size_are_saved(monkeypatch, tmp_path):
     assert dk.pet_mode() == "always"
     monkeypatch.delenv("KELVIN_DESKTOP_SIZE")
     monkeypatch.delenv("KELVIN_DESKTOP_PET")
+
+
+def test_kelvin_works_while_the_ai_runs_steps():
+    """An AI running commands shows the working Kelvin, not the thinking one."""
+    st = KelvinStatus()
+    st.observe({"type": "thinking", "active": True, "session_id": "a"})
+    assert dk.pet_mood(st) == "thinking"
+    st.observe({"type": "activity", "session_id": "a", "phase": "step", "label": "run command"})
+    assert dk.pet_mood(st) == "working"
+    # No new step for a while: back to thinking.
+    from helm.kelvin_status import STEP_SECONDS
+    assert dk.pet_mood(st, time.time() + STEP_SECONDS + 1) == "thinking"
+    st.observe({"type": "activity", "session_id": "a", "phase": "step", "label": "write to file"})
+    st.observe({"type": "activity", "session_id": "a", "phase": "done"})
+    assert dk.pet_mood(st) == "thinking"
+    st.observe({"type": "activity", "session_id": "a", "phase": "step", "label": "run command"})
+    st.observe({"type": "thinking", "active": False, "session_id": "a"})
+    assert dk.pet_mood(st) in ("idle", "done")
+
+
+def test_moods_have_several_moves():
+    """Idle, thinking, working and done each have three moves, every one a full strip."""
+    for mood in ("idle", "thinking", "working", "done"):
+        assert dk.move_count(mood) == 3, mood
+        for move in range(3):
+            frames = dk.load_strip(mood, move=move)
+            assert len(frames) >= 8 and frames[0].size == (dk.PET_W, dk.PET_H), (mood, move)
+    assert dk.move_count("approval") == 1
+
+
+def test_next_move_is_always_a_different_one():
+    import random
+    rnd = random.Random(1)
+    for cur in range(3):
+        for _ in range(20):
+            assert dk.next_move(cur, 3, rnd) != cur
+    assert dk.next_move(0, 1) == 0
+
+
+def test_desktop_kelvin_switches_moves_while_a_mood_lasts(monkeypatch):
+    """Drive the real animation loop with a stand-in window and a fake clock."""
+    clock = [1000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    monkeypatch.setattr(dk, "pet_size", lambda: "medium")
+    monkeypatch.setattr(dk, "pet_mode", lambda: "always")
+
+    class Root:
+        def after(self, ms, fn): pass
+        def attributes(self, *a): pass
+        def deiconify(self): pass
+        def withdraw(self): pass
+
+    shown = []
+    class Label:
+        def configure(self, image): shown.append(image)
+
+    st = KelvinStatus()
+    st.observe({"type": "thinking", "active": True, "session_id": "a"})
+    pet = dk.DesktopKelvin(st, open_ui=lambda: None)
+    pet.root, pet.label, pet._size = Root(), Label(), "medium"
+    pet._frames_for = lambda mood, move=0: [(mood, move, i) for i in range(16)]
+
+    moves = set()
+    for _ in range(600):                    # 600 frames of 75 ms = 45 s of thinking
+        pet._tick()
+        clock[0] += dk.FRAME_MS / 1000
+        moves.add(shown[-1][1])
+    assert {m for (mood, m, _) in shown if mood == "thinking"} == moves
+    assert len(moves) >= 2                  # it changed move at least once
+    # A move only changes at the start of a loop, never mid-animation.
+    for prev, cur in zip(shown, shown[1:]):
+        if cur[1] != prev[1]:
+            assert cur[2] == 0

@@ -397,6 +397,12 @@ async def _main():
                 Application.builder().token(token).concurrent_updates(True).build()
             )
             tg = _st.telegram_app
+            if _st.telegram_chat_id is None:
+                # Set up from the setup page while running: send updates (group chats,
+                # files…) to the allowed user straight away, without waiting for /start.
+                _ids = [x.strip() for x in os.environ.get("ALLOWED_USER_IDS", "").split(",") if x.strip().isdigit()]
+                if _ids:
+                    _st.telegram_chat_id = int(_ids[0])
             tg.add_handler(CommandHandler("start",   tg_start))
             tg.add_handler(CommandHandler("menu",    tg_menu))
             tg.add_handler(CommandHandler("claude",  tg_claude))

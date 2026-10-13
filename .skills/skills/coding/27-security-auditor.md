@@ -472,7 +472,7 @@ vault kv get secret/prod/database
 **Secure Secrets in Code:**
 ```javascript
 // WRONG: Secret in code
-const apiKey = 'sk_live_1234567890';
+const apiKey = 'sk_live_your_key_here';
 
 // CORRECT: Load from environment
 const apiKey = process.env.API_KEY;
