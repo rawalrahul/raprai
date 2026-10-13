@@ -489,11 +489,14 @@
     var now = Date.now();
     var timers = [ui.doneUntil, ui.listenUntil, ui.errorUntil, ui.pipelineEndedAt + CREW_LINGER_MS];
     Object.keys(ui.stepDoneAt).forEach(function (id) { timers.push(ui.stepDoneAt[id] + STEP_CELEBRATE_MS); });
-    Object.keys(team.doneAt).forEach(function (id) { timers.push(team.doneAt[id] + TEAM_DONE_MS); });
+    Object.keys(groupDone).forEach(function (gid) {
+      Object.keys(groupDone[gid]).forEach(function (id) { timers.push(groupDone[gid][id] + TEAM_DONE_MS); });
+    });
     var next = timers.filter(function (t) { return t > now; });
     if (next.length) expiryTimer = setTimeout(render, Math.min.apply(null, next) - now + 20);
     renderCrew();
     renderTeam();
+    renderFloat();
     var s = computeState();
     if (s === ui.current) return;
     ui.current = s;
@@ -587,26 +590,7 @@
       });
     }
 
-    // Group chats: one Kelvin per member, in that AI's beanie. The member speaking
-    // works, members who already replied this turn look pleased, the rest wait.
-    Object.keys(ui.groups).forEach(function (gid) {
-      var g = ui.groups[gid];
-      var speaker = (g.members || []).filter(function (m) { return m.id === g.speaking; })[0];
-      var replied = Object.keys(g.replied).length;
-      groups.push({
-        kind: 'group', id: gid,
-        title: '👥 ' + g.name,
-        sub: (speaker ? speaker.name + ' is replying…' : 'The group is thinking…') +
-             (replied ? ' · ' + replied + ' repl' + (replied === 1 ? 'y' : 'ies') + ' so far' : ''),
-        lanes: [(g.members || []).map(function (m) {
-          var talking = m.id === g.speaking, done = !!g.replied[m.id];
-          return { key: 'g:' + gid + ':' + m.id, ai: m.ai, groupId: gid,
-                   mood: talking ? 'working' : done ? 'done' : 'idle',
-                   name: (m.emoji ? m.emoji + ' ' : '') + m.name,
-                   tag: talking ? 'replying' : done ? 'replied' : 'waiting' };
-        })],
-      });
-    });
+    // Group chats get their own stage (the open group chat, or the floating stage), not a lane here.
 
     var pl = ui.pipeline;
     var ended = pl && /^(completed|failed|cancelled)$/.test(pl.status);
@@ -743,98 +727,249 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Group chat team: one Kelvin per member, shown inside the open group chat
+  // Group chat stage: one big Kelvin per member (in that AI's beanie) acting out
+  // the collaboration. Shown inside the open group chat, and as a floating stage
+  // while a group works and its chat isn't on screen.
   // ---------------------------------------------------------------------------
 
-  var QUIPS = {
-    working: ['Typing with both flippers…', 'Sliding through the code on my belly…', 'Fish break later, work now.',
-              'Do not disturb: penguin at work.', 'Waddling between files…', 'Polishing every semicolon…'],
-    listening: ['Listening closely…', 'Taking notes on an ice cube…', 'Waiting for my turn, politely.'],
-    done: ['Flipper five! 🐟', 'Nailed it.', 'Done. Fish time?', 'Slid it home.'],
-    sleeping: ['Zzz… dreaming of fish.', 'Napping on an iceberg.'],
-  };
   var TEAM_DONE_MS = 4000;
-  var team = { host: null, gid: null, sig: '', members: {}, doneAt: {}, quipAt: 0, quip: '', quipMood: '' };
+  var BATON_MS = 1600;
+  var BIT_MS = 7000;
+  var BITS = ['toss', 'tower', 'board', 'plane', 'cheer', 'coffee'];
+  var groupDone = {};      // group id -> { member id: when it last replied }
 
-  function teamDestroy() {
-    Object.keys(team.members).forEach(function (id) { team.members[id].k.destroy(); });
-    team.members = {};
-    team.sig = '';
+  function first(name) { return String(name || 'AI').split(/\s+/)[0]; }
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
   }
 
-  function teamMood(m, live, now) {
-    if (live && live.speaking === m.id) return 'working';
-    if (now - (team.doneAt[m.id] || 0) < TEAM_DONE_MS) return 'done';
-    if (live) return 'listening';
-    if (now - ui.lastEvent > SLEEP_AFTER_MS) return 'sleeping';
-    return 'idle';
+  /** A stage in host. Returns { update(group), destroy() }. */
+  function createStage(host, size) {
+    var st = { actors: {}, order: [], bit: null, bitUntil: 0, prevSpeaker: null, baton: null, five: null, fxKey: '', sig: '' };
+    host.textContent = '';
+    var stage = el('div', 'kv-stage kv-stage-' + size);
+    var fx = el('div', 'kv-fx');
+    var row = el('div', 'kv-actors');
+    var caption = el('div', 'kv-caption');
+    stage.appendChild(fx); stage.appendChild(row); stage.appendChild(caption);
+    host.appendChild(stage);
+
+    function build(members) {
+      Object.keys(st.actors).forEach(function (id) { st.actors[id].k.destroy(); });
+      st.actors = {}; st.order = []; row.textContent = '';
+      members.forEach(function (m) {
+        var node = el('div', 'kv-actor');
+        var art = el('span', 'kelvin-slot kv-actor-art');
+        var name = el('span', 'kv-actor-name', m.name);
+        if (m.color) name.style.color = m.color;
+        var tag = el('span', 'kv-actor-tag');
+        node.appendChild(art); node.appendChild(name); node.appendChild(tag);
+        row.appendChild(node);
+        st.actors[m.id] = { m: m, node: node, tag: tag,
+                            k: mount(art, { track: false, pokeable: false, ai: m.ai, label: 'Kelvin: ' + m.name }) };
+        st.order.push(m.id);
+      });
+    }
+
+    function x(id) {   // centre of an actor, relative to the stage
+      var a = st.actors[id];
+      return a ? a.node.offsetLeft + a.node.offsetWidth / 2 : 0;
+    }
+
+    function update(g) {
+      var members = g.members || [];
+      var sig = members.map(function (m) { return m.id + ':' + m.ai; }).join(',');
+      if (sig !== st.sig) { build(members); st.sig = sig; st.fxKey = ''; }
+      var now = Date.now(), live = g.live, done = groupDone[g.id] || {};
+      var speaker = live ? live.speaking : null;
+
+      // Turn changes: the baton flies from the last speaker to the new one.
+      if (speaker !== st.prevSpeaker) {
+        if (st.prevSpeaker && speaker && st.actors[st.prevSpeaker] && st.actors[speaker]) {
+          st.baton = { from: st.prevSpeaker, to: speaker, until: now + BATON_MS };
+        }
+        st.prevSpeaker = speaker;
+      }
+      // A fresh reply: a high five.
+      Object.keys(done).forEach(function (id) {
+        if (now - done[id] < 1500 && (!st.five || st.five.at !== done[id])) st.five = { id: id, at: done[id] };
+      });
+
+      st.order.forEach(function (id) {
+        var a = st.actors[id], mood;
+        if (live && id === speaker) mood = 'working';
+        else if (now - (done[id] || 0) < TEAM_DONE_MS) mood = 'done';
+        else if (live) mood = 'listening';
+        else mood = now - ui.lastEvent > SLEEP_AFTER_MS ? 'sleeping' : 'idle';
+        a.k.setState(mood);
+        a.node.setAttribute('data-mood', mood);
+        a.tag.textContent = { working: 'replying', done: 'replied', listening: 'with the team', sleeping: 'napping' }[mood] ||
+                            (a.m.role || aiName(a.m.ai));
+      });
+
+      // A new collaboration bit every few seconds while the group works.
+      if (!live) { st.bit = null; }
+      else if (!st.bit || now > st.bitUntil) {
+        var pool = BITS.filter(function (b) { return b !== st.bit && (st.order.length > 1 || b === 'board' || b === 'tower'); });
+        st.bit = pool[Math.floor(Math.random() * pool.length)];
+        st.bitUntil = now + BIT_MS;
+      }
+      renderFx(g, live, speaker, now);
+    }
+
+    function renderFx(g, live, speaker, now) {
+      var baton = st.baton && now < st.baton.until ? st.baton : null;
+      var five = st.five && now - st.five.at < 1500 ? st.five : null;
+      var others = st.order.filter(function (id) { return id !== speaker; });
+      var buddy = others.length ? others[Math.floor(now / BIT_MS) % others.length] : null;
+      var key = [live ? 1 : 0, st.bit, speaker, buddy, baton && baton.to, five && five.at, row.offsetWidth].join('|');
+      if (key === st.fxKey) return;
+      st.fxKey = key;
+      fx.textContent = '';
+      var name = function (id) { return st.actors[id] ? first(st.actors[id].m.name) : 'AI'; };
+      var put = function (cls, text, left, vars) {
+        var n = el('span', 'kvx ' + cls, text);
+        n.style.left = Math.round(left) + 'px';
+        Object.keys(vars || {}).forEach(function (k) { n.style.setProperty(k, Math.round(vars[k]) + 'px'); });
+        fx.appendChild(n);
+        return n;
+      };
+      var line = '';
+      if (five) {
+        put('kvx-five', '🙌', x(five.id) + 18);
+        line = name(five.id) + ' nailed their part. High five! 🙌';
+      }
+      if (baton) {
+        put('kvx-baton', '📜', x(baton.from), { '--dx': x(baton.to) - x(baton.from) });
+        line = name(baton.from) + ' passes the baton to ' + name(baton.to) + ' 📜';
+      } else if (live && speaker && st.actors[speaker]) {
+        var xs = x(speaker), xb = buddy ? x(buddy) : xs + 60, mid = (xs + xb) / 2;
+        if (st.bit === 'toss') {
+          put('kvx-toss', '💡', xs, { '--dx': xb - xs });
+          line = line || name(buddy) + ' and ' + name(speaker) + ' toss ideas around 💡';
+        } else if (st.bit === 'tower') {
+          var n = Math.min(6, 1 + Object.keys((ui.groups[g.id] || {}).replied || {}).length);
+          for (var i = 0; i < n; i++) {
+            var b = put('kvx-brick', '🧱', mid - 9);
+            b.style.bottom = (52 + i * 15) + 'px';   // stacked on the floor, above the name tags
+            b.style.animationDelay = (i * 0.12) + 's';
+          }
+          line = line || 'Building it together, one brick per reply 🧱';
+        } else if (st.bit === 'board') {
+          put('kvx-board', '📋', buddy ? mid - 14 : xs + 44);
+          put('kvx-pen', '✏️', (buddy ? mid : xs + 58));
+          line = line || 'Huddle at the whiteboard: ' + name(speaker) + ' sketches the plan';
+        } else if (st.bit === 'plane') {
+          put('kvx-plane', '✈️', xb, { '--dx': xs - xb });
+          line = line || name(buddy) + ' sends ' + name(speaker) + ' a note: "looks good!" ✈️';
+        } else if (st.bit === 'cheer') {
+          others.forEach(function (id) { put('kvx-sign', '📣', x(id) + 16); });
+          line = line || 'The team cheers: "Go ' + name(speaker) + '!" 📣';
+        } else if (st.bit === 'coffee') {
+          put('kvx-coffee', '☕', xb, { '--dx': xs - xb });
+          line = line || name(buddy) + ' brings ' + name(speaker) + ' a coffee (fish-flavoured) ☕';
+        }
+      }
+      if (!live && !five) line = '';
+      caption.textContent = line;
+      caption.hidden = !line;
+    }
+
+    return {
+      update: update,
+      destroy: function () {
+        Object.keys(st.actors).forEach(function (id) { st.actors[id].k.destroy(); });
+        st.actors = {};
+        host.textContent = '';
+      },
+    };
   }
+
+  /** The group as the stage sees it: roster plus live status (if it's answering now). */
+  function stageGroup(gid, fallback) {
+    var live = ui.groups[gid] || null;
+    var members = (fallback && fallback.members) || (live && live.members) || [];
+    return { id: gid, name: (live && live.name) || (fallback && fallback.name) || 'Group chat', members: members, live: live };
+  }
+
+  // Inside the open group chat.
+  var team = { host: null, gid: null, group: null, stage: null };
 
   function renderTeam() {
-    var host = team.host;
-    if (!host || !host.isConnected) return;
-    var now = Date.now(), live = ui.groups[team.gid] || null, quipFor = null;
-    Object.keys(team.members).forEach(function (id) {
-      var mem = team.members[id], mood = teamMood(mem.m, live, now);
-      mem.k.setState(mood);
-      mem.node.setAttribute('data-mood', mood);
-      mem.tag.textContent = { working: 'replying', done: 'replied', listening: 'listening', sleeping: 'napping' }[mood] ||
-                            (mem.m.role || mem.ai);
-      if (mood === 'working' || (!quipFor && mood === 'done')) quipFor = { mem: mem, mood: mood };
-    });
-    var bubble = host.querySelector('.gk-quip');
-    if (!bubble) return;
-    if (!quipFor) { bubble.hidden = true; team.quipMood = ''; return; }
-    // A new line every 6 seconds, or straight away when someone else speaks.
-    var key = quipFor.mood + '|' + quipFor.mem.m.id;
-    if (key !== team.quipMood || now - team.quipAt > 6000) {
-      var lines = QUIPS[quipFor.mood], pick = team.quip;
-      while (lines.length > 1 && pick === team.quip) pick = lines[Math.floor(Math.random() * lines.length)];
-      team.quip = pick;
-      team.quipMood = key;
-      team.quipAt = now;
-    }
-    bubble.hidden = false;
-    bubble.textContent = quipFor.mem.m.name + ': ' + team.quip;
+    if (!team.stage || !team.host || !team.host.isConnected) return;
+    team.stage.update(stageGroup(team.gid, team.group));
   }
 
-  /** Show the members of an open group chat as a row of Kelvins (host null = closed). */
+  /** Show an open group chat's members on a stage (host null = closed). */
   function mountGroupTeam(host, group) {
-    if (!host || !group) { teamDestroy(); team.host = null; team.gid = null; return; }
-    var members = group.members || [];
-    var sig = group.id + '|' + members.map(function (m) { return m.id + ':' + m.ai; }).join(',');
-    if (team.host === host && team.sig === sig) { renderTeam(); return; }
-    teamDestroy();
-    if (team.gid !== group.id) team.doneAt = {};
-    team.host = host; team.gid = group.id; team.sig = sig;
-    if (group.status === 'running' && !ui.groups[group.id]) {
-      ui.groups[group.id] = { name: group.name, members: members, speaking: group.speaking, replied: {} };
+    if (!host || !group) {
+      if (team.stage) team.stage.destroy();
+      team.stage = team.host = team.gid = team.group = null;
+      renderFloat();
+      return;
     }
-    host.textContent = '';
-    var row = document.createElement('div');
-    row.className = 'gk-row';
-    members.forEach(function (m) {
-      var node = document.createElement('div');
-      node.className = 'gk-m';
-      var art = document.createElement('span');
-      art.className = 'kelvin-slot gk-art';
-      var name = document.createElement('span');
-      name.className = 'gk-name';
-      name.textContent = m.name;
-      if (m.color) name.style.color = m.color;
-      var tag = document.createElement('span');
-      tag.className = 'gk-tag';
-      node.appendChild(art); node.appendChild(name); node.appendChild(tag);
-      row.appendChild(node);
-      var k = mount(art, { overlays: false, track: false, ai: m.ai, label: 'Kelvin: ' + m.name });
-      team.members[m.id] = { m: m, k: k, node: node, tag: tag, ai: aiName(m.ai) };
-    });
-    var bubble = document.createElement('div');
-    bubble.className = 'gk-quip';
-    bubble.hidden = true;
-    host.appendChild(row);
-    host.appendChild(bubble);
+    if (team.host !== host || team.gid !== group.id) {
+      if (team.stage) team.stage.destroy();
+      team.stage = createStage(host, 'panel');
+    }
+    team.host = host; team.gid = group.id; team.group = group;
+    if (group.status === 'running' && !ui.groups[group.id]) {
+      ui.groups[group.id] = { name: group.name, members: group.members || [], speaking: group.speaking, replied: {} };
+    }
     renderTeam();
+    renderFloat();
+  }
+
+  // Floating stage: a group is working but its chat isn't on screen.
+  var float = { el: null, stage: null, gid: null, dismissed: {} };
+
+  function groupOnScreen(gid) {
+    var wrap = document.getElementById('group-wrapper');
+    return !!(wrap && wrap.classList.contains('open') && team.gid === gid && team.host && team.host.isConnected);
+  }
+
+  function renderFloat() {
+    var gid = Object.keys(ui.groups).filter(function (id) { return !groupOnScreen(id) && !float.dismissed[id]; })[0] || null;
+    Object.keys(float.dismissed).forEach(function (id) { if (!ui.groups[id]) delete float.dismissed[id]; });
+    if (!gid) {
+      if (float.el) float.el.hidden = true;
+      if (float.stage) { float.stage.destroy(); float.stage = null; float.gid = null; }
+      return;
+    }
+    if (!float.el) {
+      float.el = el('div', 'kv-float');
+      float.el.id = 'kelvin-stage-float';
+      var head = el('div', 'kv-float-head');
+      float.title = el('span', 'kv-float-title');
+      var open = el('span', 'kv-float-btn', 'Open');
+      var close = el('span', 'kv-float-btn kv-float-x', '✕');
+      open.setAttribute('role', 'button'); close.setAttribute('role', 'button');
+      close.setAttribute('aria-label', 'Hide');
+      onActivate(open, function () {
+        // Remember the group first: opening the panel hides this floating stage.
+        var gid = float.gid;
+        if (typeof window.openGroupSection === 'function' && gid) { window.openGroupSection(); window.openGroup(gid); }
+      });
+      onActivate(close, function () { if (float.gid) float.dismissed[float.gid] = true; renderFloat(); });
+      open.tabIndex = 0; close.tabIndex = 0;
+      head.appendChild(float.title); head.appendChild(open); head.appendChild(close);
+      float.body = el('div', 'kv-float-body');
+      float.el.appendChild(head); float.el.appendChild(float.body);
+      document.body.appendChild(float.el);
+    }
+    if (float.gid !== gid) {
+      if (float.stage) float.stage.destroy();
+      float.stage = createStage(float.body, 'float');
+      float.gid = gid;
+    }
+    float.el.hidden = false;
+    var g = stageGroup(gid, null);
+    float.title.textContent = '👥 ' + g.name + ' is working together';
+    float.stage.update(g);
   }
 
   var KelvinUI = {
@@ -903,7 +1038,7 @@
           }
           break;
         case 'group_message':
-          if (d.message && d.message.role === 'member' && d.group_id === team.gid) team.doneAt[d.message.author] = now;
+          if (d.message && d.message.role === 'member') (groupDone[d.group_id] = groupDone[d.group_id] || {})[d.message.author] = now;
           if (d.message && d.message.role === 'member' && ui.groups[d.group_id]) ui.groups[d.group_id].replied[d.message.author] = true;
           else if (d.message && d.message.role === 'user' && ui.groups[d.group_id]) ui.groups[d.group_id].replied = {};
           break;
