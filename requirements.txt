@@ -25,7 +25,7 @@ openpyxl>=3.1
 python-pptx>=0.6.23
 python-docx>=1.1
 pdfminer.six>=20231228
-reportlab>=4.0
+reportlab>=5.0.1
 
 # ─────────────────────────────────────────────────────────
 # Computer Use (desktop control — opt-in via COMPUTER_USE=true)
