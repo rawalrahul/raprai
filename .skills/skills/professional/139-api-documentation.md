@@ -43,7 +43,7 @@ First-time developers should be able to make their first successful API call in 
 4. Copy the key—we'll use it in the next step
 5. Store it safely; don't share it publicly
 
-Your API key looks like: `sk_live_abc123def456`"
+Your API key looks like: `sk_live_your_key_here`"
 
 **Step 2: Make Your First Request** (100-150 words):
 "Replace YOUR_API_KEY below with your actual key:
@@ -51,7 +51,7 @@ Your API key looks like: `sk_live_abc123def456`"
 **Using cURL**:
 ```bash
 curl -X GET "https://api.example.com/v1/projects" \
-  -H "Authorization: Bearer sk_live_abc123def456"
+  -H "Authorization: Bearer sk_live_your_key_here"
 ```
 
 **Using Python** (with requests library):
@@ -60,7 +60,7 @@ import requests
 
 url = "https://api.example.com/v1/projects"
 headers = {
-    "Authorization": "Bearer sk_live_abc123def456"
+    "Authorization": "Bearer sk_live_your_key_here"
 }
 response = requests.get(url, headers=headers)
 print(response.json())
@@ -68,7 +68,7 @@ print(response.json())
 
 **Using JavaScript** (with Fetch API):
 ```javascript
-const apiKey = "sk_live_abc123def456";
+const apiKey = "sk_live_your_key_here";
 const response = await fetch("https://api.example.com/v1/projects", {
   headers: {
     "Authorization": `Bearer ${apiKey}`
@@ -140,7 +140,7 @@ Authorization: Bearer YOUR_API_KEY
 
 **Example**:
 ```bash
-curl -H "Authorization: Bearer sk_live_abc123def456" \
+curl -H "Authorization: Bearer sk_live_your_key_here" \
   https://api.example.com/v1/projects
 ```
 
@@ -154,7 +154,7 @@ curl -H "Authorization: Bearer sk_live_abc123def456" \
 "Alternative to Bearer token (less secure; recommended for read-only operations):
 
 ```
-https://api.example.com/v1/projects?api_key=sk_live_abc123def456
+https://api.example.com/v1/projects?api_key=sk_live_your_key_here
 ```
 
 **When to use**: Only for GET requests in client-side code where headers can't be set (e.g., image URLs). Never use for sensitive operations."
@@ -186,7 +186,7 @@ const apiKey = process.env.API_KEY;
 
 **Bash**:
 ```bash
-export API_KEY="sk_live_abc123def456"
+export API_KEY="sk_live_your_key_here"
 curl -H "Authorization: Bearer $API_KEY" ...
 ```"
 
@@ -216,7 +216,7 @@ POST /v1/projects
 
 ```bash
 curl -X POST "https://api.example.com/v1/projects" \
-  -H "Authorization: Bearer sk_live_abc123def456" \
+  -H "Authorization: Bearer sk_live_your_key_here" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Q1 Marketing Campaign",
@@ -266,7 +266,7 @@ curl -X POST "https://api.example.com/v1/projects" \
 ```python
 import requests
 
-api_key = "sk_live_abc123def456"
+api_key = "sk_live_your_key_here"
 url = "https://api.example.com/v1/projects"
 headers = {
     "Authorization": f"Bearer {api_key}",
@@ -288,7 +288,7 @@ else:
 
 **JavaScript/Node.js**:
 ```javascript
-const apiKey = "sk_live_abc123def456";
+const apiKey = "sk_live_your_key_here";
 const response = await fetch("https://api.example.com/v1/projects", {
   method: "POST",
   headers: {
@@ -323,7 +323,7 @@ import (
 )
 
 func main() {
-  apiKey := "sk_live_abc123def456"
+  apiKey := "sk_live_your_key_here"
 
   data := map[string]interface{}{
     "name": "Q1 Marketing Campaign",
@@ -484,7 +484,7 @@ We maintain SDKs for popular languages:
 ```python
 from example_api import Client
 
-client = Client(api_key="sk_live_abc123def456")
+client = Client(api_key="sk_live_your_key_here")
 project = client.projects.create(name="My Project")
 print(f"Created: {project.id}")
 ```
