@@ -10,6 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 ![Windows | macOS | Linux server](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux%20server-blue)
 [![Listed in awesome-ai-plugins](https://img.shields.io/badge/listed%20in-awesome--ai--plugins-fc60a8)](https://github.com/hashgraph-online/awesome-ai-plugins#tools--integrations)
+[![HOL Guard](https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3Drawalrahul%252Fraprai%26metric%3Dtrust)](https://hol.org/registry/plugins/rawalrahul%2Fraprai)
 [![GitHub stars](https://img.shields.io/github/stars/rawalrahul/raprai?style=social)](https://github.com/rawalrahul/raprai/stargazers)
 
 [Website](https://raprai.com) · [Install](#install) · [Features](#what-you-can-do) · [Full guide](docs/guide.md) · [Contributing](CONTRIBUTING.md)
