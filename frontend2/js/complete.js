@@ -111,7 +111,10 @@ function _checkForNewVersion(){
   if(!_pageBuild || _newVersionShown) return;
   fetch('/health', {cache: 'no-store'}).then(r => r.json()).then(d => {
     if(!d.build || d.build === _pageBuild) return;
-    if(document.hidden){ location.reload(); return; }
+    // Hidden tab, or the user clicked Update now (js/updates.js): just reload.
+    let updating = false;
+    try { updating = !!sessionStorage.getItem('raprUpdating'); } catch(e) {}
+    if(document.hidden || updating){ location.reload(); return; }
     _newVersionShown = true;
     const bar = document.createElement('div');
     bar.id = 'update-ready-bar';

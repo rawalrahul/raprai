@@ -6,6 +6,7 @@
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
+    RAPR_INSTALL_KIND=docker \
     RAPR_HEADLESS=1 \
     RAPR_DATA_DIR=/data \
     WEB_HOST=0.0.0.0 \
@@ -26,6 +27,11 @@ RUN useradd --create-home --uid 1000 rapr \
  && mkdir -p /data \
  && chown -R rapr:rapr /data /app
 USER rapr
+
+# The commit the image was built from, for the update check (set by
+# .github/workflows/docker-image.yml). Last, so it doesn't invalidate the cached layers.
+ARG RAPR_COMMIT=""
+ENV RAPR_COMMIT=${RAPR_COMMIT}
 
 VOLUME ["/data"]
 EXPOSE 8000

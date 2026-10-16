@@ -86,7 +86,7 @@
 
 /* "RAPR was updated" bar (complete.js _checkForNewVersion) */
 #update-ready-bar {
-  position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 1500;
+  position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%); z-index: 1500;
   display: flex; align-items: center; gap: 12px;
   padding: 8px 8px 8px 16px; border-radius: 999px;
   background: var(--bg-elevated); color: var(--text-main);
@@ -97,3 +97,65 @@ html #update-ready-bar button {
   min-height: 30px !important; padding: 0 14px !important; border-radius: 999px !important;
   background: var(--accent) !important; border: 0 !important; color: #fff !important; transform: none !important;
 }
+
+/* Updates (js/updates.js): "update available" bar, Settings dot, updating screen, Settings section */
+#upd-bar {
+  position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%); z-index: 1500;
+  display: flex; align-items: center; gap: 6px; max-width: calc(100vw - 24px);
+  padding: 6px 6px 6px 16px; border-radius: 999px;
+  background: var(--bg-elevated); color: var(--text-main);
+  border: 1px solid var(--border-subtle); box-shadow: 0 10px 30px rgba(0,0,0,.3);
+  font-size: 13px;
+}
+#upd-bar span { margin-right: 6px; }
+html #upd-bar button { min-height: 30px !important; padding: 0 12px !important; border-radius: 999px !important; transform: none !important; box-shadow: none !important; font-size: 12.5px !important; }
+html #upd-bar .upd-bar-link { background: transparent !important; border: 1px solid var(--border-strong) !important; color: var(--text-main) !important; }
+html #upd-bar .upd-bar-go { background: var(--accent) !important; border: 0 !important; color: #fff !important; }
+html #upd-bar .upd-bar-x { width: 30px; padding: 0 !important; background: transparent !important; border: 0 !important; color: var(--text-dim) !important; font-size: 18px !important; }
+
+html #left-sidebar .has-update { position: relative; }
+html #left-sidebar .has-update::after {
+  content: ''; position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 0 2px var(--bg-deep);
+}
+
+#upd-overlay {
+  position: fixed; inset: 0; z-index: 3000; display: flex; align-items: center; justify-content: center;
+  background: var(--overlay-bg, rgba(0,0,0,.55)); backdrop-filter: blur(3px);
+}
+#upd-overlay .upd-card {
+  width: min(460px, calc(100vw - 32px)); padding: 28px 24px 22px; text-align: center;
+  background: var(--bg-surface); color: var(--text-main); border: 1px solid var(--border-subtle);
+  border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.4);
+}
+#upd-overlay .upd-spin {
+  width: 34px; height: 34px; margin: 0 auto 16px; border-radius: 50%;
+  border: 3px solid var(--border-subtle); border-top-color: var(--accent);
+  animation: upd-spin 0.9s linear infinite;
+}
+@keyframes upd-spin { to { transform: rotate(360deg); } }
+#upd-overlay .upd-card-title { font-size: 16px; font-weight: 650; margin-bottom: 6px; }
+#upd-overlay .upd-card-body { font-size: 13px; color: var(--text-muted); line-height: 1.55; }
+#upd-overlay .upd-log { margin: 12px 0; max-height: 220px; overflow: auto; text-align: left; font-size: 11.5px; padding: 10px; border-radius: 8px; background: var(--bg-deep); white-space: pre-wrap; }
+
+.upd-panel { display: flex; flex-direction: column; gap: 8px; padding: 6px 0 10px; font-size: 13px; }
+.upd-panel code { font-family: var(--font-mono); font-size: 12px; padding: 1px 5px; border-radius: 4px; background: var(--bg-deep); }
+.upd-panel .upd-line small { color: var(--text-dim); }
+.upd-panel .upd-state { color: var(--text-muted); }
+.upd-panel .upd-state.is-new { color: var(--text-main); }
+.upd-panel .upd-state.is-new b { color: var(--accent); }
+.upd-panel .upd-state.is-warn { color: var(--color-warning, #d4a017); }
+.upd-panel .upd-changes-title { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-dim); margin-top: 4px; }
+.upd-panel .upd-changes { list-style: none; margin: 0; padding: 0; max-height: 200px; overflow-y: auto; border: 1px solid var(--border-dim); border-radius: 8px; }
+.upd-panel .upd-changes li { display: flex; gap: 10px; justify-content: space-between; padding: 7px 10px; border-bottom: 1px solid var(--border-dim); }
+.upd-panel .upd-changes li:last-child { border-bottom: 0; }
+.upd-panel .upd-changes time { flex-shrink: 0; color: var(--text-dim); font-size: 11.5px; }
+.upd-panel .upd-more { color: var(--text-dim); }
+.upd-panel .upd-notes { white-space: pre-wrap; max-height: 200px; overflow-y: auto; font-size: 12.5px; color: var(--text-muted); }
+.upd-panel .upd-how { font-size: 12.5px; color: var(--text-muted); }
+.upd-panel .upd-actions { display: flex; gap: 8px; }
+html .upd-panel .upd-go { background: var(--accent) !important; border-color: var(--accent) !important; color: #fff !important; }
+.upd-panel .upd-auto { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: center; cursor: pointer; margin-top: 4px; }
+.upd-panel .upd-auto input { accent-color: var(--accent); margin: 0; }
+.upd-panel .upd-auto small { grid-column: 2; color: var(--text-dim); font-size: 11.5px; line-height: 1.45; }
+html .upd-panel .upd-check { background: transparent !important; border: 1px solid var(--border-strong) !important; color: var(--text-main) !important; }

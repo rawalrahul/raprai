@@ -110,6 +110,28 @@ jobs:
           if ($s -notlike '*not running*') { throw 'RAPR still running after the update' }
           'update stopped RAPR and finished'
 
+      - name: Install by download, the way users get RAPR (pins and records the commit)
+        shell: powershell
+        env:
+          RAPR_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+          RAPR_NO_OPEN: "1"
+          RAPR_YES: "1"
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $h = Join-Path $env:LOCALAPPDATA 'rapr-ai'
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-windows.ps1
+          if ($LASTEXITCODE) { throw "installer exited with $LASTEXITCODE" }
+          foreach ($f in @("$h\app\web_app.py", "$h\app\frontend2\index.html")) { if (-not (Test-Path $f)) { throw "missing after download: $f" } }
+          $info = Get-Content "$h\app\.rapr-install.json" -Raw | ConvertFrom-Json
+          $info | Format-List
+          if ($info.kind -ne 'source-windows') { throw "kind should be source-windows, got $($info.kind)" }
+          if ($info.commit -ne $env:RAPR_REF) { throw "recorded commit $($info.commit) isn't the one asked for ($env:RAPR_REF)" }
+          # Run it again: the second time it replaces the files in place (robocopy).
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-windows.ps1
+          if ($LASTEXITCODE) { throw "second install exited with $LASTEXITCODE" }
+          if (-not (Test-Path "$h\app\.rapr-install.json")) { throw 'the install record should survive an update' }
+          'download install pinned and recorded the commit, and updated in place'
+
       - name: Log on failure
         if: failure()
         shell: powershell
