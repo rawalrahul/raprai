@@ -22,6 +22,7 @@
 <link rel="stylesheet" href="/css/groupchat.css?v=3">
 <link rel="stylesheet" href="/css/header.css?v=2">
 <link rel="stylesheet" href="/css/sidebar.css?v=1">
+<link rel="stylesheet" href="/css/composer.css?v=1">
 <!-- Applies saved theme, accent, size and layout before first paint -->
 <script src="/js/customize.js?v=1"></script>
 </head>
@@ -1388,47 +1389,54 @@ Example:
 
 <div id="kelvin-crew" class="kelvin-crew" aria-live="polite" hidden></div>
 
+<!-- Message composer: text on top, tools below (like Claude / ChatGPT).
+     One primary button changes with context: Send when there's text, Stop while
+     the AI works, hands-free voice when the box is empty (complete.js _updateComposer). -->
 <div class="input-bar" role="form" aria-label="Chat input">
-  <!-- AI picker chip -->
-  <div class="ai-picker" id="ai-picker" onclick="toggleAiMenu(event)" role="button" aria-haspopup="true" aria-expanded="false" aria-label="Select AI provider">
-    <div class="dot" id="dot" aria-hidden="true"></div>
-    <span id="ai-label">Shell</span>
-    <svg class="chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M6 9l6 6 6-6"/>
-    </svg>
-  </div>
+  <div class="composer-box">
+    <textarea id="inp" placeholder="Message your AI…" rows="1" aria-label="Message prompt"></textarea>
+    <div class="composer-tools">
+      <input type="file" id="file-input" style="display:none" onchange="handleFileUpload(this)" multiple aria-label="File upload">
+      <button id="clip-btn" class="cmp-icon" onclick="document.getElementById('file-input').click()" title="Add files (or paste / drop them)" aria-label="Add files">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
 
-  <!-- Sessions + AI dropdown menu — sessions injected dynamically by applyState(); integrations by loadIntegrations() -->
-  <div class="ai-menu" id="ai-menu" role="menu" aria-label="AI Provider and Session Menu">
-    <div class="ai-menu-section" role="presentation">Active Sessions</div>
-    <div id="ai-menu-sessions"><!-- filled by applyState() --></div>
-    <div class="ai-menu-divider" role="presentation"></div>
-    <div class="ai-menu-section" role="presentation">New Session</div>
-    <button id="claude-menu-btn" class="ai-menu-item" onclick="cmd('new_session:claude');closeAiMenu()" role="menuitem">
-      <span class="menu-dot claude" aria-hidden="true"></span>New: Claude Code</button>
-    <button class="ai-menu-item" id="auto-menu-btn" onclick="autoNewSession();closeAiMenu()" role="menuitem" title="RAPR picks the cheapest AI that can do the task">
-      <span class="menu-dot" aria-hidden="true">✨</span>New: Auto (pick for my task)</button>
-    <button class="ai-menu-item" onclick="openBakeoffModal();closeAiMenu()" role="menuitem" title="Same task, several AIs, then pick the best result"><span class="menu-dot" aria-hidden="true">🧪</span>New: Bake-off (compare AIs)</button>
-    <!-- integration "New: ..." buttons inserted here by loadIntegrations() -->
-    <button class="ai-menu-item" id="shell-mode-btn" onclick="cmd('new_session:');closeAiMenu()" role="menuitem">
-      <span class="menu-dot shell" aria-hidden="true"></span>New: Shell</button>
-    <div class="ai-menu-divider" role="presentation"></div>
-    <div class="ai-menu-section" role="presentation">Focused Session</div>
-    <button class="ai-menu-item" onclick="cmd('interrupt');closeAiMenu()" role="menuitem">⏸ Cancel Task</button>
-    <button class="ai-menu-item" onclick="if(confirm('Delete this session?'))cmd('delete_session');closeAiMenu()" role="menuitem">🗑️ Delete Session</button>
-    <button class="ai-menu-item" onclick="cmd('clear');closeAiMenu()" role="menuitem">↺ Clear Chat</button>
-  </div>
+      <!-- Which AI gets the message: the focused session, or pick / start one -->
+      <div class="ai-picker" id="ai-picker" onclick="toggleAiMenu(event)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleAiMenu(event)}" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" aria-label="Choose which AI to talk to" title="Choose which AI to talk to">
+        <div class="dot" id="dot" aria-hidden="true"></div>
+        <span id="ai-label">Pick an AI</span>
+        <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <!-- Picker menu: start a new session with any AI, and act on the focused one.
+           Switching between running sessions lives in the sessions panel on the right. -->
+      <div class="ai-menu" id="ai-menu" role="menu" aria-label="Choose an AI">
+        <div class="ai-menu-section" role="presentation">Start a new chat with</div>
+        <button id="claude-menu-btn" class="ai-menu-item" onclick="cmd('new_session:claude');closeAiMenu()" role="menuitem">
+          <span class="menu-dot claude" aria-hidden="true"></span>Claude Code</button>
+        <button class="ai-menu-item" id="auto-menu-btn" onclick="autoNewSession();closeAiMenu()" role="menuitem" title="RAPR picks the cheapest AI that can do the task">
+          <span class="menu-dot" aria-hidden="true">✨</span>Auto (pick for my task)</button>
+        <button class="ai-menu-item" onclick="openBakeoffModal();closeAiMenu()" role="menuitem" title="Same task, several AIs, then pick the best result"><span class="menu-dot" aria-hidden="true">🧪</span>Bake-off (compare AIs)</button>
+        <!-- integration "New: ..." buttons inserted here by loadIntegrations() -->
+        <button class="ai-menu-item" id="shell-mode-btn" onclick="cmd('new_session:');closeAiMenu()" role="menuitem">
+          <span class="menu-dot shell" aria-hidden="true"></span>Shell</button>
+        <div class="ai-menu-divider" role="presentation"></div>
+        <div class="ai-menu-section" role="presentation">This chat</div>
+        <button class="ai-menu-item" onclick="cmd('clear');closeAiMenu()" role="menuitem">↺ Clear chat</button>
+        <button class="ai-menu-item" onclick="if(confirm('Delete this session?'))cmd('delete_session');closeAiMenu()" role="menuitem">🗑️ Delete session</button>
+      </div>
 
-  <textarea id="inp" placeholder="Type a message...  (Enter to send, Shift+Enter for newline)" rows="1" aria-label="Message prompt"></textarea>
-  <input type="file" id="file-input" style="display:none" onchange="handleFileUpload(this)" multiple aria-label="File upload">
-  <button id="clip-btn" onclick="document.getElementById('file-input').click()" title="Attach a file" aria-label="Attach file">
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
-  </button>
-  <button id="handsfree-btn" onclick="toggleHandsFree()" title="Hands-free: talk instead of typing" aria-label="Hands-free voice">🎧</button>
-  <button id="mic-btn" onclick="toggleVoiceRec()" title="Click to record voice message" aria-label="Voice input">
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-  </button>
-  <button id="send" onclick="send()" aria-label="Send message">Send</button>
+      <span class="composer-spacer"></span>
+      <button id="mic-btn" class="cmp-icon" onclick="toggleVoiceRec()" title="Voice message: record, and it's sent when you stop" aria-label="Record a voice message">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/></svg>
+      </button>
+      <button id="send" class="cmp-primary" data-mode="send" onclick="composerPrimary()" title="Send (Enter)" aria-label="Send message">
+        <svg class="ic-send" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+        <svg class="ic-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>
+        <svg class="ic-voice" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="composer-hint" aria-hidden="true">Enter to send · Shift+Enter for a new line</div>
 </div>
 
 <!-- History modal -->
@@ -1772,7 +1780,7 @@ Example:
 </div>
 
 <script src="/js/kelvin.js?v=8"></script>
-<script src="/js/complete.js?v=17"></script>
+<script src="/js/complete.js?v=18"></script>
 <script src="/js/ai_list.js?v=1"></script>
 <script src="/js/packages.js?v=6"></script>
 <script src="/js/memory.js?v=2"></script>
@@ -1783,7 +1791,7 @@ Example:
 <script src="/js/groupchat.js?v=6"></script>
 <script src="/js/whatsapp.js?v=2"></script>
 <script src="/js/voices.js?v=2"></script>
-<script src="/js/finish.js?v=2"></script>
+<script src="/js/finish.js?v=3"></script>
 <script src="/js/cloud.js?v=2"></script>
 <script src="/js/safety.js?v=3"></script>
 <script src="/js/demos.js?v=2"></script>

@@ -271,6 +271,7 @@ function stopHandsFree() {
 function _markHandsFree() {
   const b = document.getElementById('handsfree-btn');
   if (b) { b.classList.toggle('active', window._handsFree); b.title = window._handsFree ? 'Hands-free is on (click to stop)' : 'Hands-free: talk instead of typing'; }
+  if (typeof _updateComposer === 'function') _updateComposer();   // the composer's voice button shows this state
 }
 
 /** Speak an assistant reply with its AI's voice, pausing the microphone so it doesn't hear itself. */

@@ -153,7 +153,8 @@
       css.push(`html{zoom:${z}}`, `html body, html #app{height:calc(100vh / ${z}) !important}`);
     }
     const w = CHAT_WIDTH[prefs.chatWidth];
-    if(w) css.push(`html #messages .grp, html #messages .grp.assistant{max-width:${w} !important}`, `html #messages .grp.user{max-width:min(${w}, 80%) !important}`);
+    if(w) css.push(`html #messages .grp, html #messages .grp.assistant{max-width:${w} !important}`, `html #messages .grp.user{max-width:min(${w}, 80%) !important}`,
+                   `html:root{--composer-max:${w === '100%' ? '100%' : `calc(${w} + 20px)`}}`);
     const t = CHAT_TEXT[prefs.chatText];
     if(t) css.push(`html #messages .grp .bubble, html #messages .grp.assistant .bubble, html #messages .grp.user .bubble{font-size:${t}px !important}`);
     if(prefs.motion === 'reduced'){

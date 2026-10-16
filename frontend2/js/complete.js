@@ -59,7 +59,7 @@ async function loadIntegrations(){
       btn.className = 'ai-menu-item';
       btn.dataset.newAi = key;
       const warnIcon = ready ? '' : ' <span title="'+escHtml(setup_hint)+'" style="color:#f59e0b;font-size:11px">⚠️ Not set up</span>';
-      btn.innerHTML = `<span class="menu-dot ${key}"></span>New: ${escHtml(name)}${warnIcon}`;
+      btn.innerHTML = `<span class="menu-dot ${key}"></span>${escHtml(name)}${warnIcon}`;
       // Always create session directly with default model — use Switch Model to change
       btn.onclick = () => { cmd('new_session:'+key); closeAiMenu(); };
       shellBtn.parentNode.insertBefore(btn, shellBtn);
@@ -418,7 +418,7 @@ function applyState(s){
       }
     } else {
       document.getElementById('dot').className = 'dot';
-      document.getElementById('ai-label').textContent = 'No session';
+      document.getElementById('ai-label').textContent = 'Pick an AI';
       picker.className = 'ai-picker';
       if(badge) badge.textContent = '';
     }
@@ -487,11 +487,14 @@ function toggleAiMenu(e){
   if(isOpen){ closeAiMenu(); } else {
     menu.classList.add('open');
     picker.classList.add('menu-open');
+    picker.setAttribute('aria-expanded', 'true');
   }
 }
 function closeAiMenu(){
   document.getElementById('ai-menu').classList.remove('open');
-  document.getElementById('ai-picker').classList.remove('menu-open');
+  const picker = document.getElementById('ai-picker');
+  picker.classList.remove('menu-open');
+  picker.setAttribute('aria-expanded', 'false');
 }
 document.addEventListener('click', e => {
   if(!document.getElementById('ai-picker').contains(e.target) &&
@@ -753,6 +756,7 @@ function _refreshThinkingUI(){
     el.className = '';
     if(_thinkingTimer){ clearInterval(_thinkingTimer); _thinkingTimer = null; }
   }
+  _updateComposer();
 }
 
 // --- Logo watermark helpers ------------------------------------------------------------------------------
@@ -984,6 +988,43 @@ function send(){
   ws.send(JSON.stringify({type:'message', content:content}));
   inp.value = '';
   inp.style.height = 'auto';
+  _updateComposer();
+}
+
+// --- Composer primary button -----------------------------------------------------------------------------------
+// One button, like Claude and ChatGPT: Send when there's text, Stop while the AI
+// is working and the box is empty, otherwise hands-free voice (when the browser
+// can do speech recognition; if not, a disabled Send).
+const _COMPOSER_MODES = {
+  send:  {title: 'Send (Enter)', label: 'Send message'},
+  stop:  {title: 'Stop the AI', label: 'Stop the running task'},
+  voice: {title: 'Talk hands-free: speak, and RAPR replies out loud', label: 'Start hands-free voice'},
+  'voice-on': {title: 'Hands-free is on (click to stop)', label: 'Stop hands-free voice'},
+};
+function _composerMode(){
+  const el = document.getElementById('inp');
+  if(el && el.value.trim()) return 'send';
+  if(_thinkingState[_focusedId] && _thinkingState[_focusedId].active) return 'stop';
+  if(window._handsFree) return 'voice-on';
+  if(window.SpeechRecognition || window.webkitSpeechRecognition) return 'voice';
+  return 'send';
+}
+function _updateComposer(){
+  const btn = document.getElementById('send');
+  if(!btn) return;
+  const mode = _composerMode();
+  const el = document.getElementById('inp');
+  btn.dataset.mode = mode;
+  btn.title = _COMPOSER_MODES[mode].title;
+  btn.setAttribute('aria-label', _COMPOSER_MODES[mode].label);
+  btn.disabled = mode === 'send' && !(el && el.value.trim());
+}
+function composerPrimary(){
+  const mode = _composerMode();
+  if(mode === 'send') send();
+  else if(mode === 'stop') cmd('interrupt');
+  else if(typeof toggleHandsFree === 'function') toggleHandsFree();
+  _updateComposer();
 }
 // --- File Upload ------------------------------------------------------------------------------------------------
 let _uploadedFiles = [];
@@ -1169,8 +1210,10 @@ function cmd(c){
 const inp = document.getElementById('inp');
 inp.addEventListener('input', () => {
   inp.style.height = 'auto';
-  inp.style.height = Math.min(inp.scrollHeight, 120) + 'px';
+  inp.style.height = Math.min(inp.scrollHeight, 200) + 'px';
+  _updateComposer();
 });
+_updateComposer();
 inp.addEventListener('keydown', e => {
   if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }
 });
