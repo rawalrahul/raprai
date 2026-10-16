@@ -1,0 +1,138 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   RAPR AI — Message composer
+   One rounded box: the message on top, a slim toolbar below
+   (add files · which AI · … · voice message · Send/Stop/hands-free).
+   Loaded after the theme layers; selectors start at html .input-bar to win.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root { --composer-max: 820px; }
+
+html .input-bar {
+  display: flex !important; flex-direction: column !important; align-items: stretch !important; gap: 6px !important;
+  padding: 10px 20px 10px !important;
+  border-top: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+html .input-bar.drag-over { background: transparent !important; box-shadow: none !important; }
+html .input-bar.drag-over .composer-box { border-color: var(--accent) !important; box-shadow: 0 0 0 3px var(--accent-subtle) !important; }
+
+.composer-box {
+  position: relative;
+  width: 100%; max-width: var(--composer-max); margin: 0 auto;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 12px 10px 8px 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 22px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.18);
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+}
+[data-theme="light"] .composer-box { background: #fff; box-shadow: 0 4px 18px rgba(20,20,40,.07); }
+.composer-box:focus-within { border-color: var(--border-strong); }
+
+/* The text */
+html .input-bar #inp {
+  width: 100% !important; min-height: 26px !important; max-height: 200px; height: auto;
+  padding: 2px 6px 2px 0 !important; margin: 0 !important;
+  border: 0 !important; outline: 0 !important; box-shadow: none !important; border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--text-main) !important;
+  font-size: 15px !important; line-height: 1.55 !important;
+  resize: none !important; overflow-y: auto;
+}
+html .input-bar #inp::placeholder { color: var(--text-dim) !important; opacity: 1; }
+
+/* Toolbar */
+.composer-tools { display: flex; align-items: center; gap: 4px; min-height: 36px; margin-left: -6px; }
+.composer-spacer { flex: 1; }
+
+html .input-bar .cmp-icon, html .input-bar #clip-btn, html .input-bar #mic-btn {
+  width: 34px !important; height: 34px !important; min-height: 0 !important; padding: 0 !important; margin: 0 !important;
+  display: inline-flex !important; align-items: center !important; justify-content: center !important; flex-shrink: 0;
+  border-radius: 999px !important; border: 0 !important; box-shadow: none !important; transform: none !important;
+  background: transparent !important; color: var(--text-muted) !important;
+}
+html .input-bar #clip-btn:hover, html .input-bar #mic-btn:hover { background: var(--bg-hover) !important; color: var(--text-main) !important; }
+html .input-bar #clip-btn:focus-visible, html .input-bar #mic-btn:focus-visible { outline: 2px solid var(--accent) !important; outline-offset: 1px !important; }
+.input-bar .cmp-icon svg,
+.input-bar .cmp-primary svg,
+.input-bar .ai-picker svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.input-bar .cmp-icon svg { width: 18px; height: 18px; }
+html .input-bar #clip-btn svg { width: 20px; height: 20px; }
+html .input-bar #clip-btn.uploading { color: var(--accent) !important; animation: cmp-pulse 1s ease-in-out infinite; }
+html .input-bar #mic-btn.recording { background: color-mix(in oklch, var(--color-danger, #ef4444) 18%, transparent) !important; color: var(--color-danger, #ef4444) !important; animation: cmp-pulse 1.2s ease-in-out infinite; }
+html .input-bar #mic-btn.transcribing { color: var(--accent) !important; animation: cmp-pulse 1s ease-in-out infinite; }
+
+/* Which AI: a quiet pill, like a model picker */
+html .input-bar .ai-picker {
+  height: 32px !important; padding: 0 8px 0 10px !important; margin: 0 0 0 2px !important; gap: 7px !important;
+  max-width: 240px; min-width: 0;
+  border-radius: 999px !important; border: 0 !important; box-shadow: none !important;
+  background: transparent !important;
+  color: var(--text-muted) !important; font-size: 13px !important; font-weight: 500 !important;
+}
+html .input-bar .ai-picker:hover, html .input-bar .ai-picker.menu-open { background: var(--bg-hover) !important; color: var(--text-main) !important; }
+html .input-bar .ai-picker:focus-visible { outline: 2px solid var(--accent) !important; outline-offset: 1px; }
+html .input-bar .ai-picker #ai-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; }
+html .input-bar .ai-picker[class*="active-"] #ai-label { color: var(--text-main) !important; }
+.input-bar .ai-picker .chevron { width: 12px; height: 12px; flex-shrink: 0; opacity: .7; transition: transform var(--duration-fast); }
+.input-bar .ai-picker.menu-open .chevron { transform: rotate(180deg); }
+
+/* Menu opens above the box, lined up with the picker */
+html .input-bar .ai-menu {
+  left: 40px !important; right: auto !important; bottom: calc(100% + 10px) !important;
+  width: max-content !important; min-width: 220px; max-width: min(320px, calc(100vw - 40px));
+  padding: 6px !important;
+}
+html .input-bar .ai-menu-section { padding: 8px 10px 4px !important; font-size: 10.5px !important; }
+html .input-bar .ai-menu-item {
+  display: flex !important; justify-content: flex-start !important; align-items: center !important; gap: 10px !important;
+  width: 100% !important; min-height: 34px !important; padding: 0 10px !important; margin: 0 !important;
+  border: 0 !important; border-radius: var(--rad-md, 6px) !important; box-shadow: none !important; transform: none !important;
+  background: transparent !important; color: var(--text-main) !important;
+  font-size: 13px !important; font-weight: 500 !important; text-align: left !important;
+}
+html .input-bar .ai-menu-item:hover, html .input-bar .ai-menu-item:focus-visible { background: var(--bg-hover) !important; }
+html .input-bar .ai-menu-item .menu-dot { width: 8px; height: 8px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; }
+html .input-bar .ai-menu-divider { margin: 6px 4px !important; }
+
+/* The one primary button */
+html .input-bar #send.cmp-primary {
+  width: 36px !important; height: 36px !important; min-height: 0 !important; padding: 0 !important; margin: 0 0 0 2px !important;
+  display: inline-flex !important; align-items: center !important; justify-content: center !important; flex-shrink: 0;
+  border-radius: 999px !important; border: 0 !important; transform: none !important;
+  background: var(--accent) !important; color: #fff !important;
+  box-shadow: none !important;
+  transition: background var(--duration-fast), opacity var(--duration-fast) !important;
+}
+html .input-bar #send.cmp-primary:hover:not(:disabled) { background: var(--accent-hover, var(--accent)) !important; filter: brightness(1.08); }
+html .input-bar #send.cmp-primary:focus-visible { outline: 2px solid var(--accent) !important; outline-offset: 2px !important; }
+html .input-bar #send.cmp-primary:disabled { background: var(--bg-active) !important; color: var(--text-dim) !important; cursor: default !important; }
+.input-bar #send svg { width: 18px; height: 18px; display: none; }
+.input-bar #send[data-mode="send"] .ic-send { display: block; stroke-width: 2.4; }
+.input-bar #send[data-mode="stop"] .ic-stop { display: block; fill: currentColor; stroke: none; }
+.input-bar #send[data-mode="voice"] .ic-voice,
+.input-bar #send[data-mode="voice-on"] .ic-voice { display: block; stroke-width: 2.2; }
+/* Stop and voice use the text colour, so the accent means "send" */
+html .input-bar #send[data-mode="stop"],
+html .input-bar #send[data-mode="voice"] { background: var(--text-main) !important; color: var(--bg-deep) !important; }
+html .input-bar #send[data-mode="voice-on"] { background: var(--accent) !important; animation: cmp-ring 1.6s ease-out infinite; }
+
+.composer-hint {
+  max-width: var(--composer-max); width: 100%; margin: 0 auto;
+  text-align: center; font-size: 11px; color: var(--text-dim); opacity: .8;
+}
+
+@keyframes cmp-pulse { 50% { opacity: .55; } }
+@keyframes cmp-ring {
+  0% { box-shadow: 0 0 0 0 var(--accent-glow); }
+  100% { box-shadow: 0 0 0 10px transparent; }
+}
+
+@media (max-width: 640px) {
+  html .input-bar { padding: 8px 10px !important; }
+  .composer-box { padding: 10px 8px 6px 12px; border-radius: 18px; }
+  .composer-hint { display: none; }
+  html .input-bar .ai-picker { max-width: 150px; }
+}
