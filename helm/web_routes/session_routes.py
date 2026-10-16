@@ -86,26 +86,112 @@ async def serve_file(filename: str):
     return _FR(str(path))
 
 
+def _is_hidden(entry: os.DirEntry) -> bool:
+    """Dot-folders everywhere, plus folders Windows marks hidden or system (AppData...)."""
+    if entry.name.startswith("."):
+        return True
+    attrs = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+    return bool(attrs & 0x6)   # FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM
+
+
+def _browse_places() -> list:
+    """Home and the usual user folders that exist (OneDrive-redirected ones too)."""
+    home = pathlib.Path.home()
+    places = [{"name": "Home", "path": str(home), "kind": "home"}]
+    for name, kind in (("Desktop", "desktop"), ("Documents", "documents"), ("Downloads", "downloads")):
+        for cand in (home / name, home / "OneDrive" / name):
+            if cand.is_dir():
+                places.append({"name": name, "path": str(cand), "kind": kind})
+                break
+    return places
+
+
+def _recent_projects(limit: int = 8) -> list:
+    """Folders sessions recently worked in, newest first, that still exist."""
+    try:
+        from helm.db import get_db
+        rows = get_db().execute(
+            "SELECT path, MAX(id) AS last FROM messages WHERE type = 'cwd' AND path IS NOT NULL "
+            "GROUP BY path ORDER BY last DESC LIMIT ?",
+            (limit * 3,),
+        ).fetchall()
+    except Exception:
+        return []
+    out, seen = [], set()
+    for row in rows:
+        path = row["path"]
+        key = os.path.normcase(os.path.normpath(path))
+        if key in seen or not os.path.isdir(path):
+            continue
+        seen.add(key)
+        out.append({"name": pathlib.Path(path).name or path, "path": path})
+        if len(out) >= limit:
+            break
+    return out
+
+
 @router.get("/browse")
-async def browse_directory(path: str = ""):
-    """Return subdirectories and navigation info for the folder browser."""
+async def browse_directory(path: str = "", places: int = 0):
+    """Subfolders and navigation info for the folder browser.
+
+    `places=1` also returns Home/Desktop/Documents/Downloads, recent project
+    folders and (on Windows) the drives, for the picker's side column.
+    """
     cwd    = session_cwd()
     target = path.strip() if path.strip() else cwd
     p = pathlib.Path(target).expanduser().resolve()
+    error = None
     if not p.exists() or not p.is_dir():
+        if path.strip():
+            error = "That folder doesn't exist."
         p = pathlib.Path(cwd).resolve()
+    dirs, hidden = [], []
     try:
-        dirs = sorted(
-            [d.name for d in p.iterdir() if d.is_dir()],
-            key=lambda x: x.lower(),
-        )
+        with os.scandir(p) as it:
+            for e in it:
+                try:
+                    if not e.is_dir():
+                        continue
+                    dirs.append(e.name)
+                    if _is_hidden(e):
+                        hidden.append(e.name)
+                except OSError:
+                    continue
+        dirs.sort(key=str.lower)
     except (PermissionError, OSError):
-        dirs = []
+        error = error or "RAPR can't open this folder (no permission)."
     parent = str(p.parent) if str(p) != str(p.parent) else None
     drives = []
     if sys.platform == "win32":
         drives = [f"{d}:\\" for d in _string.ascii_uppercase if pathlib.Path(f"{d}:\\").exists()]
-    return JSONResponse({"path": str(p), "dirs": dirs, "parent": parent, "drives": drives})
+    data = {"path": str(p), "dirs": dirs, "hidden": hidden, "parent": parent,
+            "drives": drives, "sep": os.sep, "error": error}
+    if places:
+        data["places"] = await asyncio.to_thread(_browse_places)
+        data["recent"] = await asyncio.to_thread(_recent_projects)
+    return JSONResponse(data)
+
+
+_BAD_FOLDER_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+@router.post("/browse/mkdir")
+async def browse_mkdir(payload: dict):
+    """Create a folder inside `path` (the picker's "New folder")."""
+    parent = pathlib.Path(str(payload.get("path") or "")).expanduser()
+    name = str(payload.get("name") or "").strip()
+    if not name or name in (".", "..") or _BAD_FOLDER_NAME.search(name) or name.endswith((".", " ")):
+        return JSONResponse({"error": "Use a folder name without \\ / : * ? \" < > |"}, status_code=400)
+    if not parent.is_dir():
+        return JSONResponse({"error": "That folder doesn't exist."}, status_code=400)
+    new = parent / name
+    try:
+        new.mkdir()
+    except FileExistsError:
+        return JSONResponse({"error": "A folder with that name already exists."}, status_code=400)
+    except OSError as e:
+        return JSONResponse({"error": f"Couldn't create the folder: {e.strerror or e}"}, status_code=400)
+    return JSONResponse({"path": str(new.resolve())})
 
 
 @router.get("/browse/native")
