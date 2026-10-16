@@ -83,3 +83,17 @@
   #app-header { gap: 6px !important; padding: 0 8px !important; }
   #app-header .hdr-sep, #app-header #help-btn { display: none !important; }
 }
+
+/* "RAPR was updated" bar (complete.js _checkForNewVersion) */
+#update-ready-bar {
+  position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 1500;
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 8px 8px 16px; border-radius: 999px;
+  background: var(--bg-elevated); color: var(--text-main);
+  border: 1px solid var(--border-subtle); box-shadow: 0 10px 30px rgba(0,0,0,.3);
+  font-size: 13px;
+}
+html #update-ready-bar button {
+  min-height: 30px !important; padding: 0 14px !important; border-radius: 999px !important;
+  background: var(--accent) !important; border: 0 !important; color: #fff !important; transform: none !important;
+}

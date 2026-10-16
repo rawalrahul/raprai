@@ -101,6 +101,28 @@ async function checkClaudeAuth(){
 }
 function escHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+// --- After an update: the open tab is still the old page --------------------------------------
+// The server fingerprints the UI files (<meta name="rapr-build"> and /health). When RAPR
+// comes back after an update with a different fingerprint, reload: straight away if
+// nobody is looking at this tab, otherwise offer a Reload button so nothing typed is lost.
+const _pageBuild = document.querySelector('meta[name="rapr-build"]')?.content || '';
+let _newVersionShown = false;
+function _checkForNewVersion(){
+  if(!_pageBuild || _newVersionShown) return;
+  fetch('/health', {cache: 'no-store'}).then(r => r.json()).then(d => {
+    if(!d.build || d.build === _pageBuild) return;
+    if(document.hidden){ location.reload(); return; }
+    _newVersionShown = true;
+    const bar = document.createElement('div');
+    bar.id = 'update-ready-bar';
+    bar.setAttribute('role', 'status');
+    bar.innerHTML = '<span>RAPR was updated.</span><button type="button">Reload</button>';
+    bar.querySelector('button').onclick = () => location.reload();
+    document.body.appendChild(bar);
+  }).catch(() => {});
+}
+document.addEventListener('visibilitychange', () => { if(!document.hidden) _checkForNewVersion(); });
+
 function connect(){
   const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
   const url = `${wsProto}://${location.host}/ws`;
@@ -118,6 +140,7 @@ function connect(){
     renderHeaderIcons();
     try { initOnboarding(); } catch(e){ console.warn('initOnboarding err', e); }
     try { cmd('schedule_list'); } catch(e){ console.warn('schedule_list err', e); }
+    _checkForNewVersion();
     try { loadSbHistory(); } catch(e){ console.warn('loadSbHistory err', e); }
     try { loadSbTemplates(); } catch(e){ console.warn('loadSbTemplates err', e); }
     try { _sbSchedPopulateAi(); } catch(e){ console.warn('_sbSchedPopulateAi err', e); }

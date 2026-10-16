@@ -415,10 +415,18 @@ _USE_SEPARATED_FRONTEND = _FRONTEND_DIR.exists() and (_FRONTEND_DIR / "index.htm
 if _USE_SEPARATED_FRONTEND:
     logger.info("Serving separated frontend from: %s", _FRONTEND_DIR)
     # Mount frontend static assets (js/, css/, assets/)
+    class _RevalidatedStatic(StaticFiles):
+        """Browsers check with us (a cheap 304) before reusing a cached copy, so a
+        reload after an update always gets the new files, with or without ?v=."""
+        async def get_response(self, path, scope):
+            response = await super().get_response(path, scope)
+            response.headers["Cache-Control"] = "no-cache"
+            return response
+
     for sub in ("js", "css", "assets"):
         sub_dir = _FRONTEND_DIR / sub
         if sub_dir.exists():
-            app.mount(f"/{sub}", StaticFiles(directory=str(sub_dir)), name=f"frontend-{sub}")
+            app.mount(f"/{sub}", _RevalidatedStatic(directory=str(sub_dir)), name=f"frontend-{sub}")
 
     # Serve PWA manifest.json and service worker from frontend root
     from fastapi.responses import FileResponse
@@ -443,6 +451,19 @@ if _USE_SEPARATED_FRONTEND:
 # Main page and health endpoint
 # ---------------------------------------------------------------------------
 
+def _frontend_build() -> str:
+    """A fingerprint of the web UI's files. It changes when an update replaces
+    them, so an open tab can tell that it's showing an old version."""
+    import hashlib
+    h = hashlib.sha1()
+    if _USE_SEPARATED_FRONTEND:
+        for p in sorted(_FRONTEND_DIR.rglob("*")):
+            if p.suffix in (".html", ".js", ".css") and p.is_file():
+                st = p.stat()
+                h.update(f"{p.relative_to(_FRONTEND_DIR).as_posix()}:{st.st_size}:{st.st_mtime_ns}\n".encode())
+    return h.hexdigest()[:12]
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     # First run: no .env file yet → full setup wizard
@@ -458,7 +479,9 @@ async def index():
             content="<h1>Frontend not found</h1><p>frontend2/index.html missing.</p>",
             status_code=500,
         )
-    return HTMLResponse(content=(_FRONTEND_DIR / "index.html").read_text(encoding="utf-8"))
+    html = (_FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    html = html.replace("<head>", f'<head>\n<meta name="rapr-build" content="{_frontend_build()}">', 1)
+    return HTMLResponse(content=html, headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/agent-run/{run_id}", response_class=HTMLResponse)
@@ -593,4 +616,5 @@ async def agent_run_window(run_id: str):
 async def health():
     """Quick health check."""
     from fastapi.responses import JSONResponse
-    return JSONResponse({"ok": True, "sessions": len(_st.sessions), "ws_clients": len(_st.ws_clients)})
+    return JSONResponse({"ok": True, "sessions": len(_st.sessions), "ws_clients": len(_st.ws_clients),
+                         "build": _frontend_build()})
