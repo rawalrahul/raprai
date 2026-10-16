@@ -93,11 +93,28 @@ function Install-RaprAI {
   New-Item -ItemType Directory -Force -Path $Home_, $BinDir, $DataDir -ErrorAction Stop | Out-Null
 
   # --- Stop a running RAPR before replacing its files ---------------------------
-  $running = Get-CimInstance Win32_Process -Filter "Name='python.exe' or Name='pythonw.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -and $_.CommandLine -like "*$Home_*" }
+  # RAPR itself runs from the venv's python; the AIs and tools it starts (node,
+  # claude, MCP servers...) may run from the venv too. Match either the program's
+  # path or its command line, then wait for them to exit and let go of their files.
+  # Never this updater or what started it ("rapr update" runs cmd.exe -> rapr.cmd ->
+  # powershell, and their command lines name the RAPR folder too).
+  $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+  $self = @{}
+  $id = $PID
+  while ($id -and -not $self.ContainsKey($id)) {
+    $self[$id] = $true
+    $id = ($procs | Where-Object { $_.ProcessId -eq $id } | Select-Object -First 1).ParentProcessId
+  }
+  $running = @($procs |
+    Where-Object { -not $self.ContainsKey($_.ProcessId) } |
+    Where-Object { ($_.ExecutablePath -and $_.ExecutablePath -like "$Home_\*") -or
+                   ($_.CommandLine -and $_.CommandLine -like "*$Home_*") })
   foreach ($p in $running) {
-    Say "Stopping the running RAPR (process $($p.ProcessId)) to update it..."
-    & taskkill /PID $p.ProcessId /T /F | Out-Null
+    Say "Stopping the running RAPR (process $($p.ProcessId), $($p.Name)) to update it..."
+    & taskkill /PID $p.ProcessId /T /F 2>&1 | Out-Null
+  }
+  if ($running.Count) {
+    Wait-Process -Id ($running | ForEach-Object { $_.ProcessId }) -Timeout 15 -ErrorAction SilentlyContinue
   }
 
   # --- RAPR's code -----------------------------------------------------------
@@ -114,8 +131,17 @@ function Install-RaprAI {
       Expand-Archive -Path $zip -DestinationPath $tmp -Force -ErrorAction Stop
       $src = Get-ChildItem -Path $tmp -Directory | Select-Object -First 1
       if (-not $src -or -not (Test-Path (Join-Path $src.FullName 'web_app.py'))) { Fail 'The download looks wrong (no web_app.py).' }
-      if (Test-Path $AppDir) { Remove-Item -Recurse -Force $AppDir -ErrorAction Stop }
-      Move-Item -Path $src.FullName -Destination $AppDir -ErrorAction Stop
+      # Replace the files inside the app folder rather than deleting the folder:
+      # Windows won't delete a folder while any program (a leftover AI or tool
+      # RAPR started, a terminal, an Explorer window) has it as its current folder.
+      New-Item -ItemType Directory -Force -Path $AppDir -ErrorAction Stop | Out-Null
+      & robocopy $src.FullName $AppDir /MIR /R:3 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
+      if ($LASTEXITCODE -ge 8) {
+        Fail ("Some of RAPR's files in $AppDir are in use, so they couldn't be replaced. " +
+              'Close any terminal, editor or File Explorer window open in that folder, then run "rapr update" again. ' +
+              'If it still fails, restart your PC and run "rapr update" first thing.')
+      }
+      $global:LASTEXITCODE = 0     # robocopy uses 1-7 for success
     } finally {
       Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
     }
