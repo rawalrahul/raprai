@@ -23,6 +23,7 @@
 <link rel="stylesheet" href="/css/header.css?v=2">
 <link rel="stylesheet" href="/css/sidebar.css?v=1">
 <link rel="stylesheet" href="/css/composer.css?v=1">
+<link rel="stylesheet" href="/css/picker.css?v=1">
 <!-- Applies saved theme, accent, size and layout before first paint -->
 <script src="/js/customize.js?v=1"></script>
 </head>
@@ -1456,16 +1457,50 @@ Example:
 <!-- Browse directory modal -->
 <div class="modal-overlay" id="browse-modal" onclick="closeBrowse(event)" role="dialog" aria-modal="true" aria-labelledby="browse-modal-title">
   <div class="modal-box browse-box">
-    <div class="modal-header">
-      <span class="modal-title" id="browse-modal-title">Choose your project</span>
-      <button class="modal-close" onclick="closeBrowseModal()" aria-label="Close folder browser">✖</button>
+    <div class="fp-head">
+      <div>
+        <div class="fp-title" id="browse-modal-title">Choose your project</div>
+        <div class="fp-sub" id="browse-hint"></div>
+      </div>
+      <button class="fp-close" onclick="closeBrowseModal()" aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
     </div>
-    <div id="browse-hint" class="browse-hint"></div>
-    <div id="browse-crumb" class="browse-crumb" aria-label="Current directory breadcrumb"></div>
-    <div class="modal-body" id="browse-list" role="listbox" aria-label="Directory contents"></div>
-    <div class="browse-footer">
-      <button class="sess-action-btn" onclick="closeBrowseModal()">Cancel</button>
-      <button class="sess-action-btn resume" id="browse-select-btn" onclick="selectBrowsePath()">✓ Use this project</button>
+
+    <!-- Where you are: up, clickable path segments, or type/paste a path -->
+    <div class="fp-pathbar">
+      <button class="fp-btn fp-up" id="fp-up" onclick="browseUp()" title="Up one folder (Backspace)" aria-label="Up one folder">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      </button>
+      <div class="fp-crumbs" id="browse-crumb" onclick="if(event.target===this)browseEditPath()" aria-label="Current folder"></div>
+      <input class="fp-path-input" id="fp-path-input" spellcheck="false" autocomplete="off" aria-label="Folder path" placeholder="Type or paste a folder path, then press Enter" hidden>
+      <button class="fp-btn" id="fp-edit" onclick="browseEditPath()" title="Type or paste a path" aria-label="Type or paste a path">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+      </button>
+    </div>
+
+    <div class="fp-main">
+      <nav class="fp-places" id="fp-places" aria-label="Places"></nav>
+      <div class="fp-content">
+        <div class="fp-tools">
+          <div class="fp-filter">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+            <input id="fp-filter" placeholder="Filter folders" autocomplete="off" spellcheck="false" aria-label="Filter folders">
+          </div>
+          <button class="fp-btn fp-text-btn" onclick="browseNewFolder()" title="Create a folder here">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 10v6M9 13h6"/></svg>New folder
+          </button>
+        </div>
+        <div class="fp-error" id="fp-error" role="alert" hidden></div>
+        <div class="fp-list" id="browse-list" role="listbox" aria-label="Folders" tabindex="0"></div>
+        <label class="fp-hidden-toggle"><input type="checkbox" id="fp-show-hidden"> Show hidden and system folders <span id="fp-hidden-count"></span></label>
+      </div>
+    </div>
+
+    <div class="fp-foot">
+      <div class="fp-selected" id="fp-selected" title=""></div>
+      <button class="fp-btn fp-cancel" onclick="closeBrowseModal()">Cancel</button>
+      <button class="fp-btn fp-primary" id="browse-select-btn" onclick="selectBrowsePath()">Use this folder</button>
     </div>
   </div>
 </div>
@@ -1780,7 +1815,7 @@ Example:
 </div>
 
 <script src="/js/kelvin.js?v=8"></script>
-<script src="/js/complete.js?v=18"></script>
+<script src="/js/complete.js?v=19"></script>
 <script src="/js/ai_list.js?v=1"></script>
 <script src="/js/packages.js?v=6"></script>
 <script src="/js/memory.js?v=2"></script>
