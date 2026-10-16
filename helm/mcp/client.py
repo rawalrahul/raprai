@@ -8,8 +8,10 @@ Generalized from helm/gws_mcp.py to work with any MCP server.
 """
 
 import asyncio
+import collections
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -20,19 +22,36 @@ from helm.config import logger
 from helm.subprocess_utils import hidden_kwargs
 
 
+_URL_RE = re.compile(r"https?://\S+")
+_AUTH_PROMPT_RE = re.compile(r"authorize this client|visit(?:ing)?:", re.I)
+_USER_CODE_RE = re.compile(r"enter the code:\s*(\S+)", re.I)
+
+
 class MCPClient:
     """Manages a single MCP server subprocess."""
 
-    def __init__(self, server_id: str, command: list[str], env: dict | None = None):
+    def __init__(self, server_id: str, command: list[str], env: dict | None = None,
+                 init_timeout: float = 15.0):
         """
         Args:
-            server_id: Unique identifier (e.g. "slack", "github", "google_workspace")
-            command:   Command to start the server (e.g. ["npx", "-y", "@modelcontextprotocol/server-slack"])
-            env:       Extra environment variables to pass to the subprocess
+            server_id:    Unique identifier (e.g. "slack", "github", "google_workspace")
+            command:      Command to start the server (e.g. ["npx", "-y", "@modelcontextprotocol/server-slack"])
+            env:          Extra environment variables to pass to the subprocess
+            init_timeout: Seconds to wait for the initialize handshake. Remote
+                          servers that sign in through a browser (mcp-remote
+                          OAuth) need minutes, not seconds.
         """
         self.server_id = server_id
         self.command = command
         self.extra_env = env or {}
+        self.init_timeout = init_timeout
+
+        # Last lines the server wrote to stderr, plus any sign-in link it asked
+        # the user to open (mcp-remote prints one when OAuth is needed).
+        self._stderr_tail: collections.deque[str] = collections.deque(maxlen=40)
+        self._await_auth_url = False
+        self.auth_url = ""
+        self.auth_code = ""
 
         self._proc: Optional[subprocess.Popen] = None
         self._lock = asyncio.Lock()
@@ -125,6 +144,36 @@ class MCPClient:
         except Exception:
             pass
 
+    # ── stderr ────────────────────────────────────────────────────────────
+
+    def _drain_stderr(self, proc: subprocess.Popen) -> None:
+        """Read the server's stderr until it closes (runs in a thread).
+
+        Draining matters on its own: chatty servers (mcp-remote logs every
+        step) would otherwise fill the pipe and block. Along the way we keep
+        the last lines for error messages and pick out a sign-in link.
+        """
+        try:
+            for line in proc.stderr:
+                line = line.rstrip()
+                if not line:
+                    continue
+                self._stderr_tail.append(line)
+                if _AUTH_PROMPT_RE.search(line):
+                    self._await_auth_url = True
+                m = _URL_RE.search(line)
+                if m and self._await_auth_url:
+                    self.auth_url = m.group(0)
+                    self._await_auth_url = False
+                c = _USER_CODE_RE.search(line)
+                if c:
+                    self.auth_code = c.group(1)
+        except Exception:
+            pass
+
+    def get_stderr_tail(self, lines: int = 8) -> str:
+        return "\n".join(list(self._stderr_tail)[-lines:])
+
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
     async def start(self) -> bool:
@@ -176,17 +225,19 @@ class MCPClient:
                 logger.error("MCP '%s': failed to start: %s", self.server_id, exc)
                 return False
 
+            self._stderr_tail.clear()
+            self.auth_url = ""
+            self.auth_code = ""
+            threading.Thread(target=self._drain_stderr, args=(self._proc,),
+                             daemon=True, name=f"mcp-stderr-{self.server_id}").start()
+
             # Give the server a moment to start
             await asyncio.sleep(0.5)
 
             if self._proc.poll() is not None:
-                stderr = ""
-                try:
-                    stderr = self._proc.stderr.read()[:500] if self._proc.stderr else ""
-                except Exception:
-                    pass
+                await asyncio.sleep(0.2)            # let the drain thread catch up
                 logger.error("MCP '%s': server exited immediately. stderr: %s",
-                             self.server_id, stderr)
+                             self.server_id, self.get_stderr_tail()[:500])
                 self._proc = None
                 return False
 
@@ -198,7 +249,7 @@ class MCPClient:
                         "capabilities": {},
                         "clientInfo": {"name": "rapr-ai", "version": "1.0.0"},
                     },
-                    timeout=15.0,
+                    timeout=self.init_timeout,
                 )
                 server_info = result.get("serverInfo", {})
                 logger.info("MCP '%s': initialized (server=%s v%s)",
@@ -217,6 +268,8 @@ class MCPClient:
                 )
                 self._tools = tools_result.get("tools", [])
                 self._initialized = True
+                self.auth_url = ""
+                self.auth_code = ""
 
                 logger.info("MCP '%s': ready — %d tools discovered",
                             self.server_id, len(self._tools))
@@ -245,6 +298,20 @@ class MCPClient:
         self._initialized = False
         self._tools = []
         self._msg_id = 0
+
+    def cancel(self):
+        """Kill the subprocess without waiting for the lock.
+
+        start() holds the lock for the whole handshake, which for a browser
+        sign-in can be minutes; killing the process makes that handshake fail
+        straight away so a remove or reconnect doesn't have to wait.
+        """
+        proc = self._proc
+        if proc and proc.poll() is None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
 
     async def stop(self):
         """Stop the server subprocess."""

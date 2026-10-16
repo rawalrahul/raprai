@@ -412,6 +412,23 @@ Browse, search, and one-click install packages (MCP servers, skills, plugins) fr
 
 Upload `.raprpkg` files to install from local packages. Each `.raprpkg` is a ZIP with a `manifest.json` describing the package type, dependencies, and metadata. Installs are atomic with automatic rollback on failure.
 
+### Add any MCP server
+
+Any app that has an MCP server can be connected without waiting for RAPR to support it. In the RAPR Packages panel, click **+ Add MCP server** and pick one of:
+
+- **Server URL**: paste the app's hosted MCP URL (usually ending in `/mcp` or `/sse`) and choose how to sign in:
+  - *Sign in with my account*: a sign-in page for the app opens; approve access and you're done.
+  - *API key or token*: sent as `Authorization: Bearer <key>`.
+  - *Custom headers*: for apps that want something like `X-API-Key`.
+  - *Sign in with a code*: for a RAPR running on a server with no browser (the app must support the OAuth device flow).
+  - *No sign-in needed*.
+- **Command**: a server RAPR starts on this computer (for example `npx -y @modelcontextprotocol/server-github`), with environment variables for its API keys.
+- **Paste JSON**: the `mcpServers` snippet apps publish for Claude Desktop, Cursor or VS Code. Every server in it is added.
+
+Once a server is connected, every AI in RAPR can use its tools: Claude Code gets it through `--mcp-config`, Codex and Gemini through their own config files, and Ollama and the API AIs (Groq, OpenRouter...) through RAPR's tool calling. Each server's card shows its status, the reason if it couldn't connect, and **Reconnect** / **Sign in again** and **Remove** buttons.
+
+Remote servers are bridged with [`mcp-remote`](https://www.npmjs.com/package/mcp-remote), so they need Node.js. Keys, tokens and URLs are stored encrypted in RAPR's vault; the server list is kept in RAPR's data folder (`custom_mcp_servers.json`), so updates don't remove it.
+
 ---
 
 ## Cloud Backup

@@ -5,6 +5,12 @@ Endpoints:
     GET  /mcp/servers              → List ALL configured MCP servers with status
     POST /mcp/servers/{id}/toggle  → Enable or disable an MCP server
     POST /mcp/call                 → Call an MCP tool (used by code-executing AIs)
+    GET  /mcp/custom/add           → Add-MCP popup page
+    POST /mcp/custom               → Add any MCP server (URL or command) and connect it
+    POST /mcp/custom/import        → Add servers from a pasted mcpServers JSON
+    POST /mcp/custom/{id}/connect  → Reconnect / sign in again
+    GET  /mcp/custom/{id}/status   → Connecting / sign-in link / running / error
+    DELETE /mcp/custom/{id}        → Remove a custom server and its stored secrets
 """
 
 import asyncio
@@ -68,9 +74,34 @@ async def list_mcp_servers():
                 "summary": "Not started",
             })
 
+    # Servers the user added themselves: label, sign-in state, last error.
+    try:
+        from helm.mcp import custom_mcp
+        custom_info = {c["id"]: c for c in custom_mcp.list_servers()}
+    except Exception as exc:
+        logger.warning("custom MCP list failed: %s", exc)
+        custom_info = {}
+
     # Enrich each server with setup/connected info for OAuth MCPs
     for srv in all_servers:
         sid = srv["id"]
+
+        if sid in custom_info and config.get(sid, {}).get("custom"):
+            c = custom_info[sid]
+            srv.update({
+                "custom": True,
+                "label": c["label"],
+                "transport": c["transport"],
+                "auth": c["auth"],
+                "host": c["host"],
+                "command": c["command"],
+                "enabled": c["enabled"],
+                "connecting": c["connecting"],
+                "auth_url": c["auth_url"],
+                "auth_code": c["auth_code"],
+                "error": c["error"],
+            })
+            continue
 
         # Zapier is the Tier-2 universal connector: connected via a pasted MCP
         # server URL, not a toggle. Flag it so the UI shows a Connect button.
@@ -169,14 +200,28 @@ async def toggle_mcp_server(server_id: str, request: Request):
     # an empty target and fail with a cryptic error.
     if enabled and config[server_id].get("needs_config"):
         missing = ", ".join(config[server_id].get("missing_env", [])) or "credentials"
-        hint = ("Use the Connect button to set up Zapier first."
-                if server_id == "zapier"
-                else f"Set the required value(s) first: {missing}.")
+        if server_id == "zapier":
+            hint = "Use the Connect button to set up Zapier first."
+        elif config[server_id].get("custom"):
+            hint = "Some saved details are missing. Remove it and add it again."
+        else:
+            hint = f"Set the required value(s) first: {missing}."
         return JSONResponse(
             {"ok": False, "error": f"'{server_id}' needs configuration. {hint}",
              "needs_config": True},
             status_code=400,
         )
+
+    # Custom servers live in their own store and connect in the background
+    # (a sign-in can take minutes).
+    if config[server_id].get("custom"):
+        from helm.mcp import custom_mcp
+        custom_mcp.set_enabled(server_id, enabled)
+        if enabled:
+            res = await custom_mcp.connect(server_id)
+            return JSONResponse({**res, "enabled": True})
+        await _get_mgr().stop_server(server_id)
+        return JSONResponse({"ok": True, "enabled": False, "running": False})
 
     config[server_id]["enabled"] = enabled
     save_config(config)
@@ -580,5 +625,272 @@ async function save() {{
     }}
   }}catch(e){{ msg.className='msg err'; msg.textContent=e.message; btn.disabled=false; btn.textContent='Save & Connect'; }}
 }}
+</script>
+</body></html>"""
+
+
+# ── Custom MCP servers ("Add any MCP") ───────────────────────────────────────
+# The user adds any MCP server (a hosted URL or a local command), signs in, and
+# every AI in RAPR can use its tools. See helm/mcp/custom_mcp.py.
+
+@router.get("/mcp/custom")
+async def custom_list():
+    from helm.mcp import custom_mcp
+    return JSONResponse({"servers": custom_mcp.list_servers()})
+
+
+@router.get("/mcp/custom/add")
+async def custom_add_page():
+    """Popup page with the Add-MCP form."""
+    return HTMLResponse(_custom_add_page())
+
+
+@router.post("/mcp/custom")
+async def custom_add(request: Request):
+    """Add a server and start connecting it. Body: see custom_mcp.add_server()."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid JSON body"}, status_code=400)
+    from helm.mcp import custom_mcp
+    res = custom_mcp.add_server(body if isinstance(body, dict) else {})
+    if not res.get("ok"):
+        return JSONResponse(res, status_code=400)
+    conn = await custom_mcp.connect(res["id"])
+    return JSONResponse({"ok": True, "ids": [res["id"]], "status": {res["id"]: conn}})
+
+
+@router.post("/mcp/custom/import")
+async def custom_import(request: Request):
+    """Add every server in a pasted MCP config. Body: {"json": "<text>"}"""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Invalid JSON body"}, status_code=400)
+    from helm.mcp import custom_mcp
+    res = custom_mcp.import_json(str((body or {}).get("json", "")))
+    if not res.get("ok"):
+        return JSONResponse(res, status_code=400)
+    res["status"] = {sid: await custom_mcp.connect(sid) for sid in res["ids"]}
+    return JSONResponse(res)
+
+
+@router.post("/mcp/custom/{server_id}/connect")
+async def custom_connect(server_id: str):
+    """(Re)connect a custom server — also how the user signs in again."""
+    from helm.mcp import custom_mcp
+    res = await custom_mcp.connect(server_id)
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
+@router.get("/mcp/custom/{server_id}/status")
+async def custom_status(server_id: str):
+    from helm.mcp import custom_mcp
+    if not custom_mcp.is_custom(server_id):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return JSONResponse({"id": server_id, **custom_mcp.status(server_id)})
+
+
+@router.delete("/mcp/custom/{server_id}")
+async def custom_remove(server_id: str):
+    from helm.mcp import custom_mcp
+    res = await custom_mcp.remove_server(server_id)
+    return JSONResponse(res, status_code=200 if res.get("ok") else 404)
+
+
+def _custom_add_page() -> str:
+    """Render the Add-MCP popup (remote URL / local command / pasted JSON)."""
+    return """<!DOCTYPE html>
+<html><head><title>RAPR AI — Add MCP server</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    display:flex;justify-content:center;min-height:100vh;background:#0d0d0d;color:#e0e0e0;padding:20px}
+  .card{background:#1a1a1a;border-radius:16px;padding:28px;max-width:560px;width:100%;
+    box-shadow:0 4px 24px rgba(0,0,0,.5);align-self:flex-start}
+  .header{text-align:center;margin-bottom:18px}
+  .emoji{font-size:40px;margin-bottom:6px}
+  h2{font-size:19px;font-weight:600;margin-bottom:4px}
+  .subtitle{color:#888;font-size:12.5px;line-height:1.5}
+  .tabs{display:flex;gap:4px;background:#111;border:1px solid #262626;border-radius:10px;padding:4px;margin-bottom:16px}
+  .tab{flex:1;padding:8px 6px;background:none;border:none;border-radius:7px;color:#999;font-size:12.5px;cursor:pointer}
+  .tab.active{background:#7c3aed;color:#fff}
+  .pane{display:none}.pane.active{display:block}
+  label{font-size:12.5px;font-weight:600;color:#ddd;display:block;margin:12px 0 5px}
+  .hint{font-size:11.5px;color:#777;margin-top:5px;line-height:1.5}
+  .hint code{background:#111;padding:1px 4px;border-radius:4px;color:#bbb}
+  input,select,textarea{width:100%;background:#111;border:1px solid #333;border-radius:8px;padding:9px 12px;
+    color:#e0e0e0;font-size:13px;outline:none;font-family:inherit}
+  input.mono,textarea{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+  textarea{min-height:170px;resize:vertical}
+  input:focus,select:focus,textarea:focus{border-color:#7c3aed}
+  .row{display:flex;gap:6px;margin-top:6px}
+  .row input{flex:1}
+  .row button{background:none;border:1px solid #333;color:#888;border-radius:8px;width:34px;cursor:pointer}
+  .add-row{background:none;border:none;color:#a78bfa;font-size:12px;cursor:pointer;margin-top:8px}
+  .auth-extra{display:none}.auth-extra.active{display:block}
+  .actions{display:flex;flex-direction:column;gap:10px;margin-top:20px}
+  .btn-save{padding:12px 20px;background:#7c3aed;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:500;cursor:pointer}
+  .btn-save:hover{background:#6d28d9}
+  .btn-save:disabled{background:#333;color:#666;cursor:not-allowed}
+  .btn-close{padding:10px 20px;background:transparent;color:#888;border:1px solid #333;border-radius:10px;font-size:13px;cursor:pointer}
+  .msg{padding:10px 12px;border-radius:8px;font-size:12.5px;margin-top:12px;display:none;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+  .msg.ok{display:block;background:#052e16;color:#34d399;border:1px solid #065f46}
+  .msg.err{display:block;background:#450a0a;color:#f87171;border:1px solid #7f1d1d}
+  .msg.info{display:block;background:#1e1b4b;color:#c4b5fd;border:1px solid #3730a3}
+  .msg a.signin{display:inline-block;margin-top:8px;padding:8px 14px;background:#7c3aed;color:#fff;border-radius:8px;text-decoration:none;font-weight:500}
+  .msg .code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px;color:#fff;letter-spacing:1px}
+  .spinner{display:inline-block;width:14px;height:14px;border:2px solid #fff3;border-top-color:#fff;
+    border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style></head>
+<body>
+<div class="card">
+  <div class="header">
+    <div class="emoji">&#128268;</div>
+    <h2>Add an MCP server</h2>
+    <div class="subtitle">Connect any app that has an MCP server. Once it's connected, every AI in RAPR
+      (Claude, Codex, Gemini, Ollama and the rest) can use its tools.</div>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab active" data-pane="remote" onclick="tab(this)">Server URL</button>
+    <button class="tab" data-pane="local" onclick="tab(this)">Command</button>
+    <button class="tab" data-pane="json" onclick="tab(this)">Paste JSON</button>
+  </div>
+
+  <div class="pane active" id="pane-remote">
+    <label for="r-name">Name</label>
+    <input id="r-name" placeholder="e.g. Buffer, Linear, Notion" autocomplete="off">
+    <label for="r-url">MCP server URL</label>
+    <input id="r-url" class="mono" placeholder="https://mcp.example.com/mcp" autocomplete="off" spellcheck="false">
+    <div class="hint">The app's docs list it, usually ending in <code>/mcp</code> or <code>/sse</code>.</div>
+    <label for="r-auth">How do you sign in?</label>
+    <select id="r-auth" onchange="authChanged()">
+      <option value="oauth">Sign in with my account (opens a sign-in page)</option>
+      <option value="bearer">API key or token</option>
+      <option value="headers">Custom headers</option>
+      <option value="device">Sign in with a code (RAPR runs on a server)</option>
+      <option value="none">No sign-in needed</option>
+    </select>
+    <div class="auth-extra" id="auth-bearer">
+      <label for="r-token">API key / token</label>
+      <input id="r-token" type="password" class="mono" autocomplete="off" spellcheck="false">
+      <div class="hint">Sent as <code>Authorization: Bearer &lt;key&gt;</code>. Stored encrypted on this computer.</div>
+    </div>
+    <div class="auth-extra" id="auth-headers">
+      <label>Headers</label>
+      <div id="hdr-rows"></div>
+      <button class="add-row" onclick="addRow('hdr-rows','X-API-Key','value')">+ Add header</button>
+    </div>
+    <div class="auth-extra active" id="auth-oauth">
+      <div class="hint">After you click Add, a sign-in page for the app opens. Approve access and come back here.</div>
+    </div>
+    <div class="auth-extra" id="auth-device">
+      <div class="hint">You'll get a link and a code to enter on any device. Use this when RAPR runs on a server
+        without a browser. Not every app supports it.</div>
+    </div>
+  </div>
+
+  <div class="pane" id="pane-local">
+    <label for="l-name">Name</label>
+    <input id="l-name" placeholder="e.g. GitHub" autocomplete="off">
+    <label for="l-cmd">Command</label>
+    <input id="l-cmd" class="mono" placeholder="npx -y @modelcontextprotocol/server-github" autocomplete="off" spellcheck="false">
+    <div class="hint">RAPR runs this on this computer. Only add commands you trust.</div>
+    <label>Environment variables (API keys go here)</label>
+    <div id="env-rows"></div>
+    <button class="add-row" onclick="addRow('env-rows','GITHUB_PERSONAL_ACCESS_TOKEN','value')">+ Add variable</button>
+  </div>
+
+  <div class="pane" id="pane-json">
+    <label for="j-text">MCP config JSON</label>
+    <textarea id="j-text" spellcheck="false" placeholder='{
+  "mcpServers": {
+    "my-app": { "url": "https://mcp.example.com/mcp" },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "..." }
+    }
+  }
+}'></textarea>
+    <div class="hint">Paste the snippet an app gives you for Claude Desktop, Cursor or VS Code. URL servers without
+      headers sign in with your account.</div>
+  </div>
+
+  <div class="actions">
+    <button class="btn-save" id="btn" onclick="save()">Add &amp; connect</button>
+    <button class="btn-close" onclick="window.close()">Close</button>
+  </div>
+  <div class="msg" id="msg"></div>
+</div>
+<script>
+let pane='remote', pollTimer=null;
+function csrf(){ const m=document.cookie.match(/(?:^|; )hq_csrf=([^;]+)/); return m?decodeURIComponent(m[1]):''; }
+function esc(s){ return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function tab(b){ pane=b.dataset.pane;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t===b));
+  document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('active',p.id==='pane-'+pane)); }
+function authChanged(){ const a=document.getElementById('r-auth').value;
+  document.querySelectorAll('.auth-extra').forEach(e=>e.classList.toggle('active',e.id==='auth-'+a));
+  if(a==='headers' && !document.querySelector('#hdr-rows .row')) addRow('hdr-rows','X-API-Key','value'); }
+function addRow(id,ph1,ph2){ const r=document.createElement('div'); r.className='row';
+  r.innerHTML='<input class="mono k" placeholder="'+ph1+'" spellcheck="false"><input class="mono v" type="password" placeholder="'+ph2+'" spellcheck="false"><button title="Remove" onclick="this.parentNode.remove()">&times;</button>';
+  document.getElementById(id).appendChild(r); }
+function rows(id){ return [...document.querySelectorAll('#'+id+' .row')].map(r=>({name:r.querySelector('.k').value.trim(),value:r.querySelector('.v').value})).filter(p=>p.name||p.value); }
+function show(cls,html){ const m=document.getElementById('msg'); m.className='msg '+cls; m.innerHTML=html; }
+function busy(on,label){ const b=document.getElementById('btn'); b.disabled=on;
+  b.innerHTML=on?'<span class="spinner"></span>'+(label||'Connecting...'):'Add &amp; connect'; }
+
+async function save(){
+  let url='/mcp/custom', body;
+  if(pane==='remote') body={transport:'remote',name:v('r-name'),url:v('r-url'),auth:v('r-auth'),token:document.getElementById('r-token').value,headers:rows('hdr-rows')};
+  else if(pane==='local') body={transport:'local',name:v('l-name'),command:v('l-cmd'),env:rows('env-rows')};
+  else { url='/mcp/custom/import'; body={json:document.getElementById('j-text').value}; }
+  busy(true,'Adding...'); show('','');
+  try{
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','x-csrf-token':csrf()},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(!d.ok){ show('err',esc(d.error||'Could not add the server.')); busy(false); return; }
+    busy(true);
+    poll(d.ids, d.errors||[]);
+  }catch(e){ show('err',esc(e.message)); busy(false); }
+}
+function v(id){ return document.getElementById(id).value.trim(); }
+
+function poll(ids, importErrors){
+  clearTimeout(pollTimer);
+  // One request for every server being added (RAPR rate-limits requests).
+  fetch('/mcp/custom').then(r=>r.json()).then(d=>{
+    const byId={}; (d.servers||[]).forEach(s=>byId[s.id]=s);
+    return ids.map(id=>byId[id]||{id,error:'It was removed.'});
+  }).catch(()=>ids.map(id=>({id,connecting:true})))
+  .then(list=>{
+    const pending=list.filter(s=>s.connecting);
+    const signin=pending.find(s=>s.auth_url);
+    if(signin){
+      let h='Sign in to finish connecting <b>'+esc(signin.id)+'</b>.<br>';
+      if(signin.auth_code) h+='Enter this code when asked: <span class="code">'+esc(signin.auth_code)+'</span><br>';
+      h+='<a class="signin" href="'+esc(signin.auth_url)+'" target="_blank" rel="noopener">Open sign-in page</a>';
+      h+='<div class="hint">If a sign-in tab already opened by itself, finish there. This page updates on its own.</div>';
+      show('info',h);
+    } else if(pending.length){
+      show('info','<span class="spinner"></span>Connecting '+pending.map(s=>esc(s.id)).join(', ')+'... (the first time can take a minute)');
+    }
+    if(pending.length){ pollTimer=setTimeout(()=>poll(ids,importErrors),2000); return; }
+    const ok=list.filter(s=>s.running), bad=list.filter(s=>!s.running);
+    let html='';
+    if(ok.length) html+=ok.map(s=>'&#10003; '+esc(s.id)+': '+(s.tool_count||0)+' tools').join('<br>')+'<br>Every AI in RAPR can use these tools now.';
+    if(bad.length) html+=(html?'<br><br>':'')+bad.map(s=>'&#10007; '+esc(s.id)+': '+esc(s.error||'Could not connect.')).join('<br><br>')
+      +'<br><br>It stays in your Packages list; use Reconnect there after fixing it.';
+    if(importErrors.length) html+='<br><br>Skipped: '+importErrors.map(esc).join('; ');
+    show(bad.length?'err':'ok',html);
+    busy(false);
+    if(window.opener){ try{ window.opener.postMessage({type:'plugin-oauth-done',success:true},'*'); }catch(e){} }
+    if(!bad.length && !importErrors.length) setTimeout(()=>window.close(),2500);
+  });
+}
 </script>
 </body></html>"""

@@ -44,23 +44,20 @@ def load_config(config_path: Optional[str] = None) -> dict:
         from helm.paths import PROJECT_ROOT
         config_path = str(PROJECT_ROOT / "mcp_servers.json")
 
+    raw: dict = {}
     if not os.path.isfile(config_path):
-        logger.info("MCP config not found at %s — no MCP servers configured", config_path)
-        return {}
-
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-    except json.JSONDecodeError as exc:
-        logger.error("MCP config: invalid JSON in %s: %s", config_path, exc)
-        return {}
-    except Exception as exc:
-        logger.error("MCP config: failed to read %s: %s", config_path, exc)
-        return {}
-
-    if not isinstance(raw, dict):
-        logger.error("MCP config: expected JSON object at top level")
-        return {}
+        logger.info("MCP config not found at %s — no built-in MCP servers", config_path)
+    else:
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except json.JSONDecodeError as exc:
+            logger.error("MCP config: invalid JSON in %s: %s", config_path, exc)
+        except Exception as exc:
+            logger.error("MCP config: failed to read %s: %s", config_path, exc)
+        if not isinstance(raw, dict):
+            logger.error("MCP config: expected JSON object at top level")
+            raw = {}
 
     servers = {}
     for server_id, cfg in raw.items():
@@ -137,6 +134,16 @@ def load_config(config_path: Optional[str] = None) -> dict:
         else:
             logger.info("MCP config: loaded '%s' [%s] — %s",
                          server_id, status, log_command_str)
+
+    # Servers the user added in the Packages panel (kept in the user data
+    # folder so they survive updates). Built-in ids win on a clash.
+    try:
+        from .custom_mcp import runtime_configs
+        for server_id, cfg in runtime_configs().items():
+            if server_id not in servers:
+                servers[server_id] = cfg
+    except Exception as exc:
+        logger.warning("MCP config: could not load custom servers: %s", exc)
 
     logger.info("MCP config: %d servers loaded, %d enabled",
                 len(servers), sum(1 for s in servers.values() if s["enabled"]))

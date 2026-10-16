@@ -152,3 +152,6 @@ helm/learning/routing_table.json
 
 # Port the web UI is running on (read by the macOS launcher)
 web_port
+
+# Custom MCP servers the user added (secrets are in the vault, not here)
+custom_mcp_servers.json
