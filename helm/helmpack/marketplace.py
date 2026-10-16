@@ -439,6 +439,8 @@ def check_updates(force: bool = False) -> list[dict]:
         from helm.mcp.config import load_config
         mcp_cfg = load_config()
         for server_id, cfg in mcp_cfg.items():
+            if cfg.get("custom"):           # added by the user, not from the catalog
+                continue
             # If this MCP server matches a catalog entry but isn't in
             # installed packages, treat it as "installed at v0.0.0"
             if server_id in catalog_map or server_id.replace("_", "-") in catalog_map:

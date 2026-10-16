@@ -60,6 +60,7 @@ class MCPManager:
                 server_id=server_id,
                 command=cfg["command"],
                 env=cfg["env"],
+                init_timeout=cfg.get("init_timeout", 15.0),
             )
             self._clients[server_id] = client
             tasks.append(self._start_client(server_id, client))
@@ -141,6 +142,7 @@ class MCPManager:
                 server_id=sid,
                 command=cfg["command"],
                 env=cfg["env"],
+                init_timeout=cfg.get("init_timeout", 15.0),
             )
             self._clients[sid] = client
             tasks.append(self._start_client(sid, client))
@@ -160,6 +162,40 @@ class MCPManager:
             logger.warning("MCP config sync failed (non-fatal): %s", exc)
 
         logger.info("MCP reload complete: %d servers active", len(self._clients))
+
+    async def start_server(self, server_id: str, cfg: dict) -> bool:
+        """Start one server from a load_config()-format entry (replacing any
+        client already registered under that id) and refresh the tool map."""
+        old = self._clients.get(server_id)
+        if old:
+            old.cancel()
+            await old.stop()
+        client = MCPClient(
+            server_id=server_id,
+            command=cfg["command"],
+            env=cfg.get("env", {}),
+            init_timeout=cfg.get("init_timeout", 15.0),
+        )
+        self._clients[server_id] = client
+        ok = await self._start_client(server_id, client)
+        # The id may have been removed while we were waiting on a sign-in.
+        if self._clients.get(server_id) is not client:
+            await client.stop()
+            return False
+        self._rebuild_tool_map()
+        if ok:
+            logger.info("MCP '%s': started (%d tools)", server_id, client.get_tool_count())
+        return ok
+
+    async def stop_server(self, server_id: str) -> None:
+        """Stop one server, forget it and refresh the tool map."""
+        client = self._clients.pop(server_id, None)
+        if client:
+            try:
+                await client.stop()
+            except Exception as exc:
+                logger.warning("MCP '%s': stop error: %s", server_id, exc)
+        self._rebuild_tool_map()
 
     async def shutdown(self):
         """Stop all MCP servers."""
@@ -517,7 +553,7 @@ class MCPManager:
         logger.info("Claude MCP config written: %s (%d servers)", path, len(mcp_servers))
         return path
 
-    def sync_native_mcp_configs(self) -> None:
+    def sync_native_mcp_configs(self, removed: list[str] | None = None) -> None:
         """Write MCP server configs to each CLI's native config location.
 
         This lets every CLI discover tools as if the user configured them
@@ -529,11 +565,15 @@ class MCPManager:
 
         Claude uses --mcp-config at invocation time (handled by export_claude_mcp_config).
         Ollama has its own native tool calling via the API.
+
+        removed: ids of servers the user just removed, deleted from both files
+        even when no other server is running.
         """
         import json, os
 
         servers = self._get_subprocess_servers()
-        if not servers:
+        removed = [r for r in (removed or []) if r not in servers]
+        if not servers and not removed:
             logger.info("sync_native_mcp_configs: no subprocess MCP servers — skipping")
             return
 
@@ -555,7 +595,13 @@ class MCPManager:
                     existing = {}
 
             # Build mcpServers — same format as Claude (Gemini uses identical schema)
-            existing["mcpServers"] = servers
+            if servers:
+                existing["mcpServers"] = servers
+            else:
+                mcp = existing.get("mcpServers")
+                for sid in removed:
+                    if isinstance(mcp, dict):
+                        mcp.pop(sid, None)
             with open(gemini_path, "w", encoding="utf-8") as f:
                 json.dump(existing, f, indent=2, ensure_ascii=False)
                 f.write("\n")
@@ -575,12 +621,19 @@ class MCPManager:
                 with open(codex_path, "r", encoding="utf-8") as f:
                     existing_lines = f.readlines()
 
+            def _block_name(header: str) -> str:
+                name = header[len("[mcp_servers."):].rstrip("]")
+                if name.startswith('"'):
+                    return name[1:].split('"', 1)[0]
+                return name.split(".", 1)[0]
+
             # Strip existing [mcp_servers.*] blocks (we'll rewrite them)
             cleaned: list[str] = []
             in_mcp_block = False
             for line in existing_lines:
                 stripped = line.strip()
-                if stripped.startswith("[mcp_servers."):
+                if stripped.startswith("[mcp_servers.") and (
+                        servers or _block_name(stripped) in removed):
                     in_mcp_block = True
                     continue
                 if in_mcp_block:

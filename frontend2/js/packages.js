@@ -177,8 +177,8 @@ function renderInstalledPackages(){
   // MCP Servers → unified items
   if(!_rpType || _rpType === 'mcp'){
     _rpMcpServers.forEach(s => {
-      if(q && !(s.id||'').toLowerCase().includes(q)) return;
-      items.push({_source:'mcp', _data:s, name:s.id.replace(/_/g,' '), id:s.id, type:'mcp',
+      if(q && !(s.id||'').toLowerCase().includes(q) && !(s.label||'').toLowerCase().includes(q)) return;
+      items.push({_source:'mcp', _data:s, name:s.label || s.id.replace(/_/g,' '), id:s.id, type:'mcp',
         emoji: s.running ? '🟢' : (s.enabled ? '🟡' : '⚪'),
         description: s.running ? (s.summary||'Running') : 'Server not running',
         enabled:s.enabled, running:s.running, tool_count:s.tool_count||0,
@@ -207,6 +207,8 @@ function renderInstalledPackages(){
         description:p.description||'', version:p.version||'', author:p.author||''});
     });
   }
+
+  _rpScheduleCustomPoll();
 
   if(!items.length){
     container.innerHTML = updateBannerHtml + (_rpQuery || _rpType
@@ -333,6 +335,41 @@ function _renderInstalledCard(item){
     const toggle = `<button class="toggle-switch ${s.enabled?'on':''}"
       onclick="event.stopPropagation();toggleMcpServer('${id}',${!s.enabled})"
       title="${s.enabled?'Disable':'Enable'}"></button>`;
+
+    // Added by the user (any MCP server): sign-in state, reconnect, remove.
+    if(s.custom){
+      let cStatus, cCls = statusCls;
+      if(s.running) cStatus = 'Running';
+      else if(s.connecting) cStatus = s.auth_url ? 'Sign in' : 'Connecting...';
+      else if(!s.enabled) cStatus = 'Disabled';
+      else { cStatus = 'Not connected'; cCls = 'stopped'; }
+      const where = s.transport === 'local' ? escHtml(s.command || 'local command') : escHtml(s.host || 'remote server');
+      const authTxt = {oauth:'account sign-in', device:'sign-in code', bearer:'API key', headers:'custom headers', none:'no sign-in'}[s.auth] || '';
+      const signin = (s.connecting && s.auth_url)
+        ? `<a class="plg-header-connect" href="${escHtml(s.auth_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${s.auth_code ? 'Code: '+escHtml(s.auth_code) : 'Open sign-in page'}">Sign in</a>`
+        : '';
+      const reconnectLbl = (s.auth === 'oauth' || s.auth === 'device') ? 'Sign in again' : 'Reconnect';
+      return `
+      <div class="plg-accordion" data-mcp-id="${id}">
+        <div class="plg-accordion-header" onclick="togglePluginAccordion(this)">
+          <span class="plg-accordion-arrow">▶</span>
+          <span class="plg-emoji">🔌</span>
+          <span class="plg-title">${name}</span>
+          <span class="mcp-status ${cCls}">${cStatus}</span> ${typeBadge}
+          <div class="plg-header-right">${signin} ${toggle}</div>
+        </div>
+        <div class="plg-accordion-body">
+          <div class="plg-body-desc">${where}${authTxt ? ' · '+authTxt : ''}${s.running ? '<br>'+escHtml(s.summary||'') : ''}</div>
+          ${s.auth_code && s.connecting ? `<div class="plg-body-desc">Sign-in code: <b>${escHtml(s.auth_code)}</b></div>` : ''}
+          ${s.error ? `<div class="plg-body-desc" style="color:var(--red,#f87171);white-space:pre-wrap">${escHtml(s.error)}</div>` : ''}
+          <div class="plg-body-meta">
+            <span class="mcp-tool-count">${s.running ? (s.tool_count||0)+' tools' : ''}</span>
+            <button class="plg-reconnect-btn" onclick="event.stopPropagation();reconnectCustomMcp('${id}')">${reconnectLbl}</button>
+            <button class="plg-disconnect-btn" onclick="event.stopPropagation();removeCustomMcp('${id}')">Remove</button>
+          </div>
+        </div>
+      </div>`;
+    }
 
     // Setup button for MCP servers that need configuration
     let setupBtn = '';
@@ -926,6 +963,44 @@ function disconnectComposio(){
   fetch('/mcp/composio/disconnect',{method:'POST', headers:_rpHeaders()})
     .then(r=>r.json()).then(d=>{ if(d.ok) loadInstalledPackages(); })
     .catch(()=>alert('Failed to disconnect Composio'));
+}
+
+// ─── Custom MCP servers ("Add any MCP") ─────────────────────────────────────
+
+function openAddMcp(){
+  const w = 600, h = 760;
+  const left = (screen.width - w) / 2, top = (screen.height - h) / 2;
+  window.open('/mcp/custom/add', 'rapr-add-mcp',
+    `width=${w},height=${h},left=${left},top=${top},toolbar=no,menubar=no`);
+}
+
+function reconnectCustomMcp(id){
+  fetch('/mcp/custom/'+encodeURIComponent(id)+'/connect',{method:'POST', headers:_rpHeaders()})
+    .then(r=>r.json()).then(d=>{
+      if(!d.ok && d.error) alert(d.error);
+      loadInstalledPackages();
+    }).catch(()=>alert('Failed to reconnect'));
+}
+
+function removeCustomMcp(id){
+  if(!confirm('Remove this MCP server? Its saved keys are deleted and no AI will see its tools any more.')) return;
+  fetch('/mcp/custom/'+encodeURIComponent(id),{method:'DELETE', headers:_rpHeaders()})
+    .then(r=>r.json()).then(()=>loadInstalledPackages())
+    .catch(()=>alert('Failed to remove the server'));
+}
+
+// While a custom server is connecting (or waiting on a sign-in), refresh the
+// list so its status and sign-in link stay current.
+let _rpCustomPoll = null;
+function _rpScheduleCustomPoll(){
+  clearTimeout(_rpCustomPoll);
+  if(_rpTab !== 'installed' || !_rpMcpServers.some(s => s.custom && s.connecting)) return;
+  _rpCustomPoll = setTimeout(()=>{
+    fetch('/mcp/servers').then(r=>r.json()).then(d=>{
+      _rpMcpServers = d.servers || [];
+      renderInstalledPackages();
+    }).catch(()=>{});
+  }, 3000);
 }
 
 // Refresh the installed list when a connect popup reports success.

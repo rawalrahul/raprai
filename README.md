@@ -55,6 +55,8 @@ You probably already pay for one or two AI coding agents, and each lives in its 
 
 **Anything else:** add any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com) in Settings → Agents over ACP, or any command-line AI in Settings → AI Integrations.
 
+**Any app with an MCP server:** click **+ Add MCP server** in RAPR Packages, paste its URL (or command, or the JSON snippet from its docs) and sign in. Every AI in RAPR can then use its tools.
+
 Install the tools you want, and RAPR finds them. **Settings → AI Integrations** lists every supported AI with its install command.
 
 ## Install
