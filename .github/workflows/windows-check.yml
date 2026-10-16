@@ -83,6 +83,33 @@ jobs:
           $s
           if ($s -notlike '*not running*') { throw 'RAPR still running after rapr stop' }
 
+      - name: Update while RAPR runs, started the way "rapr update" starts it
+        shell: powershell
+        env:
+          RAPR_SOURCE_DIR: ${{ github.workspace }}
+          RAPR_NO_OPEN: "1"
+          RAPR_YES: "1"
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $h = Join-Path $env:LOCALAPPDATA 'rapr-ai'
+          $rapr = "$h\bin\rapr.cmd"
+          & $rapr start
+          foreach ($i in 1..30) { if ((& $rapr status | Out-String) -like '*is running*') { break }; Start-Sleep -Seconds 2 }
+          if ((& $rapr status | Out-String) -notlike '*is running*') { throw 'RAPR did not start' }
+          # "rapr update" runs cmd.exe -> rapr.cmd -> powershell, whose command lines name
+          # the RAPR folder. The updater must stop RAPR but not itself or its parents.
+          Copy-Item scripts/install-windows.ps1 "$h\update-test.ps1"
+          $ErrorActionPreference = 'Continue'   # pip and friends write to stderr; judge by exit code and output
+          $out = & cmd.exe /c "powershell -NoProfile -ExecutionPolicy Bypass -File `"$h\update-test.ps1`"" 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Remove-Item "$h\update-test.ps1" -ErrorAction SilentlyContinue
+          $out
+          if ($code -ne 0 -or $out -notlike '*RAPR AI is installed*') { throw "the update didn't finish (exit $code)" }
+          if ($out -notlike '*Stopping the running RAPR*') { throw 'the update should have stopped the running RAPR' }
+          $s = & $rapr status | Out-String
+          if ($s -notlike '*not running*') { throw 'RAPR still running after the update' }
+          'update stopped RAPR and finished'
+
       - name: Log on failure
         if: failure()
         shell: powershell
