@@ -99,14 +99,16 @@ function Install-RaprAI {
   # Never this updater or what started it ("rapr update" runs cmd.exe -> rapr.cmd ->
   # powershell, and their command lines name the RAPR folder too).
   $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+  # Keys are strings: $PID is Int32 but CIM's ProcessId is UInt32, and a
+  # hashtable treats 27600 (Int32) and 27600 (UInt32) as different keys.
   $self = @{}
   $id = $PID
-  while ($id -and -not $self.ContainsKey($id)) {
-    $self[$id] = $true
+  while ($id -and -not $self.ContainsKey("$id")) {
+    $self["$id"] = $true
     $id = ($procs | Where-Object { $_.ProcessId -eq $id } | Select-Object -First 1).ParentProcessId
   }
   $running = @($procs |
-    Where-Object { -not $self.ContainsKey($_.ProcessId) } |
+    Where-Object { -not $self.ContainsKey("$($_.ProcessId)") } |
     Where-Object { ($_.ExecutablePath -and $_.ExecutablePath -like "$Home_\*") -or
                    ($_.CommandLine -and $_.CommandLine -like "*$Home_*") })
   foreach ($p in $running) {
