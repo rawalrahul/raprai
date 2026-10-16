@@ -108,7 +108,7 @@ jobs:
           if ($wa.status -eq 'qr') { 'Smoke test passed: WhatsApp produced a link QR code.' }
           else { Write-Output "::warning title=WhatsApp::No QR within 60s (status $($wa.status)). The library loaded; the runner may not reach WhatsApp." }
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: RAPR_AI_Setup
           path: installer_output/RAPR_AI_Setup.exe
