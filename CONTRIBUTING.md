@@ -27,3 +27,11 @@ See `README.md` for configuration and troubleshooting.
 - Keep changes focused; one feature or fix per PR.
 - Run `pytest` before opening a PR.
 - Do not commit secrets, local databases, logs or `node_modules/`.
+
+## Dependencies
+
+`requirements.lock` is the exact, cross-platform set of versions RAPR is tested
+with (`pip install -r requirements.lock` reproduces it). After changing
+`requirements.txt`, regenerate it with:
+
+    uv pip compile --universal --python-version 3.11 requirements.txt -o requirements.lock

@@ -1,0 +1,10 @@
+# Keep local secrets, data and build output out of plugin packaging.
+.env
+.vault_key
+credentials.json
+helmhq.db*
+chat_logs/
+node_modules/
+__pycache__/
+dist/
+build/
