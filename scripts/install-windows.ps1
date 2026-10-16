@@ -128,8 +128,15 @@ function Install-RaprAI {
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("rapr-" + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $tmp -ErrorAction Stop | Out-Null
     try {
+      # Pin the exact commit, so RAPR can later tell whether $Ref has moved on.
+      $commit = $null
+      try {
+        $commit = (Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$Repo/commits/$Ref" `
+                   -Headers @{ 'User-Agent' = 'rapr-installer' } -ErrorAction Stop).sha
+      } catch { }                                            # rate-limited or offline: download $Ref as before
+      $zipRef = if ($commit) { $commit } else { $Ref }
       $zip = Join-Path $tmp 'rapr.zip'
-      Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/$Repo/archive/$Ref.zip" -OutFile $zip -ErrorAction Stop
+      Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/$Repo/archive/$zipRef.zip" -OutFile $zip -ErrorAction Stop
       Expand-Archive -Path $zip -DestinationPath $tmp -Force -ErrorAction Stop
       $src = Get-ChildItem -Path $tmp -Directory | Select-Object -First 1
       if (-not $src -or -not (Test-Path (Join-Path $src.FullName 'web_app.py'))) { Fail 'The download looks wrong (no web_app.py).' }
@@ -144,6 +151,10 @@ function Install-RaprAI {
               'If it still fails, restart your PC and run "rapr update" first thing.')
       }
       $global:LASTEXITCODE = 0     # robocopy uses 1-7 for success
+      # What's installed, for RAPR's update check (helm/updater.py). After the mirror,
+      # which would otherwise delete it.
+      @{ kind = 'source-windows'; ref = $Ref; commit = $(if ($commit) { $commit } else { '' }) } |
+        ConvertTo-Json | Set-Content -Path (Join-Path $AppDir '.rapr-install.json') -Encoding UTF8
     } finally {
       Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
     }
@@ -179,6 +190,7 @@ APP = $AppDirPy
 DATA = $DataDirPy
 os.environ['RAPR_DATA_DIR'] = DATA
 os.environ['RAPR_INSTALL_KIND'] = 'source-windows'
+os.environ.setdefault('RAPR_REF', $(ConvertTo-Json $Ref))
 # pythonw.exe (no console window) gives Python no stdout/stderr, and uvicorn's
 # logging calls sys.stdout.isatty() at startup. Send them to a log file instead.
 if sys.stdout is None or sys.stderr is None:

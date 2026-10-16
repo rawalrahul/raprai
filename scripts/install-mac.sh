@@ -91,6 +91,9 @@ main() {
       git clone --quiet --depth 1 --branch "$REF" "$REPO" "$app_dir"
     fi
     ok "RAPR $(app_version "$app_dir") downloaded"
+    # What's installed, for RAPR's update check (helm/updater.py).
+    printf '{"kind": "source-mac", "ref": "%s", "commit": "%s"}\n' \
+      "$REF" "$(git -C "$app_dir" rev-parse HEAD 2>/dev/null || true)" >"$app_dir/.rapr-install.json"
   fi
 
   if [ ! -x "$VENV/bin/python" ]; then
@@ -147,6 +150,8 @@ export RAPR_DATA_DIR=$(printf '%q' "$DATA_DIR")
 export RAPR_LOG=$(printf '%q' "$LOG_DIR/rapr.log")
 export RAPR_PID=$(printf '%q' "$HOME_DIR/rapr.pid")
 export RAPR_INSTALLER_DIR=$(printf '%q' "$HOME_DIR")
+export RAPR_INSTALL_KIND=source-mac
+export RAPR_REF=$(printf '%q' "$REF")
 export PATH=$(printf '%q' "${shell_path:+$shell_path:}$("$BREW" --prefix)/bin:$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
 EOF
 }

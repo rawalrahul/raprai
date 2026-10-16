@@ -6,6 +6,9 @@ Endpoints:
     GET  /update/status      — Current update/download status
     POST /update/download    — Start downloading the update installer
     POST /update/apply       — Launch the installer and restart
+    POST /update/now         — Source installs: rerun the installer in the background
+    GET  /update/log         — Output of the last update started from the web UI
+    POST /update/settings    — Turn the automatic check on or off
 """
 
 from fastapi import APIRouter
@@ -91,3 +94,31 @@ async def apply_update(req: ApplyRequest):
 
     result = _apply(installer_path=req.installer_path)
     return result
+
+
+class SettingsRequest(BaseModel):
+    auto_check: bool
+
+
+@router.post("/now")
+async def update_now():
+    """Source installs: update in the background; RAPR restarts by itself."""
+    from helm.updater import start_source_update
+    return start_source_update()
+
+
+@router.get("/log")
+async def update_log():
+    from helm.updater import read_update_log
+    return {"ok": True, **read_update_log()}
+
+
+@router.post("/settings")
+async def update_settings(req: SettingsRequest):
+    """UPDATE_CHECK=0 stops the automatic check; "Check now" still works."""
+    import os
+    from helm.web_routes.app import update_env
+    value = "1" if req.auto_check else "0"
+    update_env("UPDATE_CHECK", value)
+    os.environ["UPDATE_CHECK"] = value
+    return {"ok": True, "auto_check": req.auto_check}

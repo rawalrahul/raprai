@@ -87,10 +87,12 @@ On first launch, a short setup page asks for a PIN and, optionally, a Telegram b
 
 | | Windows / macOS | Linux server |
 |---|---|---|
-| **Update** | `rapr update` (or run the install command again) | `rapr update` |
+| **Update** | **Settings → Updates → Update now**, or `rapr update` (or run the install command again) | `rapr update` |
 | **Uninstall** | `rapr uninstall`: type `yes` to keep your chats and settings, `all` to delete them | `rapr remove` |
 | **Start / stop** | `rapr start` / `rapr stop` (or the RAPR AI app) | `rapr restart` |
 | **Status and logs** | `rapr status`, `rapr logs` | `rapr status`, `rapr logs`, `rapr url` |
+
+**How RAPR knows about updates:** every 4 hours it asks GitHub whether the branch it was installed from (`main` by default) has new commits. That's an ordinary web request carrying RAPR's version number; nothing else is sent. When there's something new, a dot appears on Settings, and **Settings → Updates** lists what changed. Offline, the check just skips. Turn it off in the same place (or set `UPDATE_CHECK=0` in `.env`); **Check now** still works.
 
 Your chats and settings live in `%LOCALAPPDATA%\RAPR AI` (Windows) or `~/Library/Application Support/RAPR AI` (Mac), so updating keeps them. Used the old Windows `.exe` installer? Run the Windows command: it uses the same folder, so everything carries over. Then remove the old app in Windows Settings → Apps.
 

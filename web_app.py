@@ -546,6 +546,11 @@ async def _main():
 
     async def _open_browser():
         await asyncio.sleep(1.2)
+        # Restarting after "Update now" in the web UI: that page reloads itself.
+        from helm.updater import take_quiet_start
+        if take_quiet_start():
+            logger.info("Started after an update from the web UI; not opening another browser window")
+            return
         # Try to open in Chrome/Edge "app mode" (standalone window, no tabs/address bar)
         # This gives the PWA-like experience without requiring a manual install
         opened = False
