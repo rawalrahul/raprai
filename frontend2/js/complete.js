@@ -1682,21 +1682,27 @@ function switchSbTab(tab, btn){
 function toggleSbSection(headerEl){
   const section = headerEl.closest('.sb-section');
   if(!section) return;
+  // Rail layout shows one section at a time (js/sidebar.js); Stacked layout toggles in place.
+  if(window.Sidebar && Sidebar.isRail()){ Sidebar.activate(section.dataset.section); return; }
   const isOpen = section.classList.contains('open');
   section.classList.toggle('open');
-
-  // Load data when opening
+  headerEl.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
   if(!isOpen){
-    const tab = section.dataset.section;
-    if(tab === 'history') loadSbHistory();
-    if(tab === 'scheduled') cmd('schedule_list');
-    // files section removed
-    if(tab === 'usage') loadUsageDashboard();
-    if(tab === 'pipelines') loadPipelines();
-    if(tab === 'memory') loadMemoryPanel();
-    if(tab === 'agents') loadAgentsPanel();
-    if(tab === 'demos') loadDemosPanel();
+    sbLoadSection(section.dataset.section);
+    if(window.RaprUI) RaprUI.setSidebar({active: section.dataset.section});
   }
+}
+
+// Load a sidebar section's data when it is shown
+function sbLoadSection(tab){
+  if(tab === 'history') loadSbHistory();
+  if(tab === 'scheduled') cmd('schedule_list');
+  if(tab === 'usage') loadUsageDashboard();
+  if(tab === 'pipelines') loadPipelines();
+  if(tab === 'memory') loadMemoryPanel();
+  if(tab === 'agents') loadAgentsPanel();
+  if(tab === 'demos') loadDemosPanel();
+  if(tab === 'packages' && typeof loadPackagesSection === 'function') loadPackagesSection();
 }
 
 // --- Left Sidebar: History ------------------------------------------------------------------------------

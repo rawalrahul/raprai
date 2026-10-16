@@ -30,15 +30,14 @@ function _rpHeaders(extra){
 
 function togglePackagesPanel(){
   const el = document.getElementById('sb-packages-section');
-  if(!el) return;
-  const wasOpen = el.classList.contains('open');
-  el.classList.toggle('open');
-  if(!wasOpen){
-    if(_rpTab === 'installed') loadInstalledPackages();
-    else loadPackageCatalog();
-    // Check for updates in background
-    if(!_rpUpdateCheckDone) rpCheckUpdates();
-  }
+  if(el) toggleSbSection(el.querySelector('.sb-section-header'));
+}
+
+function loadPackagesSection(){
+  if(_rpTab === 'installed') loadInstalledPackages();
+  else loadPackageCatalog();
+  // Check for updates in background
+  if(!_rpUpdateCheckDone) rpCheckUpdates();
 }
 
 // ─── Refresh ────────────────────────────────────────────────────────────────
