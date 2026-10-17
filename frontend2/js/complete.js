@@ -1748,16 +1748,24 @@ function returnToLive(){
   scroll();
 }
 
+// Resume starts its own session (the AI and folder that conversation used), so it never
+// waits behind, or mixes into, whatever the current session is doing.
 async function resumeSession(date){
   closeHistory();
-  const res = await fetch('/history/' + date + '/resume');
-  const data = await res.json();
+  const [data, hist] = await Promise.all([
+    fetch('/history/' + date + '/resume').then(r => r.json()),
+    fetch('/history/' + date).then(r => r.json()).catch(() => ({})),
+  ]);
   _pendingContext = data.context || '';
   _viewingHistory = false;
   _viewedHistoryId = null;
   const focusedSess = (_sessions || []).find(s => s.id === _focusedId);
-  if(focusedSess && focusedSess.cwd) applyCwd(focusedSess.cwd);
-  _activeHistoryId = focusedSess && focusedSess.history_id ? focusedSess.history_id : null;
+  const known = k => k && (k === 'claude' || k.startsWith('acp:') || k in (_integrationKeys || {}));
+  const ai = known(hist.ai) ? hist.ai : (focusedSess && focusedSess.ai) || 'claude';
+  const cwd = hist.cwd || (focusedSess && focusedSess.cwd) || '';
+  if(cwd) applyCwd(cwd);
+  cmd('new_session:' + ai + (cwd ? '|' + cwd : ''));
+  _activeHistoryId = null;
   const name = _sessNames[date] || _fmtDate(date);
   const banner = document.getElementById('hist-banner');
   banner.className = 'on resume';

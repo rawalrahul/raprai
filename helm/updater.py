@@ -51,8 +51,8 @@ _VERSION_API_URL = os.environ.get(
 # Fallback: direct GitHub API
 _GITHUB_RELEASES_URL = "https://api.github.com/repos/rawalrahul/rapr-releases/releases?per_page=1"
 
-# How often to auto-check (4 hours)
-_AUTO_CHECK_INTERVAL = 4 * 60 * 60
+# How often to auto-check (hourly; GitHub allows 60 unauthenticated requests an hour)
+_AUTO_CHECK_INTERVAL = 60 * 60
 
 # Source installs: the repository and the installers that update them
 _REPO = "rawalrahul/raprai"
