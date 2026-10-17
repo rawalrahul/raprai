@@ -133,7 +133,7 @@
       </div>
       <label class="upd-auto"><input type="checkbox" class="upd-auto-box" ${status.auto_check ? 'checked' : ''}>
         Check for updates automatically
-        <small>Every 4 hours RAPR asks ${where} whether there's a newer version (an ordinary web request that includes RAPR's version number). Nothing else is sent. Offline, it just skips.</small></label>`;
+        <small>Every hour RAPR asks ${where} whether there's a newer version (an ordinary web request that includes RAPR's version number). Nothing else is sent. Offline, it just skips.</small></label>`;
     el.querySelector('.upd-check').onclick = () => loadStatus(true);
     const go = el.querySelector('.upd-go'); if(go) go.onclick = updateNow;
     el.querySelector('.upd-auto-box').onchange = e => {
@@ -223,13 +223,15 @@
   window.openUpdates = openUpdates;
   window.raprUpdateNow = updateNow;
 
-  // Refresh the Updates section whenever Settings opens.
+  // Refresh the Updates section whenever Settings opens, asking GitHub again when
+  // the last check is more than 10 minutes old.
+  function stale(){ return !status || !status.last_check_at || Date.now() / 1000 - status.last_check_at > 10 * 60; }
   const origOpen = window.openSettings;
   if(typeof origOpen === 'function'){
-    window.openSettings = function(){ const r = origOpen.apply(this, arguments); loadStatus(false); return r; };
+    window.openSettings = function(){ const r = origOpen.apply(this, arguments); loadStatus(stale()); return r; };
   }
 
   afterReload();
   setTimeout(() => loadStatus(false), 4000);
-  setInterval(() => loadStatus(false), 30 * 60 * 1000);   // pick up the server's 4-hourly check
+  setInterval(() => loadStatus(false), 15 * 60 * 1000);   // pick up the server's hourly check
 })();
