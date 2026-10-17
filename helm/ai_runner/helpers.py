@@ -274,6 +274,28 @@ async def change_cwd(new_path: str, source: str = "web",
         return False
     new_cwd = str(path)
     _st.last_cwd = new_cwd  # remember the last selected CWD even with no active session
+
+    # A session that's still working keeps its folder: moving it would leave the
+    # running task in the old folder and park the next message behind its lock.
+    # Start a new session of the same AI in the chosen folder instead, so the two
+    # run in parallel.
+    lock = sess.get("_lock") if sess else None
+    if sess and sess.get("ai") and (sess.get("busy") or (lock and lock.locked())):
+        from helm.session_mgr import make_session
+        new_sess = make_session(sess["ai"], cwd=new_cwd, model=sess.get("model"))
+        _st.focused_id = new_sess["id"]
+        save_last_state()
+        logger.info("%s is busy; started %s in %s", sess["name"], new_sess["name"], new_cwd)
+        await push_state()
+        await push_message(
+            "system",
+            f"📂 {sess['name']} is still working, so it stays in its folder. "
+            f"Started {new_sess['emoji']} {new_sess['name']} in {new_cwd}.",
+            source=source, session_id=new_sess["id"],
+        )
+        await tg_update_focus()
+        return True
+
     if sess:
         sess["cwd"] = new_cwd
     save_cwd_to_log(new_cwd, session_id=sid)
