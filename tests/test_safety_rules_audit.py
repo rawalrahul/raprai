@@ -112,7 +112,7 @@ def _three(data):
 
 
 def test_audit_chain_verifies(data):
-    assert audit.verify() == {"ok": True, "entries": 0, "legacy": 0, "head": "", "problem": None}
+    assert audit.verify() == {"ok": True, "entries": 0, "legacy": 0, "head": "", "problem": None, "anchor": None}
     _three(data)
     v = audit.verify()
     assert v["ok"] and v["entries"] == 3 and v["head"] == json.loads(_lines(data)[-1])["h"]
@@ -170,3 +170,73 @@ def test_audit_search_ignores_hashes(data):
     audit.record("approval_requested", id="a1", description="deploy")
     h = json.loads(_lines(data)[0])["h"]
     assert audit.read(query=h[:8]) == []
+
+
+def _anchor(sent=None):
+    sent = [] if sent is None else sent
+    async def send(text):
+        sent.append(text)
+    return asyncio.run(audit.anchor_now(send)), sent
+
+
+def test_anchor_sends_only_when_the_log_grew(data):
+    assert _anchor() == (None, [])            # empty log: nothing to send
+    _three(data)
+    text, sent = _anchor()
+    head = audit.verify()["head"]
+    assert len(sent) == 1 and "3 signed entries" in text and head in text
+    assert audit.last_anchor()["entries"] == 3 and audit.last_anchor()["head"] == head
+    assert _anchor() == (None, [])            # unchanged: stay quiet
+    audit.record("approval_resolved", id="a1", action="approved")
+    assert "4 signed entries" in _anchor()[0]
+    assert audit.verify()["anchor"]["entries"] == 4
+
+
+def test_anchor_catches_lines_cut_from_the_end(data):
+    _three(data)
+    _anchor()
+    _write(data, _lines(data)[:2])
+    v = audit.verify()
+    assert not v["ok"] and "1 entries removed from the end" in v["problem"]["reason"]
+
+
+def test_anchor_catches_a_resigned_log(data):
+    _three(data)
+    _anchor()
+    lines = [json.loads(x) for x in _lines(data)]
+    key = audit._key()
+    prev = ""
+    for e in lines:   # an attacker with the key edits and re-signs everything
+        e["description"] = e["description"].upper()
+        e["prev"] = prev
+        e["h"] = audit._sign(key, e)
+        prev = e["h"]
+    _write(data, [json.dumps(e) for e in lines])
+    v = audit.verify()
+    assert not v["ok"] and v["problem"]["line"] == 3 and "rewritten" in v["problem"]["reason"]
+
+
+def test_broken_log_warns_once_a_day_and_keeps_the_good_anchor(data):
+    _three(data)
+    _anchor()
+    good = audit.last_anchor()
+    lines = _lines(data)
+    _write(data, [lines[0].replace("step 0", "step zero")] + lines[1:])
+    text, _ = _anchor()
+    assert text.startswith("⚠️") and "entry was edited" in text
+    after = audit.last_anchor()
+    assert (after["entries"], after["head"]) == (good["entries"], good["head"]) and after["ts"] >= good["ts"]
+
+
+def test_anchor_loop_skips_without_telegram(data, monkeypatch):
+    _three(data)
+    monkeypatch.setattr(_st, "telegram_app", None, raising=False)
+    sleeps = []
+    async def fake_sleep(s):
+        sleeps.append(s)
+        if len(sleeps) > 1:
+            raise asyncio.CancelledError
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(audit.anchor_loop())
+    assert sleeps == [120, 3600] and audit.last_anchor() is None

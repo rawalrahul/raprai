@@ -588,6 +588,8 @@ async def _main():
     from helm.kelvin_report import daily_checkin_loop
     asyncio.create_task(daily_checkin_loop())
     asyncio.create_task(heartbeat_runner())
+    from helm.audit import anchor_loop
+    asyncio.create_task(anchor_loop())
     asyncio.create_task(_open_browser())
 
     # WhatsApp: reconnect if it was linked before (QR scanned in Settings).

@@ -138,7 +138,8 @@ async function verifyAudit() {
   msg.textContent = 'Checking…';
   try {
     const d = await (await fetch('/api/audit/verify')).json();
-    const older = d.legacy ? ' (' + d.legacy + ' older entries from before signing)' : '';
+    let older = d.legacy ? ' (' + d.legacy + ' older entries from before signing)' : '';
+    if (d.anchor) older += '. Matches the daily check sent to Telegram on ' + d.anchor.day;
     if (d.ok) {
       msg.textContent = d.entries
         ? 'Intact: ' + d.entries + ' signed entries' + older + '. Latest: ' + d.head.slice(0, 12)
