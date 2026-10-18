@@ -138,9 +138,11 @@ def _gemini_cli_aliases() -> list[str]:
 
 
 def _fetch_claude_models() -> list[str]:
-    """Claude CLI aliases (opus, sonnet...) first, then any full model names found."""
-    aliases = _claude_cli_aliases()
-    return aliases + [m for m in _fetch_claude_model_ids() if m not in aliases]
+    """Claude's models, read live: Claude Code's own /model list (opus, sonnet…, see
+    helm/claude_models.py), then older versions from Anthropic's model list when it can
+    be read. Same list as the app's model picker."""
+    from helm import model_catalog
+    return model_catalog.model_ids("claude")
 
 
 def _fetch_claude_model_ids() -> list[str]:

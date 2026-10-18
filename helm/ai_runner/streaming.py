@@ -198,6 +198,10 @@ def run_claude_stream(cmd: list, cwd: str, sess: dict,
             if etype == "result":
                 result_line = line  # same shape as --output-format json
             elif etype == "assistant":
+                # The model Claude says answered (shown in the model picker as "last reply").
+                _m = (ev.get("message") or {}).get("model")
+                if _m and _m != "<synthetic>":
+                    sess["model_used"] = _m
                 for block in (ev.get("message", {}).get("content") or []):
                     if not isinstance(block, dict):
                         continue

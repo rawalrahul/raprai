@@ -158,6 +158,18 @@ Click the chip (shows the focused session's emoji and name) to open the sessions
 - **New Session** — create a new session with Claude Code, any loaded integration, or a raw shell.
 - **Focused Session controls** — interrupt, stop, or clear history for the current session.
 
+### Choosing the model
+
+In a Claude chat, the chip next to the AI chip shows the chat's model (**Default** until you pick one). Click it to see Claude's models (Default, Fable, Opus, Sonnet, Haiku, or **Other model…** to type any name Claude accepts); the one in use has a ✓.
+
+- Picking a model switches **this chat** right away, also in the middle of a conversation: your next message uses it, and Claude still has the whole conversation. Other open chats keep their own model.
+- New Claude chats start with the model you picked last.
+- **Default** lets Claude choose, as it would on its own.
+- The menu shows which model wrote the last reply ("Last reply: claude-sonnet-…"), from what Claude itself reports.
+- If Claude can't use a model (a typo, a retired model, or one your plan doesn't include), RAPR says so, puts the chat back on Default, and sends your message again.
+
+`/model` in the chat (or Telegram's Model button) does the same for the chat you're in. Model choice for Codex, Ollama, Antigravity and Groq is coming next.
+
 ### Changing the working directory
 
 Click the path in the directory bar, type a new path, and press **Enter**. This changes the CWD for the focused session only. Other sessions keep their own directories.

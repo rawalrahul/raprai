@@ -1450,12 +1450,34 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
                 _has_mcp, _computer_on,
             )
 
+        # Which --model to send. A chat on Default normally sends none, so Claude uses
+        # the user's own setting. But --continue keeps the model the conversation last
+        # ran on, so right after a chat switches back to Default from a picked model,
+        # Default is spelled out once: the user's configured model, else Claude's own.
+        from helm.claude_models import configured_model
+
+        def _model_for_turn():
+            m = sess.get("model")
+            if not m and has_history and sess.get("_ran_with_model"):
+                m = configured_model(cwd) or "default"
+            return m
+
+        # Effort: only a level picked for this chat that its model takes (Claude Code
+        # ignores a level it doesn't know). None: Claude's own default.
+        from helm import model_catalog as _mc
+        _levels = await asyncio.to_thread(_mc.efforts_for, "claude", sess.get("model"))
+
+        def _effort_for_turn():
+            e = sess.get("effort")
+            return e if e and e in _levels else None
+
         # Build command — with native MCP if subprocess servers exist
         cmd = build_claude_cmd(
             enriched_text, has_history,
-            model=sess.get("model"),
+            model=_model_for_turn(),
             auto_approve=True,
             mcp_config=_mcp_config_path,
+            effort=_effort_for_turn(),
         )
 
         # ── Live-progress helper (default OFF; RAPR_LIVE_PROGRESS=1) ──────────
@@ -1475,6 +1497,57 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
                 pass
 
         async def _claude_raw(_cmd):
+            """One Claude run. If Claude refuses the chosen model, this chat goes back to
+            Claude's default (and so does the new-chat default, if it was that model),
+            the user is told, and the message is sent once more without --model."""
+            from helm.ai_runner.claude import model_answered, model_rejected
+            sess.pop("model_used", None)
+            raw = await _claude_raw_once(_cmd)
+            parsed = parse_claude_json_output(raw)
+            if "--model" in _cmd and model_rejected(parsed):
+                i = _cmd.index("--model")
+                bad = _cmd[i + 1]
+                if bad == "default":   # an older Claude Code without that name: just leave it out
+                    sess.pop("model_used", None)
+                    raw = await _claude_raw_once(_cmd[:i] + _cmd[i + 2:])
+                    parsed = parse_claude_json_output(raw)
+                    if not sess.get("model_used"):
+                        sess["model_used"] = model_answered(parsed, None)
+                    return raw
+                sess["model"] = None
+                try:
+                    from helm.model_prefs import get_model_pref, set_model_pref
+                    if get_model_pref("claude") == bad:
+                        set_model_pref("claude", None)
+                except Exception:
+                    pass
+                logger.info("claude rejected model %s; retrying with its default", bad)
+                await push_message(
+                    "system",
+                    f"Claude can't use the model `{bad}` (it doesn't exist or your account "
+                    f"can't use it), so this chat is back on Claude's default model.",
+                    source=source, session_id=sid)
+                await push_state()
+                sess.pop("model_used", None)
+                retry = (["--model", configured_model(cwd) or "default"] if "--continue" in _cmd else [])
+                raw = await _claude_raw_once(_cmd[:i] + retry + _cmd[i + 2:])
+                parsed = parse_claude_json_output(raw)
+            if not sess.get("model_used"):
+                sess["model_used"] = model_answered(parsed, sess.get("model"))
+            if not parsed.get("is_error"):
+                sess["_ran_with_model"] = sess.get("model")
+                from helm.claude_models import replaced
+                chosen, used = sess.get("model"), sess.get("model_used")
+                if replaced(chosen, used) and sess.get("_replaced_note") != (chosen, used):
+                    sess["_replaced_note"] = (chosen, used)
+                    await push_message(
+                        "system",
+                        f"You picked `{chosen}`, but Claude answered with `{used}`. "
+                        f"That version may be retired; Claude Code uses a current one instead.",
+                        source=source, session_id=sid)
+            return raw
+
+        async def _claude_raw_once(_cmd):
             _dbg = "disabled"
             try:
                 from helm.ai_runner.streaming import (
@@ -1517,9 +1590,10 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
             async def _claude_run_fn(prompt: str) -> str:
                 _cmd = build_claude_cmd(
                     prompt, has_history,
-                    model=sess.get("model"),
+                    model=_model_for_turn(),
                     auto_approve=True,
                     mcp_config=_mcp_config_path,
+                    effort=_effort_for_turn(),
                 )
                 raw = await _claude_raw(_cmd)
                 parsed = parse_claude_json_output(raw)
@@ -1568,6 +1642,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
                 pass
 
         await push_thinking(False, session_id=sid)
+        await push_state()   # the model picker shows which model answered
 
         # If successful, broadcast and handle file diff
         if not _is_failure(output):
