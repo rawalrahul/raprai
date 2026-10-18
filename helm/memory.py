@@ -17,7 +17,8 @@ Public API:
     search_memories(query, limit) → list[dict]
     get_memory_block(prompt, max_tokens) → str
     touch_memory(memory_id) → None
-    extract_memories_from_session(sess) → list[dict]   (session-end)
+    new_user_texts(sess) → (list[str], cursor)
+    extract_memories_from_session(sess) → list[dict]   (pattern fallback)
     save_extracted_memories(sess) → int
     enforce_memory_cap() → int   (auto-archive oldest if over cap)
     apply_memory_decay() → dict  (reduce decay_score, auto-archive stale)
@@ -573,7 +574,11 @@ def enforce_memory_cap() -> int:
 
 
 # ---------------------------------------------------------------------------
-# Session-end memory extraction (lightweight, no LLM needed)
+# Session-end memory extraction
+#
+# The main path is helm/memory_extract.py (an AI decides what to add, update or
+# archive). The patterns below are its fallback when no AI is available, and
+# what runs at shutdown, where there's no time to wait for one.
 # ---------------------------------------------------------------------------
 
 # Patterns that indicate a memorable fact.
@@ -649,11 +654,33 @@ def _guess_category(text: str) -> str:
     return DEFAULT_CATEGORY
 
 
-def extract_memories_from_session(sess: dict) -> list[dict]:
-    """Extract memorable facts from a session's conversation history.
+def _user_texts(sess: dict) -> list[str]:
+    """Everything the user typed in this session (never AI replies)."""
+    ai = sess.get("ai") or "shell"
+    if ai == "ollama" and sess.get("ollama_messages"):
+        return [
+            m["content"] for m in sess["ollama_messages"]
+            if m.get("role") == "user" and isinstance(m.get("content"), str)
+        ]
+    if ai == "claude":
+        return [t for t in sess.get("claude_msgs", []) if isinstance(t, str)]
+    if sess.get("_integration_history"):
+        return [h["q"] for h in sess["_integration_history"] if isinstance(h.get("q"), str)]
+    return []
 
-    Called at session end (or periodically). Scans user messages for
-    patterns that indicate facts worth remembering.
+
+def new_user_texts(sess: dict) -> tuple[list[str], int]:
+    """User messages not yet looked at for memories, and the cursor to store
+    in sess["_memory_cursor"] once they've been handled."""
+    texts = _user_texts(sess)
+    cursor = int(sess.get("_memory_cursor") or 0)
+    if cursor > len(texts):   # history was trimmed; start over (dedup copes)
+        cursor = 0
+    return texts[cursor:], len(texts)
+
+
+def extract_memories_from_session(sess: dict) -> list[dict]:
+    """Extract memorable facts from the session's new user messages by pattern.
 
     Returns list of {content, category, source_ai, session_id} dicts
     (not yet saved — call save_extracted_memories() to persist).
@@ -663,18 +690,7 @@ def extract_memories_from_session(sess: dict) -> list[dict]:
     extracted: list[dict] = []
     seen_contents: set[str] = set()
 
-    # Get user messages based on AI type
-    user_texts: list[str] = []
-    if ai == "ollama" and sess.get("ollama_messages"):
-        user_texts = [
-            m["content"] for m in sess["ollama_messages"]
-            if m.get("role") == "user" and isinstance(m.get("content"), str)
-        ]
-    elif ai == "claude":
-        user_texts = list(sess.get("claude_msgs", []))
-    elif sess.get("_integration_history"):
-        user_texts = [h["q"] for h in sess["_integration_history"]]
-
+    user_texts, _ = new_user_texts(sess)
     for text in user_texts:
         for pattern in _REMEMBER_PATTERNS:
             match = pattern.search(text)
@@ -726,6 +742,7 @@ def _is_task_instruction(text: str) -> bool:
 def save_extracted_memories(sess: dict) -> int:
     """Extract and save memories from a session. Returns count saved."""
     candidates = extract_memories_from_session(sess)
+    sess["_memory_cursor"] = new_user_texts(sess)[1]
     saved = 0
     for mem in candidates:
         try:

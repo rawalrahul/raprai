@@ -36,6 +36,11 @@ async def get_audit(since_days: float = Query(0, ge=0), event: str = "", q: str 
     return JSONResponse({"entries": audit.read(since=since, event=event or None, query=q, limit=limit)})
 
 
+@router.get("/api/audit/verify")
+async def verify_audit():
+    return JSONResponse(audit.verify())
+
+
 @router.get("/api/audit.csv")
 async def get_audit_csv(since_days: float = Query(0, ge=0)):
     since = time.time() - since_days * 86400 if since_days else 0.0

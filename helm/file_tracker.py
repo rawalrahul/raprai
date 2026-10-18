@@ -191,15 +191,6 @@ async def emit_session_end_summary(sess: dict, ended_as: str, source: str) -> No
     _add_block("Modified", mod_files, "\u270F\uFE0F")
     _add_block("Deleted", del_files, "\U0001F5D1\uFE0F")
 
-    # Extract and save memories from this session's conversation
-    try:
-        from helm.memory import save_extracted_memories
-        mem_count = save_extracted_memories(sess)
-        if mem_count:
-            lines.append(f"🧠 Extracted {mem_count} memory/memories for future sessions")
-    except Exception as e:
-        logger.warning("Session memory extraction failed: %s", e)
-
     summary = "\n".join(lines)
     await push_message("system", summary, source=source, session_id=sess.get("id"))
 
@@ -216,6 +207,25 @@ async def emit_session_end_summary(sess: dict, ended_as: str, source: str) -> No
             )
         except Exception as e:
             logger.warning("Session summary Telegram notify failed: %s", e)
+
+    # Decide what to remember in the background: it may wait on an AI.
+    task = asyncio.create_task(_remember(sess, source))
+    _memory_tasks.add(task)
+    task.add_done_callback(_memory_tasks.discard)
+
+
+_memory_tasks: set = set()   # keeps background extractions from being garbage-collected
+
+
+async def _remember(sess: dict, source: str) -> None:
+    try:
+        from helm.memory_extract import extract_and_save
+        n = await extract_and_save(sess)
+        if n:
+            await push_message("system", f"🧠 Memory: {n} change(s) saved for future sessions",
+                               source=source, session_id=sess.get("id"))
+    except Exception as e:
+        logger.warning("Session memory extraction failed: %s", e)
 
 
 _emit_session_end_summary = emit_session_end_summary  # legacy alias

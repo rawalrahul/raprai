@@ -70,6 +70,10 @@ def repair_agent_node(description: str, node: dict, index: int = 0) -> None:
         node.setdefault("loop_max", 10)
     elif node_type == "loop" and not loop_intent(text):
         node_type = "ai"
+    elif node_type == "input":
+        # Labelled input but asks the user for nothing: a processing step that
+        # would otherwise stop the run and wait. Reviews are the manager's job.
+        node_type = "ai"
     elif any(word in text for word in ("condition", "decide whether", "branch")):
         node_type = "condition"
 
