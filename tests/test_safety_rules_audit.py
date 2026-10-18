@@ -96,3 +96,77 @@ def test_audit_filter_and_csv(data):
 def test_audit_survives_a_corrupt_line(data):
     (data / "audit.jsonl").write_text('{"ts": 1, "event": "x"}\nnot json\n{"ts": 2, "event": "y"}\n')
     assert [e["event"] for e in audit.read()] == ["y", "x"]
+
+
+def _lines(data):
+    return (data / "audit.jsonl").read_text().splitlines()
+
+
+def _write(data, lines):
+    (data / "audit.jsonl").write_text("\n".join(lines) + "\n")
+
+
+def _three(data):
+    for i in range(3):
+        audit.record("approval_requested", id=f"a{i}", description=f"step {i}")
+
+
+def test_audit_chain_verifies(data):
+    assert audit.verify() == {"ok": True, "entries": 0, "legacy": 0, "head": "", "problem": None}
+    _three(data)
+    v = audit.verify()
+    assert v["ok"] and v["entries"] == 3 and v["head"] == json.loads(_lines(data)[-1])["h"]
+    assert json.loads(_lines(data)[1])["prev"] == json.loads(_lines(data)[0])["h"]
+    assert (data / ".audit_key").exists()
+
+
+def test_audit_edit_is_detected(data):
+    _three(data)
+    lines = _lines(data)
+    lines[1] = lines[1].replace("step 1", "step one")
+    _write(data, lines)
+    v = audit.verify()
+    assert not v["ok"] and v["problem"] == {"line": 2, "reason": "entry was edited"}
+
+
+def test_audit_removed_or_reordered_line_is_detected(data):
+    _three(data)
+    lines = _lines(data)
+    _write(data, [lines[0], lines[2]])
+    assert audit.verify()["problem"]["line"] == 2
+    _write(data, [lines[1], lines[0], lines[2]])
+    assert audit.verify()["problem"]["line"] == 1
+
+
+def test_audit_inserted_unsigned_line_is_detected(data):
+    _three(data)
+    lines = _lines(data)
+    _write(data, lines[:2] + ['{"ts": 5, "event": "approval_resolved"}'] + lines[2:])
+    assert audit.verify()["problem"] == {"line": 3, "reason": "unsigned entry after signing began"}
+
+
+def test_audit_resigning_without_the_key_fails(data):
+    _three(data)
+    (data / ".audit_key").write_text("00" * 32)
+    assert audit.verify()["problem"]["line"] == 1
+
+
+def test_audit_legacy_lines_then_chain(data):
+    (data / "audit.jsonl").write_text('{"ts": 1, "event": "x"}\n{"ts": 2, "event": "y"}\n')
+    audit.record("approval_resolved", id="a1", action="approved")
+    v = audit.verify()
+    assert v["ok"] and v["legacy"] == 2 and v["entries"] == 1
+    assert [e["event"] for e in audit.read()] == ["approval_resolved", "y", "x"]
+
+
+def test_audit_chain_continues_after_outside_append(data):
+    audit.record("approval_requested", id="a1")
+    audit._head.clear()   # as after a restart
+    audit.record("approval_resolved", id="a1", action="approved")
+    assert audit.verify()["entries"] == 2
+
+
+def test_audit_search_ignores_hashes(data):
+    audit.record("approval_requested", id="a1", description="deploy")
+    h = json.loads(_lines(data)[0])["h"]
+    assert audit.read(query=h[:8]) == []

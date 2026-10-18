@@ -132,7 +132,27 @@ async function loadAudit() {
   } catch (_) {}
 }
 
-// ── What RAPR has learned (playbooks) ───────────────────────────────────────
+async function verifyAudit() {
+  const msg = document.getElementById('audit-verify-msg');
+  if (!msg) return;
+  msg.textContent = 'Checking…';
+  try {
+    const d = await (await fetch('/api/audit/verify')).json();
+    const older = d.legacy ? ' (' + d.legacy + ' older entries from before signing)' : '';
+    if (d.ok) {
+      msg.textContent = d.entries
+        ? 'Intact: ' + d.entries + ' signed entries' + older + '. Latest: ' + d.head.slice(0, 12)
+        : 'Nothing signed yet' + older + '.';
+    } else {
+      msg.textContent = '⚠️ Changed outside RAPR at line ' + d.problem.line + ': ' + d.problem.reason + '.';
+    }
+  } catch (err) {
+    msg.textContent = 'Could not check: ' + err.message;
+  }
+}
+document.getElementById('audit-verify-btn')?.addEventListener('click', verifyAudit);
+
+// ── What RAPR has learned (playbooks)───────────────────────────────────────
 
 async function loadPlaybooks() {
   const list = document.getElementById('playbook-list');
