@@ -189,3 +189,11 @@ def test_stdio_end_to_end(repo, fake_claude, tmp_path):
     finally:
         proc.stdin.close()
         proc.wait(timeout=10)
+
+
+def test_a_byte_order_mark_before_a_message_is_ignored():
+    """Windows PowerShell puts a BOM in front of text it pipes to a program."""
+    import io
+    out = io.StringIO()
+    mcp.Server(out=out).serve(io.StringIO('\ufeff{"jsonrpc":"2.0","id":7,"method":"ping"}\n'))
+    assert json.loads(out.getvalue()) == {"jsonrpc": "2.0", "id": 7, "result": {}}

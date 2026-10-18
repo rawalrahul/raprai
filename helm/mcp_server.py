@@ -534,7 +534,7 @@ class Server:
 
     def serve(self, inp) -> None:
         for line in inp:
-            line = line.strip()
+            line = line.strip().lstrip("\ufeff")   # Windows PowerShell can put a byte-order mark in front
             if not line:
                 continue
             try:
