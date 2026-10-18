@@ -210,6 +210,7 @@ case "${1:-}" in
       echo "RAPR is not running. Start it with: rapr start (or open the RAPR AI app)"; exit 1
     fi ;;
   logs)    tail -n 120 "$RAPR_LOG" ;;
+  mcp)     exec "$RAPR_VENV/bin/python" "$RAPR_APP_DIR/rapr_mcp.py" ;;   # MCP server for Claude Code, Cursor, Codex…
   update)  curl -fsSL https://raw.githubusercontent.com/rawalrahul/raprai/main/scripts/install-mac.sh | bash ;;
   uninstall)
     read -r -p "Remove RAPR from this Mac? Your chats and settings stay unless you also type 'all': [yes/all/N] " a </dev/tty
@@ -220,7 +221,7 @@ case "${1:-}" in
     [ "$a" = all ] && rm -rf "$RAPR_DATA_DIR" "$(dirname "$RAPR_LOG")"
     rm -rf "$RAPR_INSTALLER_DIR"
     if [ "$a" = all ]; then echo "RAPR and its data removed."; else echo "RAPR removed. Your data is still in $RAPR_DATA_DIR"; fi ;;
-  *) echo "Usage: rapr start | stop | open | status | logs | update | uninstall" ;;
+  *) echo "Usage: rapr start | stop | open | status | logs | update | uninstall | mcp" ;;
 esac
 EOF
   chmod 755 "$BIN"/rapr "$BIN"/rapr-*
