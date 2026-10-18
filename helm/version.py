@@ -11,4 +11,4 @@ at build/runtime rather than hardcoding their own strings.
 (tests/test_plugin_manifest.py checks they match).
 """
 
-APP_VERSION = "2.0.3"
+APP_VERSION = "2.0.4"
