@@ -313,7 +313,35 @@ Once you've merged a winner (or discarded them all), **🏆 Share result** opens
 
 Finished bake-offs are kept (the numbers only, not the code), so they count toward your monthly recap.
 
-## Monthly recap
+## Use RAPR from Claude Code, Cursor or Codex (MCP)
+
+RAPR is also an MCP server, so the AI you're coding with can call the others. In Claude Code:
+
+```
+claude mcp add rapr -- rapr mcp
+```
+
+On Windows, use `claude mcp add rapr -- cmd /c rapr mcp`. From a source checkout, use `-- python /path/to/raprai/rapr_mcp.py`.
+
+For **Cursor**, **Windsurf**, **Codex** and other clients, add a server with the command `rapr mcp` (on Windows: command `cmd`, arguments `/c rapr mcp`). For example, in Cursor's `~/.cursor/mcp.json`:
+
+```json
+{ "mcpServers": { "rapr": { "command": "rapr", "args": ["mcp"] } } }
+```
+
+Then ask in plain words: *"get a second opinion from Codex on my changes"*, *"ask Antigravity how it would structure this"*, *"run a bake-off between Claude and Codex on this task, with pytest -q"*.
+
+| Tool | What it does |
+|---|---|
+| `second_opinion` | Another AI reviews your uncommitted changes (or the last commit, or changes since a branch you name) and reports bugs and risks, most serious first. |
+| `ask_agent` | Sends any question or task to another AI and returns its reply. |
+| `start_bakeoff`, `bakeoff_status`, `merge_bakeoff`, `discard_bakeoff` | The same bake-off as in the app: 2 to 4 AIs, each in its own copy of the project. Merge the one you like (staged, not committed). |
+| `list_agents` | The AIs that are installed and set up on this computer. |
+
+- **It runs on your computer.** Your MCP client starts `rapr mcp` itself and talks to it over stdin/stdout. Nothing is hosted, and the RAPR app doesn't need to be open. The AIs run through their own command-line tools with your sign-ins, as in a bake-off.
+- **Your files are safe by default.** `second_opinion` and `ask_agent` run the other AI in a temporary copy of the project, including your uncommitted changes. If it edits anything, you get the diff back; your files don't change. Pass `allow_edits` to `ask_agent` to let it work in the real folder.
+- Each call takes as long as the other AI does, usually a minute or a few. Bake-offs run in the background: `start_bakeoff` returns an id, and `bakeoff_status` waits for the results. Bake-offs from MCP are kept like the app's, so they count in your monthly recap.
+
 
 **🐧 Your month with RAPR** (top of the **Usage** panel, or in the AI menu) turns a month of work into a card: tasks sent, AI replies, active days and longest streak, your AI crew and its MVP, bake-offs judged, tasks sent from your phone, and a title for the month ("The Conductor", "Night Owl", "Local Hero"…). Use **‹ Previous** to look back. At the start of each month RAPR offers last month's recap once.
 

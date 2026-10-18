@@ -243,10 +243,18 @@ switch (`$cmd) {
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `$Home_
     if (`$a -eq 'all') { 'RAPR and its data removed.' } else { "RAPR removed. Your data is still in `$DataDir" }
   }
-  default { 'Usage: rapr start | stop | open | status | logs | update | uninstall' }
+  default { 'Usage: rapr start | stop | open | status | logs | update | uninstall | mcp' }
 }
 "@ | Set-Content -Path $cli -Encoding UTF8 -ErrorAction Stop
-  "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$cli`" %*`r`n" |
+  # "rapr mcp" starts RAPR's MCP server for Claude Code, Cursor, Codex... It runs Python
+  # straight from cmd.exe so stdin/stdout reach the MCP client untouched.
+  ("@echo off`r`n" +
+   "if /i `"%~1`"==`"mcp`" (`r`n" +
+   "  set `"RAPR_DATA_DIR=$DataDir`"`r`n" +
+   "  `"$vpy`" `"$(Join-Path $AppDir 'rapr_mcp.py')`"`r`n" +
+   "  exit /b`r`n" +
+   ")`r`n" +
+   "powershell -NoProfile -ExecutionPolicy Bypass -File `"$cli`" %*`r`n") |
     Set-Content -Path (Join-Path $BinDir 'rapr.cmd') -Encoding ASCII
 
   $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')

@@ -16,6 +16,8 @@ on:
       - helm/keep_awake.py
       - helm/tray.py
       - helm/paths.py
+      - helm/mcp_server.py
+      - rapr_mcp.py
   pull_request:
     paths:
       - scripts/install-mac.sh
@@ -25,6 +27,8 @@ on:
       - helm/keep_awake.py
       - helm/tray.py
       - helm/paths.py
+      - helm/mcp_server.py
+      - rapr_mcp.py
 
 concurrency:
   group: mac-check-${{ github.ref }}
@@ -76,6 +80,12 @@ jobs:
           rapr status
           rapr stop
           ! rapr status
+
+      - name: rapr mcp answers an MCP client over stdio
+        run: |
+          out=$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' | rapr mcp)
+          echo "$out"
+          echo "$out" | grep -q '"name": "rapr-ai"'
 
       - name: Tests
         run: |

@@ -38,6 +38,7 @@ You probably already pay for one or two AI coding agents, and each lives in its 
 |---|---|
 | 💬 **Group chats** | Several AIs in one conversation. `@mention` who should answer, or `@all`. Ready-made **crews** give each AI a job: code review, research, launch, debate. |
 | 🧪 **Bake-off** | Give the same task to several AIs. Each works in its own copy of your project; compare the diffs, test results and time, then merge the winner. Share the result as a card, or publish it to the public [RAPR Arena](https://www.raprai.com/arena) leaderboard. |
+| 🔌 **Second opinions from your editor** | RAPR is an MCP server: from Claude Code, Cursor or Codex, ask another AI to review your changes, answer a question or join a bake-off. `claude mcp add rapr -- rapr mcp`. Runs on your computer; your files stay untouched unless you allow edits. |
 | 🐧 **Monthly recap** | Your month as a shareable card: your AI crew and its MVP, streaks, bake-offs, and what running AIs locally saved you. Worked out on your computer. |
 | 🧭 **Smart routing** | Choose "Auto" and RAPR picks the AI for each task: free local models for easy work, the strongest coding agent for hard work, skipping any AI that's over budget. |
 | 📱 **Phone control** | Telegram bot and WhatsApp (scan a QR code, no Business API). Start sessions, send tasks, approve actions, get files back. |

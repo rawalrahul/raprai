@@ -11,10 +11,14 @@ on:
     paths:
       - scripts/install-windows.ps1
       - .github/workflows/windows-check.yml
+      - helm/mcp_server.py
+      - rapr_mcp.py
   pull_request:
     paths:
       - scripts/install-windows.ps1
       - .github/workflows/windows-check.yml
+      - helm/mcp_server.py
+      - rapr_mcp.py
 
 concurrency:
   group: windows-check-${{ github.ref }}
@@ -53,6 +57,16 @@ jobs:
           }
           $user = [Environment]::GetEnvironmentVariable('Path', 'User')
           if (($user -split ';') -notcontains "$h\bin") { throw "rapr isn't on the user PATH: $user" }
+
+      - name: rapr mcp answers an MCP client over stdio
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $rapr = Join-Path $env:LOCALAPPDATA 'rapr-ai\bin\rapr.cmd'
+          $req = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}'
+          $out = $req | cmd /c "`"$rapr`" mcp"
+          "$out"
+          if ("$out" -notmatch '"name": "rapr-ai"') { throw "rapr mcp didn't answer the MCP handshake" }
 
       - name: rapr start, RAPR answers with the setup page, rapr stop
         shell: powershell
