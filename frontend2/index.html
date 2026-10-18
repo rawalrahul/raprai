@@ -211,6 +211,7 @@
         </span>
       </div>
       <div class="sb-section-body" id="sb-panel-usage">
+        <button class="sb-add-btn" onclick="openRecap()" title="Your month with RAPR, as a card you can share" style="width:100%;margin-bottom:8px">🐧 Your month with RAPR</button>
         <div id="usage-dashboard">
           <div class="sb-empty">Loading usage data...</div>
         </div>
@@ -1425,6 +1426,7 @@ Example:
         <button class="ai-menu-item" id="auto-menu-btn" onclick="autoNewSession();closeAiMenu()" role="menuitem" title="RAPR picks the cheapest AI that can do the task">
           <span class="menu-dot" aria-hidden="true">✨</span>Auto (pick for my task)</button>
         <button class="ai-menu-item" onclick="openBakeoffModal();closeAiMenu()" role="menuitem" title="Same task, several AIs, then pick the best result"><span class="menu-dot" aria-hidden="true">🧪</span>Bake-off (compare AIs)</button>
+        <button class="ai-menu-item" onclick="openRecap();closeAiMenu()" role="menuitem" title="Your month with RAPR, as a card you can share"><span class="menu-dot" aria-hidden="true">🐧</span>Your month (recap)</button>
         <!-- integration "New: ..." buttons inserted here by loadIntegrations() -->
         <button class="ai-menu-item" id="shell-mode-btn" onclick="cmd('new_session:');closeAiMenu()" role="menuitem">
           <span class="menu-dot shell" aria-hidden="true"></span>Shell</button>
@@ -1834,7 +1836,8 @@ Example:
 <script src="/js/groupchat.js?v=6"></script>
 <script src="/js/whatsapp.js?v=2"></script>
 <script src="/js/voices.js?v=2"></script>
-<script src="/js/finish.js?v=3"></script>
+<script src="/js/finish.js?v=4"></script>
+<script src="/js/share.js?v=1"></script>
 <script src="/js/cloud.js?v=2"></script>
 <script src="/js/safety.js?v=6"></script>
 <script src="/js/demos.js?v=2"></script>
