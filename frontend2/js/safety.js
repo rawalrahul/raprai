@@ -139,7 +139,12 @@ async function verifyAudit() {
   try {
     const d = await (await fetch('/api/audit/verify')).json();
     let older = d.legacy ? ' (' + d.legacy + ' older entries from before signing)' : '';
-    if (d.anchor) older += '. Matches the daily check sent to Telegram on ' + d.anchor.day;
+    if (d.anchor) {
+      const to = d.anchor.sent_to || [];
+      older += '. Matches the daily check from ' + d.anchor.day + (to.length
+        ? ' (copy sent to ' + to.join(', ') + ')'
+        : ' (kept on this computer only; link Telegram or WhatsApp for a copy that can\'t be changed here)');
+    }
     if (d.ok) {
       msg.textContent = d.entries
         ? 'Intact: ' + d.entries + ' signed entries' + older + '. Latest: ' + d.head.slice(0, 12)

@@ -12,11 +12,12 @@ verify() walks the chain, so editing, inserting, reordering or removing a line
 in the middle shows up. Lines written before the chain existed are counted as
 `legacy`, not checked.
 
-Anchor: once a day, when the log has grown, anchor_loop() sends the entry count
-and latest `h` to Telegram and keeps a copy in user data/audit_anchor.json.
-verify() checks the file still reaches that point, which catches lines cut from
-the end and a log re-signed with a stolen key. The Telegram message is the copy
-that can't be changed from this computer.
+Anchor: once a day, when the log has grown, anchor_loop() saves the entry count
+and latest `h` in user data/audit_anchor.json, and sends them to every linked
+chat app (Telegram, WhatsApp, Discord, Slack). None need be linked. verify()
+checks the file still reaches that point, which catches lines cut from the end
+and a log re-signed with a stolen key. The local copy only helps if it wasn't
+edited too; a chat message is a copy that can't be changed from this computer.
 """
 
 from __future__ import annotations
@@ -120,7 +121,8 @@ def verify() -> dict:
         key = _key()
     anchor = last_anchor()
     if anchor and anchor["entries"]:
-        result["anchor"] = {"entries": anchor["entries"], "day": _day(anchor.get("ts", 0))}
+        result["anchor"] = {"entries": anchor["entries"], "day": _day(anchor.get("ts", 0)),
+                            "sent_to": anchor.get("sent_to") or []}
     else:
         anchor = None
     prev = None   # None until the first chained line
@@ -186,40 +188,68 @@ def anchor_message(v: dict) -> str:
             "Keep this message: Verify in Settings should never show fewer entries or a different hash here.")
 
 
-async def anchor_now(send) -> Optional[str]:
-    """Verify, and if the log grew since the last anchor (or is broken), send the
-    result with `send(text)` and save the new anchor. Returns what was sent."""
+def _sending_on() -> bool:
+    return os.environ.get("AUDIT_ANCHOR", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+async def send_to_chat_apps(text: str) -> list[str]:
+    """Send to every linked chat app. Returns the ones that were linked."""
+    import helm.state as _st
+    sent = []
+    if _st.telegram_app and _st.telegram_chat_id:
+        try:
+            await _st.telegram_app.bot.send_message(chat_id=_st.telegram_chat_id, text=text)
+            sent.append("Telegram")
+        except Exception as exc:
+            logger.warning("audit anchor to Telegram failed: %s", exc)
+    try:
+        import helm.whatsapp_bridge as wa
+        if wa.state.get("status") == "connected":
+            await wa.send_text(text)
+            sent.append("WhatsApp")
+    except Exception as exc:
+        logger.debug("audit anchor to WhatsApp skipped: %s", exc)
+    try:
+        import helm.groupchat as gc
+        for name in ("discord", "slack"):   # they can only post to a chat you've used since start
+            send = gc._channel_senders.get(name)
+            if send and getattr(getattr(send, "__self__", None), "last_chat", None):
+                await send({}, text)
+                sent.append(name.capitalize())
+    except Exception as exc:
+        logger.debug("audit anchor to Discord/Slack skipped: %s", exc)
+    return sent
+
+
+async def anchor_now(send=None) -> Optional[str]:
+    """Verify; if the log grew since the last anchor (or is broken), save the new
+    anchor and, when `send` is given, send the result with it (`send(text)`
+    returns the apps it reached). Returns the text, or None if nothing changed."""
     import asyncio
     v = await asyncio.to_thread(verify)
     last = last_anchor()
     if v["ok"] and (not v["entries"] or (last and last["entries"] == v["entries"])):
         return None
     text = anchor_message(v)
-    await send(text)
+    sent_to = (await send(text) or []) if send else []
     # A broken log keeps the last good anchor, so the warning repeats daily, not hourly.
-    keep = {"entries": v["entries"], "head": v["head"]} if v["ok"] else (last or {"entries": 0, "head": ""})
-    _anchor_path().write_text(json.dumps({**keep, "ts": time.time()}), encoding="utf-8")
+    keep = {"entries": v["entries"], "head": v["head"]} if v["ok"] else \
+        {k: (last or {"entries": 0, "head": ""}).get(k) for k in ("entries", "head")}
+    _anchor_path().write_text(json.dumps({**keep, "ts": time.time(), "sent_to": list(sent_to)}),
+                              encoding="utf-8")
     return text
 
 
-async def _send_telegram(text: str) -> None:
-    import helm.state as _st
-    await _st.telegram_app.bot.send_message(chat_id=_st.telegram_chat_id, text=text)
-
-
 async def anchor_loop() -> None:
-    """Background task: anchor once a day while Telegram is set up.
-    AUDIT_ANCHOR=0 turns it off."""
+    """Background task: anchor once a day. Works with no chat app linked; then
+    the anchor is only kept on this computer. AUDIT_ANCHOR=0 stops the sending."""
     import asyncio
-    import helm.state as _st
     await asyncio.sleep(120)
     while True:
         try:
             last = last_anchor()
-            due = not last or time.time() - float(last.get("ts", 0)) >= _ANCHOR_EVERY
-            if (due and os.environ.get("AUDIT_ANCHOR", "1").strip() not in ("0", "false", "no")
-                    and _st.telegram_app and _st.telegram_chat_id):
-                await anchor_now(_send_telegram)
+            if not last or time.time() - float(last.get("ts", 0)) >= _ANCHOR_EVERY:
+                await anchor_now(send_to_chat_apps if _sending_on() else None)
         except asyncio.CancelledError:
             break
         except Exception as exc:

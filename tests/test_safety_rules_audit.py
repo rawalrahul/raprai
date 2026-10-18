@@ -176,6 +176,7 @@ def _anchor(sent=None):
     sent = [] if sent is None else sent
     async def send(text):
         sent.append(text)
+        return ["Telegram"]
     return asyncio.run(audit.anchor_now(send)), sent
 
 
@@ -228,9 +229,61 @@ def test_broken_log_warns_once_a_day_and_keeps_the_good_anchor(data):
     assert (after["entries"], after["head"]) == (good["entries"], good["head"]) and after["ts"] >= good["ts"]
 
 
-def test_anchor_loop_skips_without_telegram(data, monkeypatch):
+def test_anchor_works_with_no_chat_app(data):
     _three(data)
+    assert "3 signed entries" in asyncio.run(audit.anchor_now(None))
+    assert audit.last_anchor()["sent_to"] == []
+    assert audit.verify()["anchor"]["sent_to"] == []
+    _write(data, _lines(data)[:1])
+    assert "removed from the end" in audit.verify()["problem"]["reason"]
+
+
+def test_anchor_goes_to_every_linked_app(data, monkeypatch):
+    import helm.groupchat as gc
+    import helm.whatsapp_bridge as wa
+    got = []
+
+    class Bot:
+        async def send_message(self, chat_id, text):
+            got.append(("telegram", chat_id))
+
+    class Bridge:
+        def __init__(self, name, last_chat):
+            self.name, self.last_chat = name, last_chat
+
+        async def relay_group(self, group, text):
+            got.append((self.name, self.last_chat))
+
+    async def wa_send(text, to=None):
+        got.append(("whatsapp", None))
+
+    monkeypatch.setattr(_st, "telegram_app", type("A", (), {"bot": Bot()})(), raising=False)
+    monkeypatch.setattr(_st, "telegram_chat_id", 42, raising=False)
+    monkeypatch.setattr(wa, "state", {"status": "connected"})
+    monkeypatch.setattr(wa, "send_text", wa_send)
+    monkeypatch.setattr(gc, "_channel_senders", {"discord": Bridge("discord", "c1").relay_group,
+                                                 "slack": Bridge("slack", None).relay_group})
+    assert asyncio.run(audit.send_to_chat_apps("hi")) == ["Telegram", "WhatsApp", "Discord"]
+    assert got == [("telegram", 42), ("whatsapp", None), ("discord", "c1")]
+
+
+def test_nothing_linked_sends_nowhere(data, monkeypatch):
+    import helm.groupchat as gc
+    import helm.whatsapp_bridge as wa
     monkeypatch.setattr(_st, "telegram_app", None, raising=False)
+    monkeypatch.setattr(wa, "state", {"status": "disconnected"})
+    monkeypatch.setattr(gc, "_channel_senders", {})
+    assert asyncio.run(audit.send_to_chat_apps("hi")) == []
+
+
+def test_anchor_loop_anchors_locally_and_audit_anchor_0_stops_sending(data, monkeypatch):
+    _three(data)
+    sent = []
+    async def send(text):
+        sent.append(text)
+        return ["Telegram"]
+    monkeypatch.setattr(audit, "send_to_chat_apps", send)
+    monkeypatch.setenv("AUDIT_ANCHOR", "0")
     sleeps = []
     async def fake_sleep(s):
         sleeps.append(s)
@@ -239,4 +292,5 @@ def test_anchor_loop_skips_without_telegram(data, monkeypatch):
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(audit.anchor_loop())
-    assert sleeps == [120, 3600] and audit.last_anchor() is None
+    assert sleeps == [120, 3600] and sent == []
+    assert audit.last_anchor()["entries"] == 3 and audit.last_anchor()["sent_to"] == []
