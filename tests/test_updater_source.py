@@ -81,3 +81,17 @@ def test_update_now_only_for_source_installs_and_safe_branch_names(root, monkeyp
     monkeypatch.setenv("RAPR_INSTALL_KIND", "source-mac")
     monkeypatch.setenv("RAPR_REF", "main; rm -rf ~")
     assert not u.start_source_update()["ok"]
+
+
+def test_no_install_record_is_a_checkout_even_when_bundled(root, monkeypatch):
+    monkeypatch.delenv("RAPR_INSTALL_KIND")
+    monkeypatch.setattr(helm.paths, "is_bundled", lambda: True)
+    info = u.install_info()
+    assert info["kind"] == "dev" and info["self_update"] is False
+
+
+def test_exe_download_routes_are_gone():
+    from helm.web_routes.update_routes import router
+    paths = {r.path for r in router.routes}
+    assert "/update/download" not in paths and "/update/apply" not in paths
+    assert "/update/now" in paths

@@ -1,9 +1,0 @@
-Welcome to RAPR AI v2.0.4
-
-After installation, you will be offered to run the dependency setup.
-
-IMPORTANT: Node.js must be installed separately before setup.
-Download it from: https://nodejs.org/en/download/
-
-If you run into any issues, download the Setup Guide from:
-https://raprai.com/download

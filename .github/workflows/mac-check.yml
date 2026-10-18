@@ -80,7 +80,7 @@ jobs:
       - name: Tests
         run: |
           "$HOME/.rapr-ai/venv/bin/python" -m pip install --quiet pytest
-          "$HOME/.rapr-ai/venv/bin/python" -m pytest tests --ignore=tests/agent -q
+          "$HOME/.rapr-ai/venv/bin/python" -m pytest tests -q
 
       - name: Log on failure
         if: failure()

@@ -4,9 +4,8 @@ helm/version.py — Single source of truth for the RAPR AI app version.
 Every module that needs the current version imports from here:
     from helm.version import APP_VERSION
 
-Update this file when preparing a new release.
-build.bat, installer.iss, and marketplace all reference this value
-at build/runtime rather than hardcoding their own strings.
+Update this file when preparing a new release; the marketplace and the
+update check read it at runtime rather than hardcoding their own strings.
 .codex-plugin/plugin.json repeats it for the HOL Registry; update it too
 (tests/test_plugin_manifest.py checks they match).
 """

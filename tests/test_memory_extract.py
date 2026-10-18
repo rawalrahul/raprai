@@ -142,3 +142,55 @@ def test_claude_call_has_no_tools(monkeypatch):
     cmd = calls["cmd"]
     assert cmd[cmd.index("--tools") + 1] == "" and "--dangerously-skip-permissions" not in cmd
     assert calls["stdin"] == "PROMPT" and not os.path.exists(calls["cwd"])
+
+
+def test_ollama_over_real_http(db, monkeypatch):
+    """A stand-in Ollama server on localhost, answering /api/tags and /api/chat the
+    way Ollama does: checks the request RAPR sends and the whole round trip."""
+    import http.server
+    import json
+    import threading
+
+    seen = {}
+
+    class Ollama(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _send(self, body):
+            data = json.dumps(body).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            self._send({"models": [{"name": "qwen3:4b"}]})
+
+        def do_POST(self):
+            seen["path"] = self.path
+            seen["body"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            ops = {"ops": [{"op": "add", "category": "preference", "content": "Prefers tabs over spaces"}]}
+            self._send({"model": "qwen3:4b", "created_at": "2026-10-18T10:00:00Z", "done": True,
+                        "message": {"role": "assistant", "content": json.dumps(ops)}})
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Ollama)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setattr(mx, "_OLLAMA", f"http://127.0.0.1:{server.server_port}")
+        monkeypatch.delenv("MEMORY_EXTRACTOR", raising=False)
+        monkeypatch.delenv("MEMORY_EXTRACTOR_MODEL", raising=False)
+        import helm.state as st
+        monkeypatch.setattr(st, "default_models", {"ollama": "qwen3:4b"}, raising=False)
+        sess = _sess("I always use tabs, never spaces", ai="codex")
+        sess["_integration_history"] = [{"q": "I always use tabs, never spaces"}]
+        assert mx.pick_extractor(sess) == "ollama"
+        assert asyncio.run(mx.extract_and_save(sess)) == 1
+    finally:
+        server.shutdown()
+    body = seen["body"]
+    assert seen["path"] == "/api/chat" and body["model"] == "qwen3:4b"
+    assert body["format"] == "json" and body["stream"] is False and body["options"]["temperature"] == 0
+    assert "I always use tabs, never spaces" in body["messages"][0]["content"]
+    assert _contents(db) == ["Prefers tabs over spaces"]

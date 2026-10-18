@@ -4,8 +4,7 @@
 //   - an Updates section at the top of Settings: version, what's new, Check now, Update now,
 //     and the automatic-check switch
 //   - "Update now": source installs rerun their installer in the background (RAPR stops,
-//     updates and starts again); the Windows .exe downloads and runs its installer.
-//     This page waits and reloads itself when RAPR is back.
+//     updates and starts again). This page waits and reloads itself when RAPR is back.
 
 (function(){
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -15,7 +14,6 @@
   const KIND_LABEL = {
     'source-windows': 'installed with the Windows installer script',
     'source-mac': 'installed with the Mac installer script',
-    'windows-exe': 'Windows app',
     'docker': 'cloud server (Docker)',
     'dev': 'running from a source checkout',
   };
@@ -92,7 +90,7 @@
     const short = c => c ? c.slice(0, 7) : '';
     let line = `RAPR ${esc(status.current_version)}`;
     if(inst.commit) line += ` · <code>${esc(short(inst.commit))}</code>`;
-    if(inst.kind && inst.kind !== 'windows-exe' && inst.ref) line += ` · follows <code>${esc(inst.ref)}</code>`;
+    if(inst.ref) line += ` · follows <code>${esc(inst.ref)}</code>`;
     let state, cls = '';
     if(checking) state = 'Checking for updates…';
     else if(!u) state = status.auto_check ? 'Not checked yet.' : 'Automatic checks are off.';
@@ -121,7 +119,6 @@
       if(inst.kind === 'docker') how = 'To update this server, open RAPR on the computer that set it up and use <b>Settings → Cloud server → Update</b> (or run <code>docker compose pull && docker compose up -d</code> on the server).';
       else if(inst.kind === 'dev') how = 'This is a source checkout: update it with <code>git pull</code>, then restart RAPR.';
     }
-    const where = inst.kind === 'windows-exe' ? 'raprai.com' : 'GitHub';
     el.innerHTML = `
       <div class="upd-line">${line} <small>(${esc(KIND_LABEL[inst.kind] || inst.kind || '')})</small></div>
       <div class="upd-state ${cls}">${state}</div>
@@ -133,7 +130,7 @@
       </div>
       <label class="upd-auto"><input type="checkbox" class="upd-auto-box" ${status.auto_check ? 'checked' : ''}>
         Check for updates automatically
-        <small>Every hour RAPR asks ${where} whether there's a newer version (an ordinary web request that includes RAPR's version number). Nothing else is sent. Offline, it just skips.</small></label>`;
+        <small>Every hour RAPR asks GitHub whether there's a newer version (an ordinary web request that includes RAPR's version number). Nothing else is sent. Offline, it just skips.</small></label>`;
     el.querySelector('.upd-check').onclick = () => loadStatus(true);
     const go = el.querySelector('.upd-go'); if(go) go.onclick = updateNow;
     el.querySelector('.upd-auto-box').onchange = e => {
@@ -163,30 +160,13 @@
   }
 
   async function updateNow(){
-    const inst = (status && status.install) || {};
     if(!confirm('Update RAPR now?\n\nRAPR stops, updates and starts again by itself, usually in a minute or two. Anything an AI is doing right now is interrupted.')) return;
     if(typeof closeSettings === 'function') try { closeSettings(); } catch(e) {}
     document.getElementById('upd-bar')?.remove();
     try { sessionStorage.setItem('raprUpdating', String(Date.now())); } catch(e) {}
 
-    if(inst.kind === 'windows-exe'){
-      showOverlay('Downloading the update…', 'This can take a few minutes.');
-      const r = await post('/update/download').catch(() => ({ok: false, error: 'Could not reach RAPR.'}));
-      if(!r.ok){ failOverlay(r.error || 'The download could not start.'); return; }
-      for(let i = 0; i < 600; i++){
-        await new Promise(res => setTimeout(res, 2000));
-        const s = await fetch('/update/status').then(x => x.json()).catch(() => null);
-        const d = s && s.download;
-        if(d && d.status === 'error'){ failOverlay('The download failed. Check your internet connection and try again.'); return; }
-        if(d && d.status === 'ready') break;
-        if(d) showOverlay('Downloading the update…', `${d.percent || 0}%`);
-      }
-      const a = await post('/update/apply').catch(() => ({ok: false}));
-      if(!a.ok){ failOverlay(a.error || 'The installer could not start.'); return; }
-    } else {
-      const r = await post('/update/now').catch(() => ({ok: false, error: 'Could not reach RAPR.'}));
-      if(!r.ok){ failOverlay(r.error || 'The update could not start.'); return; }
-    }
+    const r = await post('/update/now').catch(() => ({ok: false, error: 'Could not reach RAPR.'}));
+    if(!r.ok){ failOverlay(r.error || 'The update could not start.'); return; }
     showOverlay('Updating RAPR…', 'RAPR stops, updates and starts again by itself. This page reloads when it\'s back.');
     watchUpdate(Date.now());
   }
