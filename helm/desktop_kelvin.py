@@ -15,9 +15,9 @@ KELVIN_DESKTOP_PET picks when Kelvin is on screen: "1" always (default),
 KELVIN_DESKTOP_SIZE is small, medium (default) or large. Both are also in the
 tray menu ("Kelvin on desktop") and Settings, so he can be brought back any time.
 
-Built on Tkinter (bundled by build.bat's tk-inter plugin). The animation is
-pre-rendered from frontend2/js/kelvin.js into sprite strips
-frontend2/assets/kelvin/pet-<mood>.png by scripts/render_kelvin_assets.cjs.
+Built on Tkinter. The animation is pre-rendered from frontend2/js/kelvin.js into
+sprite strips frontend2/assets/kelvin/pet-<mood>.png by
+scripts/render_kelvin_assets.cjs.
 Windows uses a colour-key for the transparent background; elsewhere Kelvin
 sits on a small dark tile.
 """

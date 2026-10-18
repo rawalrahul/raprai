@@ -8,8 +8,6 @@ How RAPR finds out about updates depends on how it was installed:
   the commit it installed; we ask GitHub how many commits the branch is ahead of
   it, and list their titles as "what's new". start_source_update() reruns the
   installer in the background, which stops RAPR, updates it and starts it again.
-- The Windows .exe compares version numbers via the raprai.com API (falling back
-  to GitHub releases), downloads the new installer and runs it.
 - Docker images and developer checkouts are told about updates but update
   themselves the usual way (Cloud server -> Update, docker compose pull, git pull).
 
@@ -21,19 +19,14 @@ Public API:
     install_info() → dict
     check_for_app_update(force=False) → dict | None
     start_source_update() → dict
-    download_update(url, on_progress=None) → Path
-    apply_update(installer_path) → None  (kills current process)
     get_update_status() → dict
 """
 
 import os
 import subprocess
-import sys
-import tempfile
 import time
-import threading
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional
 
 from helm.config import logger
 from helm.version import APP_VERSION
@@ -41,15 +34,6 @@ from helm.version import APP_VERSION
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-
-# Primary: raprai.com API (fetches from GitHub releases)
-_VERSION_API_URL = os.environ.get(
-    "RAPR_VERSION_URL",
-    "https://raprai.com/api/version",
-)
-
-# Fallback: direct GitHub API
-_GITHUB_RELEASES_URL = "https://api.github.com/repos/rawalrahul/rapr-releases/releases?per_page=1"
 
 # How often to auto-check (hourly; GitHub allows 60 unauthenticated requests an hour)
 _AUTO_CHECK_INTERVAL = 60 * 60
@@ -63,7 +47,6 @@ _QUIET_START = "quiet-start"             # in the data folder: don't open a brow
 # In-memory state
 _cached_update: Optional[dict] = None
 _last_check_at: float = 0.0
-_download_progress: dict = {"status": "idle", "percent": 0, "bytes_downloaded": 0, "total_bytes": 0, "path": ""}
 
 
 # ---------------------------------------------------------------------------
@@ -90,10 +73,8 @@ def _is_newer(remote: str, local: str) -> bool:
 def install_info() -> dict:
     """How this copy was installed: kind, the branch it follows, the commit it runs."""
     import json
-    from helm.paths import PROJECT_ROOT, is_bundled
-    kind = os.environ.get("RAPR_INSTALL_KIND", "").strip()
-    if not kind:
-        kind = "windows-exe" if is_bundled() else "dev"
+    from helm.paths import PROJECT_ROOT
+    kind = os.environ.get("RAPR_INSTALL_KIND", "").strip() or "dev"
     info = {"kind": kind, "ref": os.environ.get("RAPR_REF", "").strip() or "main",
             "commit": os.environ.get("RAPR_COMMIT", "").strip()}
     try:
@@ -110,7 +91,7 @@ def install_info() -> dict:
                 info["commit"] = out.stdout.strip()
         except (OSError, subprocess.SubprocessError):
             pass
-    info["self_update"] = kind in _SOURCE_KINDS or kind == "windows-exe"
+    info["self_update"] = kind in _SOURCE_KINDS
     return info
 
 
@@ -154,241 +135,28 @@ def _check_source_update(info: dict) -> dict:
 
 
 def check_for_app_update(force: bool = False) -> Optional[dict]:
-    """
-    Check if a new version of RAPR AI is available.
+    """Check GitHub for new commits on the branch this copy follows.
 
-    Returns a dict with update info if available, None otherwise:
-        {
-            "current_version": "2.0.0",
-            "latest_version": "2.1.0",
-            "download_url": "https://...",
-            "release_notes": "...",
-            "release_date": "2026-03-21",
-            "file_size": "~200 MB",
-        }
+    Returns the update info when an update is available (or the installed
+    commit is unknown), None otherwise. The result is cached for an hour.
     """
     global _cached_update, _last_check_at
-    import requests
 
     now = time.time()
-
-    # Return cached result if fresh
     if not force and _cached_update is not None and (now - _last_check_at) < _AUTO_CHECK_INTERVAL:
         return _cached_update if _cached_update.get("update_available") else None
-
     _last_check_at = now
 
-    info = install_info()
-    if info["kind"] != "windows-exe":
-        try:
-            update_info = _check_source_update(info)
-            logger.info("Update check: %s", "update available" if update_info.get("update_available")
-                        else "up to date" if update_info.get("update_available") is False else "installed commit unknown")
-        except Exception as e:
-            logger.warning("Update check failed (offline?): %s", e)
-            update_info = {"update_available": False, "error": "Couldn't reach GitHub to check for updates.",
-                           "current_version": APP_VERSION}
-        _cached_update = update_info
-        return update_info if update_info.get("update_available") else None
-
-    # Windows .exe: try the raprai.com API first
-    update_info = None
     try:
-        resp = requests.get(_VERSION_API_URL, timeout=10, headers={
-            "User-Agent": f"RAPR-AI/{APP_VERSION}",
-            "Accept": "application/json",
-        })
-        resp.raise_for_status()
-        data = resp.json()
-
-        latest = data.get("latest_version", "")
-        if latest and _is_newer(latest, APP_VERSION):
-            update_info = {
-                "update_available": True,
-                "current_version": APP_VERSION,
-                "latest_version": latest,
-                "download_url": data.get("download_url", ""),
-                "release_notes": data.get("release_notes", ""),
-                "release_date": data.get("release_date", ""),
-                "file_size": data.get("file_size", ""),
-            }
-            logger.info("Update available: v%s → v%s", APP_VERSION, latest)
-        else:
-            update_info = {"update_available": False, "current_version": APP_VERSION, "latest_version": latest or APP_VERSION}
-            logger.info("App is up to date (v%s)", APP_VERSION)
-
+        update_info = _check_source_update(install_info())
+        logger.info("Update check: %s", "update available" if update_info.get("update_available")
+                    else "up to date" if update_info.get("update_available") is False else "installed commit unknown")
     except Exception as e:
-        logger.warning("Update check via raprai.com failed: %s — trying GitHub fallback", e)
-
-        # Fallback: direct GitHub API
-        try:
-            resp = requests.get(_GITHUB_RELEASES_URL, timeout=10, headers={
-                "User-Agent": f"RAPR-AI/{APP_VERSION}",
-                "Accept": "application/vnd.github.v3+json",
-            })
-            resp.raise_for_status()
-            releases = resp.json()
-            if releases:
-                release = releases[0]
-                tag = release.get("tag_name", "").lstrip("v")
-                if tag and _is_newer(tag, APP_VERSION):
-                    # Find the .exe asset
-                    download_url = ""
-                    file_size = ""
-                    for asset in release.get("assets", []):
-                        name = asset.get("name", "")
-                        if name.endswith(".exe"):
-                            download_url = asset.get("browser_download_url", "")
-                            size_bytes = asset.get("size", 0)
-                            file_size = f"~{size_bytes // (1024 * 1024)} MB" if size_bytes else ""
-                            break
-
-                    update_info = {
-                        "update_available": True,
-                        "current_version": APP_VERSION,
-                        "latest_version": tag,
-                        "download_url": download_url,
-                        "release_notes": release.get("body", ""),
-                        "release_date": (release.get("published_at") or "")[:10],
-                        "file_size": file_size,
-                    }
-                    logger.info("Update available (GitHub fallback): v%s → v%s", APP_VERSION, tag)
-                else:
-                    update_info = {"update_available": False, "current_version": APP_VERSION, "latest_version": tag or APP_VERSION}
-        except Exception as e2:
-            logger.warning("Update check via GitHub also failed: %s", e2)
-            update_info = None
-
+        logger.warning("Update check failed (offline?): %s", e)
+        update_info = {"update_available": False, "error": "Couldn't reach GitHub to check for updates.",
+                       "current_version": APP_VERSION}
     _cached_update = update_info
-    if update_info and update_info.get("update_available"):
-        return update_info
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Download update
-# ---------------------------------------------------------------------------
-
-def download_update(
-    url: str,
-    on_progress: Optional[Callable[[int, int], None]] = None,
-) -> Path:
-    """
-    Download the update installer to a temp directory.
-
-    Args:
-        url: Direct download URL for the installer .exe
-        on_progress: Optional callback(bytes_downloaded, total_bytes)
-
-    Returns: Path to the downloaded installer
-
-    Raises: Exception on download failure
-    """
-    global _download_progress
-    import requests
-
-    _download_progress = {"status": "downloading", "percent": 0, "bytes_downloaded": 0, "total_bytes": 0, "path": ""}
-
-    try:
-        resp = requests.get(url, stream=True, timeout=600, headers={
-            "User-Agent": f"RAPR-AI/{APP_VERSION}",
-        })
-        resp.raise_for_status()
-
-        total = int(resp.headers.get("content-length", 0))
-        _download_progress["total_bytes"] = total
-
-        # Save to temp directory
-        tmp_dir = Path(tempfile.gettempdir()) / "rapr_update"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-
-        # Extract filename from URL or use default
-        filename = url.rsplit("/", 1)[-1] if "/" in url else "RAPR_AI_Setup.exe"
-        if not filename.endswith(".exe"):
-            filename = "RAPR_AI_Setup.exe"
-
-        dest = tmp_dir / filename
-        downloaded = 0
-
-        with open(dest, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=1024 * 256):  # 256KB chunks
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    _download_progress["bytes_downloaded"] = downloaded
-                    if total > 0:
-                        _download_progress["percent"] = int((downloaded / total) * 100)
-                    if on_progress:
-                        on_progress(downloaded, total)
-
-        _download_progress["status"] = "ready"
-        _download_progress["path"] = str(dest)
-        logger.info("Update downloaded to %s (%d bytes)", dest, downloaded)
-        return dest
-
-    except Exception as e:
-        _download_progress["status"] = "error"
-        logger.error("Update download failed: %s", e)
-        raise
-
-
-def download_update_async(url: str) -> None:
-    """Start downloading the update in a background thread."""
-    thread = threading.Thread(target=download_update, args=(url,), daemon=True)
-    thread.start()
-
-
-# ---------------------------------------------------------------------------
-# Apply update
-# ---------------------------------------------------------------------------
-
-def apply_update(installer_path: Optional[str] = None) -> dict:
-    """
-    Launch the downloaded installer in silent mode and exit the current process.
-
-    The Inno Setup installer:
-    1. Kills the running web_app.exe (via [Code] section)
-    2. Overwrites files in-place (same AppId = upgrade, not fresh install)
-    3. Optionally relaunches the app
-
-    Args:
-        installer_path: Path to the .exe installer. If None, uses the
-                        path from the last download.
-
-    Returns: dict with status (should not actually return — process exits)
-    """
-    if not installer_path:
-        installer_path = _download_progress.get("path", "")
-
-    if not installer_path or not Path(installer_path).exists():
-        return {"ok": False, "error": "No installer found. Download the update first."}
-
-    logger.info("Launching update installer: %s", installer_path)
-
-    try:
-        # Launch installer with /SILENT flag (no UI, upgrades in-place)
-        # /CLOSEAPPLICATIONS tells Inno Setup to close the running app
-        # /RESTARTAPPLICATIONS tells it to relaunch after install
-        subprocess.Popen(
-            [
-                str(installer_path),
-                "/SILENT",
-                "/CLOSEAPPLICATIONS",
-                "/RESTARTAPPLICATIONS",
-                "/NORESTART",  # Don't reboot the PC
-            ],
-            creationflags=subprocess.DETACHED_PROCESS if sys.platform == "win32" else 0,
-        )
-
-        logger.info("Update installer launched. App will restart after update.")
-
-        # Give the installer a moment to start, then exit
-        # The installer's [Code] section will kill web_app.exe
-        return {"ok": True, "message": "Update installer launched. The app will restart shortly."}
-
-    except Exception as e:
-        logger.error("Failed to launch update installer: %s", e)
-        return {"ok": False, "error": str(e)}
+    return update_info if update_info.get("update_available") else None
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +170,6 @@ def get_update_status() -> dict:
         "install": install_info(),
         "auto_check": auto_check_enabled(),
         "update": _cached_update,
-        "download": _download_progress.copy(),
         "last_check_at": _last_check_at,
     }
 
