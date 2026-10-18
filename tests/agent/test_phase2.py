@@ -606,7 +606,9 @@ def test_parse_manager_reply_returns_feedback():
 
 def test_focus_manager_session_sets_focused_waiting_session():
     from helm.agent.nodes import input_node
+    from helm.db import init_db
 
+    init_db()   # starting a session reads its chat history
     old_sessions = dict(_st.sessions)
     old_focused = _st.focused_id
     old_pending = dict(input_node._pending_input_sessions)
