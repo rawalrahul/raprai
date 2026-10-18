@@ -362,7 +362,7 @@ def test_telegram_final_output_sends_final_file_artifact():
     assert "final_post.html" in app.bot.documents[0]["caption"]
 
 
-def test_cleanup_intermediate_generated_files_preserves_final_leaf_output():
+def test_cleanup_intermediate_generated_files_keeps_everything():
     from helm.agent.executor import _cleanup_intermediate_generated_files
     import pathlib
     import shutil
@@ -396,8 +396,8 @@ def test_cleanup_intermediate_generated_files_preserves_final_leaf_output():
 
         deleted = asyncio.run(_cleanup_intermediate_generated_files(run))
 
-        assert str(intermediate.resolve()) in deleted
-        assert not intermediate.exists()
+        assert deleted == []   # cleanup is off: every file stays for the user to check
+        assert intermediate.exists()
         assert final_output.exists()
         assert preexisting.exists()
     finally:
@@ -435,14 +435,14 @@ def test_cleanup_preserves_final_leaf_generated_script_when_expected_output():
 
         deleted = asyncio.run(_cleanup_intermediate_generated_files(run))
 
-        assert str(scratch.resolve()) in deleted
-        assert not scratch.exists()
+        assert deleted == []
+        assert scratch.exists()
         assert final_script.exists()
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)
 
 
-def test_persist_final_text_output_creates_output_file_and_cleanup_removes_script():
+def test_persist_final_text_output_creates_output_file_and_cleanup_keeps_script():
     from helm.agent.executor import _cleanup_intermediate_generated_files, _persist_final_text_output
     import pathlib
     import shutil
@@ -483,13 +483,13 @@ def test_persist_final_text_output_creates_output_file_and_cleanup_removes_scrip
         final_file = pathlib.Path(output_path)
         assert final_file.exists()
         assert "Here is the final LinkedIn post." in final_file.read_text(encoding="utf-8")
-        assert str(script.resolve()) in deleted
-        assert not script.exists()
+        assert deleted == []
+        assert script.exists()
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)
 
 
-def test_cleanup_runs_after_workflow_output_before_manager_review():
+def test_cleanup_after_workflow_output_keeps_files():
     from helm.agent.executor import _cleanup_after_workflow_outputs
     import pathlib
     import shutil
@@ -531,8 +531,8 @@ def test_cleanup_runs_after_workflow_output_before_manager_review():
 
         asyncio.run(_cleanup_after_workflow_outputs(run))
 
-        assert not script.exists()
-        assert not data.exists()
+        assert script.exists()
+        assert data.exists()
         assert final_output.exists()
         assert run["_workflow_output_cleanup_done"] is True
     finally:
@@ -576,8 +576,8 @@ def test_cleanup_intermediate_generated_files_preserves_delivered_parent_output(
 
         deleted = asyncio.run(_cleanup_intermediate_generated_files(run))
 
-        assert str(scratch.resolve()) in deleted
-        assert not scratch.exists()
+        assert deleted == []
+        assert scratch.exists()
         assert final_output.exists()
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)

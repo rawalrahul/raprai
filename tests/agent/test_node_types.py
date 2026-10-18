@@ -63,6 +63,9 @@ def test_shell_node_timeout():
     node["timeout"] = 0.01
 
     class SlowProc:
+        returncode = None
+        pid = None
+
         async def communicate(self):
             await asyncio.sleep(1)
             return b"", b""
