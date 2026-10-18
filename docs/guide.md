@@ -398,7 +398,7 @@ RAPR AI maintains a persistent memory store that all AI sessions share. Knowledg
 **Adding memories:**
 - Type `/remember <fact>` in any chat session
 - Use the Memory panel in the sidebar to quick-add entries
-- Memories are auto-extracted from session transcripts when a session ends
+- When a session ends, an AI reads what you typed (never the AI's replies) next to the memories that look related, and adds new lasting facts, updates ones that changed, or archives ones that are no longer true. One-off requests like "fix this bug" are skipped, and pinned memories are never touched. It uses Ollama if it's running on your computer; otherwise, for a Claude session, Claude's small Haiku model (your messages already went to Anthropic). Anything else falls back to simple phrase matching ("remember: …", "my name is …"). A conversation is never sent somewhere it didn't already go. Choose with `MEMORY_EXTRACTOR` in `.env`: `auto` (default), `ollama`, `claude`, `regex` or `off`.
 
 **Memory categories:** preference, fact, project, person, decision, instruction
 
