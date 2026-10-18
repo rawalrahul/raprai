@@ -41,6 +41,7 @@ from .routing_routes import router as routing_router
 from .safety_routes import router as safety_router
 from .playbook_routes import router as playbook_router
 from .bakeoff_routes import router as bakeoff_router
+from .recap_routes import router as recap_router
 from .push_routes import router as push_router
 from .acp_routes import router as acp_router
 from .cloud_routes import router as cloud_router
@@ -74,6 +75,7 @@ app.include_router(routing_router)
 app.include_router(safety_router)
 app.include_router(playbook_router)
 app.include_router(bakeoff_router)
+app.include_router(recap_router)
 app.include_router(push_router)
 app.include_router(acp_router)
 app.include_router(cloud_router)

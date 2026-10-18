@@ -14,6 +14,7 @@ tested with fake AIs and used with the real ones.
 from __future__ import annotations
 
 import asyncio
+import re
 import shutil
 import subprocess
 import time
@@ -37,10 +38,14 @@ class Attempt:
     files_changed: int = 0
     tests_passed: Optional[bool] = None
     error: Optional[str] = None
+    model: Optional[str] = None
+    lines_added: int = 0
+    lines_removed: int = 0
 
     def as_dict(self) -> dict:
-        return {"ai": self.ai, "files_changed": self.files_changed, "seconds": round(self.seconds, 1),
-                "tests_passed": self.tests_passed, "error": self.error,
+        return {"ai": self.ai, "model": self.model, "files_changed": self.files_changed,
+                "lines_added": self.lines_added, "lines_removed": self.lines_removed,
+                "seconds": round(self.seconds, 1), "tests_passed": self.tests_passed, "error": self.error,
                 "output": self.output[:4000], "diff": self.diff[:20000]}
 
 
@@ -53,11 +58,13 @@ class BakeOff:
     is_git: bool = False
     test_command: Optional[str] = None
     status: str = "created"   # created | running | done | merged | discarded
+    winner: Optional[int] = None   # index of the merged attempt
+    created_at: float = field(default_factory=time.time)
 
     def as_dict(self) -> dict:
         return {"id": self.id, "repo": self.repo, "task": self.task, "status": self.status,
-                "is_git": self.is_git, "test_command": self.test_command,
-                "attempts": [a.as_dict() for a in self.attempts]}
+                "is_git": self.is_git, "test_command": self.test_command, "winner": self.winner,
+                "created_at": self.created_at, "attempts": [a.as_dict() for a in self.attempts]}
 
 
 def _git(cwd: str, *args: str) -> str:
@@ -124,7 +131,8 @@ async def run(bo: BakeOff, runner: Runner, prompt_prefix: str = "") -> BakeOff:
         _collect(bo, a, before)
 
     await asyncio.gather(*(one(a) for a in bo.attempts))
-    bo.status = "done"
+    if bo.status == "running":   # not discarded meanwhile
+        bo.status = "done"
     return bo
 
 
@@ -134,6 +142,11 @@ def _collect(bo: BakeOff, a: Attempt, before: dict) -> None:
         a.diff = _git(a.path, "diff", "--cached", "HEAD")
         names = _git(a.path, "diff", "--cached", "--name-only", "HEAD").split()
         a.files_changed = len(names)
+        for line in a.diff.splitlines():
+            if line.startswith("+") and not line.startswith("+++"):
+                a.lines_added += 1
+            elif line.startswith("-") and not line.startswith("---"):
+                a.lines_removed += 1
     else:
         now = _snapshot(a.path, False)
         old = before.get(a.ai, {})
@@ -166,6 +179,7 @@ def merge(bo: BakeOff, index: int) -> int:
                 shutil.copy2(src, dst)
     cleanup(bo)
     bo.status = "merged"
+    bo.winner = index
     return a.files_changed
 
 
@@ -189,3 +203,77 @@ def cleanup(bo: BakeOff) -> None:
 def discard(bo: BakeOff) -> None:
     cleanup(bo)
     bo.status = "discarded"
+
+
+# ---------------------------------------------------------------------------
+# Results: what a finished bake-off says, without the code
+# ---------------------------------------------------------------------------
+
+CATEGORIES = ("bug fix", "feature", "refactor", "tests", "docs", "other")
+
+_LANGUAGES = {
+    ".py": "Python", ".js": "JavaScript", ".jsx": "JavaScript", ".mjs": "JavaScript",
+    ".ts": "TypeScript", ".tsx": "TypeScript", ".go": "Go", ".rs": "Rust", ".java": "Java",
+    ".kt": "Kotlin", ".swift": "Swift", ".rb": "Ruby", ".php": "PHP", ".cs": "C#",
+    ".cpp": "C++", ".cc": "C++", ".c": "C", ".h": "C", ".dart": "Dart", ".scala": "Scala",
+    ".sh": "Shell", ".ps1": "PowerShell", ".html": "HTML", ".css": "CSS", ".vue": "Vue",
+    ".svelte": "Svelte", ".sql": "SQL", ".lua": "Lua", ".ex": "Elixir", ".exs": "Elixir",
+}
+
+
+def guess_category(task: str) -> str:
+    """A rough label for the kind of task, so results can be grouped ("bug fix", "feature"…)."""
+    t = task.lower()
+    if re.search(r"\b(fix|bug|error|crash|broken|fails?|failing|traceback|exception)\b", t):
+        return "bug fix"
+    if re.search(r"\b(tests?|pytest|jest|coverage|spec)\b", t):
+        return "tests"
+    if re.search(r"\b(refactor|clean ?up|simplify|restructure|rename|reorgani[sz]e)\b", t):
+        return "refactor"
+    if re.search(r"\b(readme|docs?|documentation|docstrings?|comments?)\b", t):
+        return "docs"
+    if re.search(r"\b(add|create|implement|build|make|support|new|write)\b", t):
+        return "feature"
+    return "other"
+
+
+def guess_language(bo: BakeOff) -> Optional[str]:
+    """The language most of the changed files are in, from their extensions."""
+    counts: dict[str, int] = {}
+    for a in bo.attempts:
+        if bo.is_git:
+            names = re.findall(r"^\+\+\+ b/(.+)$", a.diff, flags=re.M)
+        else:
+            names = [line.removeprefix("changed: ") for line in a.diff.splitlines()]
+        for name in names:
+            lang = _LANGUAGES.get(Path(name).suffix.lower())
+            if lang:
+                counts[lang] = counts.get(lang, 0) + 1
+    return max(counts, key=counts.get) if counts else None
+
+
+def result(bo: BakeOff) -> dict:
+    """The outcome of a bake-off as numbers: no code, no folder, no AI output.
+
+    This is what gets saved to history, and the only thing that can be shared."""
+    return {
+        "id": bo.id,
+        "task": bo.task,
+        "category": guess_category(bo.task),
+        "language": guess_language(bo),
+        "had_tests": bool(bo.test_command),
+        "status": bo.status,
+        "created_at": bo.created_at,
+        "winner": bo.attempts[bo.winner].ai if bo.winner is not None else None,
+        "attempts": [{
+            "ai": a.ai,
+            "model": a.model,
+            "seconds": round(a.seconds, 1),
+            "files_changed": a.files_changed,
+            "lines_added": a.lines_added,
+            "lines_removed": a.lines_removed,
+            "tests_passed": a.tests_passed,
+            "failed": bool(a.error),
+            "winner": i == bo.winner,
+        } for i, a in enumerate(bo.attempts)],
+    }

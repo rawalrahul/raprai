@@ -299,6 +299,29 @@ Open **👥 Group Chats** in the header (or the sidebar section), pick any of yo
 
 ---
 
+## Bake-offs and RAPR Arena
+
+Pick **🧪 Bake-off (compare AIs)** in the AI menu, choose a project folder, a task, 2 to 4 AIs and (optionally) a test command. Each AI works in its own copy of the project; the board shows each attempt's time, files and lines changed, test result and diff. **Merge this one** applies the winner to your project; **Discard all** throws every copy away.
+
+Once you've merged a winner (or discarded them all), **🏆 Share result** opens a card you can share:
+
+- **Copy text**, **Download image** or **Post on X**. These stay on your computer until you post them.
+- **Publish to RAPR Arena** adds the result to the public leaderboard at [raprai.com/arena](https://www.raprai.com/arena), where everyone's bake-offs show which AI wins which kind of task, and gives you a link to a page for your result.
+  - What's sent: the AIs and models, how long each took, files and lines changed, whether your tests passed, which one you merged, the kind of task (which you can change), the main language and RAPR's version. **Exactly what gets sent** in the dialog shows the request before you press Publish.
+  - Never sent: your code, file names, folder paths or what the AIs said. The task text is only included if you tick the box, and you can edit it first.
+  - Nothing is sent until you press **Publish**. `ARENA_URL` in `.env` points RAPR at a different Arena server.
+
+Finished bake-offs are kept (the numbers only, not the code), so they count toward your monthly recap.
+
+## Monthly recap
+
+**🐧 Your month with RAPR** (top of the **Usage** panel, or in the AI menu) turns a month of work into a card: tasks sent, AI replies, active days and longest streak, your AI crew and its MVP, bake-offs judged, tasks sent from your phone, and a title for the month ("The Conductor", "Night Owl", "Local Hero"…). Use **‹ Previous** to look back. At the start of each month RAPR offers last month's recap once.
+
+- It's worked out on your computer from your chat history, group chats and bake-offs. Nothing is uploaded; the image only leaves your computer if you post it.
+- Dollar figures are estimates from the text you saw (about 4 characters per token, at API list prices). "Saved" is local AI work (Ollama and other local models) priced as if Claude's API had done it. AIs also read files and run tools you don't see, so real figures are higher; the card says "at least".
+
+---
+
 ## WhatsApp
 
 Free WhatsApp control through [neonize](https://github.com/krypton-byte/neonize) (whatsmeow): RAPR joins your WhatsApp as a linked device, the same way WhatsApp Web does. No Meta developer account, no per-message fees.

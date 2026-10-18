@@ -368,6 +368,24 @@ def v11_add_agent_versions(conn: sqlite3.Connection):
     conn.commit()
 
 
+def v12_add_bakeoff_results(conn: sqlite3.Connection):
+    """Version 12: finished bake-offs (numbers only, no code), for sharing and the monthly recap."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS bakeoff_results (
+            id          TEXT PRIMARY KEY,
+            created_at  REAL NOT NULL,
+            status      TEXT NOT NULL,
+            winner_ai   TEXT,
+            result_json TEXT NOT NULL,
+            arena_url   TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_bakeoff_results_created
+            ON bakeoff_results(created_at);
+    """)
+    conn.commit()
+
+
 MIGRATIONS: list[tuple[int, str, callable]] = [
     (1, "Initial schema", v1_initial),
     (2, "Add FTS5 full-text search", v2_add_content_fts),
@@ -380,6 +398,7 @@ MIGRATIONS: list[tuple[int, str, callable]] = [
     (9, "Add keywords/updated_at to packages", v9_add_packages_keywords),
     (10, "Add agents + agent_runs tables", v10_add_agent_tables),
     (11, "Add agent version history", v11_add_agent_versions),
+    (12, "Add bake-off results", v12_add_bakeoff_results),
 ]
 
 

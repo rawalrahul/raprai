@@ -119,28 +119,38 @@ function showBakeoffBoard(bid) {
   body.id = 'bakeoff-body';
   body.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;max-height:70vh;overflow:auto';
   content.appendChild(body);
+  const foot = _el('div', 'modal-body');
+  foot.style.cssText = 'display:none;gap:10px;align-items:center;justify-content:flex-end;padding-top:0';
+  foot.appendChild(_el('span', null, 'Show people how your AIs did:'));
+  const shareBtn = _el('button', 'council-btn-primary', '🏆 Share result');
+  shareBtn.addEventListener('click', () => openBakeoffShare(bid));
+  foot.appendChild(shareBtn);
+  content.appendChild(foot);
   overlay.appendChild(content);
   document.body.appendChild(overlay);
 
   const draw = async () => {
     let d;
     try { d = await _api('/api/bakeoff/' + encodeURIComponent(bid)); } catch (err) { body.textContent = err.message; clearInterval(_bakeTimer); return; }
-    title.textContent = 'Bake-off · ' + (d.status === 'done' ? 'pick a result' : d.status === 'merged' ? 'merged' : d.status === 'discarded' ? 'discarded' : 'running…');
+    title.textContent = 'Bake-off · ' + (d.status === 'done' ? 'pick a result' : d.status === 'merged' ? d.attempts[d.winner].ai + ' merged' : d.status === 'discarded' ? 'discarded' : 'running…');
     body.textContent = '';
-    d.attempts.forEach((a, i) => body.appendChild(_attemptCard(bid, i, a, d.status)));
+    d.attempts.forEach((a, i) => body.appendChild(_attemptCard(bid, i, a, d.status, i === d.winner, draw)));
+    foot.style.display = d.status === 'merged' || d.status === 'discarded' ? 'flex' : 'none';
     if (d.status !== 'running' && d.status !== 'created') clearInterval(_bakeTimer);
   };
   draw();
   _bakeTimer = setInterval(draw, 2000);
 }
 
-function _attemptCard(bid, index, a, status) {
+function _attemptCard(bid, index, a, status, isWinner, redraw) {
   const card = _el('div', 'bake-card');
   card.style.cssText = 'border:1px solid var(--border-dim);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px';
-  card.appendChild(_el('strong', null, a.ai));
+  if (isWinner) card.style.borderColor = '#f5c451';
+  card.appendChild(_el('strong', null, (isWinner ? '🏆 ' : '') + a.ai));
   const stats = [
     a.error ? 'failed' : (a.seconds ? a.seconds.toFixed(0) + 's' : 'working…'),
     a.files_changed + ' file' + (a.files_changed === 1 ? '' : 's') + ' changed',
+    a.lines_added || a.lines_removed ? '+' + a.lines_added + ' −' + a.lines_removed : '',
     a.tests_passed === true ? '✅ tests pass' : a.tests_passed === false ? '❌ tests fail' : '',
   ].filter(Boolean).join(' · ');
   card.appendChild(_el('div', null, stats));
@@ -166,13 +176,13 @@ function _attemptCard(bid, index, a, status) {
       try {
         const r = await _api('/api/bakeoff/' + encodeURIComponent(bid) + '/merge', { method: 'POST', body: JSON.stringify({ attempt: index }) });
         _toast('success', 'Merged ' + r.files_changed + ' file(s) from ' + a.ai);
-        document.getElementById('bakeoff-board')?.remove(); clearInterval(_bakeTimer);
+        redraw();
       } catch (err) { _toast('error', err.message); }
     });
     const discard = _el('button', 'council-btn-secondary', 'Discard all');
     discard.addEventListener('click', async () => {
       try { await _api('/api/bakeoff/' + encodeURIComponent(bid) + '/discard', { method: 'POST' }); } catch (_) {}
-      document.getElementById('bakeoff-board')?.remove(); clearInterval(_bakeTimer);
+      redraw();
     });
     row.append(merge, discard);
     card.appendChild(row);
