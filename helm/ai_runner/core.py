@@ -1475,6 +1475,46 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
                 pass
 
         async def _claude_raw(_cmd):
+            """One Claude run. If Claude refuses the chosen model, this chat goes back to
+            Claude's default (and so does the new-chat default, if it was that model),
+            the user is told, and the message is sent once more without --model."""
+            from helm.ai_runner.claude import model_answered, model_rejected
+            sess.pop("model_used", None)
+            raw = await _claude_raw_once(_cmd)
+            parsed = parse_claude_json_output(raw)
+            if "--model" in _cmd and model_rejected(parsed):
+                i = _cmd.index("--model")
+                bad = _cmd[i + 1]
+                if bad == "default":   # an older Claude Code without that name: just leave it out
+                    sess.pop("model_used", None)
+                    raw = await _claude_raw_once(_cmd[:i] + _cmd[i + 2:])
+                    parsed = parse_claude_json_output(raw)
+                    if not sess.get("model_used"):
+                        sess["model_used"] = model_answered(parsed, None)
+                    return raw
+                sess["model"] = None
+                try:
+                    from helm.model_prefs import get_model_pref, set_model_pref
+                    if get_model_pref("claude") == bad:
+                        set_model_pref("claude", None)
+                except Exception:
+                    pass
+                logger.info("claude rejected model %s; retrying with its default", bad)
+                await push_message(
+                    "system",
+                    f"Claude can't use the model `{bad}` (it doesn't exist or your account "
+                    f"can't use it), so this chat is back on Claude's default model.",
+                    source=source, session_id=sid)
+                await push_state()
+                sess.pop("model_used", None)
+                retry = (["--model", "default"] if "--continue" in _cmd else [])
+                raw = await _claude_raw_once(_cmd[:i] + retry + _cmd[i + 2:])
+                parsed = parse_claude_json_output(raw)
+            if not sess.get("model_used"):
+                sess["model_used"] = model_answered(parsed, sess.get("model"))
+            return raw
+
+        async def _claude_raw_once(_cmd):
             _dbg = "disabled"
             try:
                 from helm.ai_runner.streaming import (
@@ -1568,6 +1608,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
                 pass
 
         await push_thinking(False, session_id=sid)
+        await push_state()   # the model picker shows which model answered
 
         # If successful, broadcast and handle file diff
         if not _is_failure(output):

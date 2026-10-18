@@ -655,53 +655,33 @@ async def delete_custom_integration(key: str):
 # Model discovery & selection endpoints
 # ---------------------------------------------------------------------------
 
-_model_cache: dict[str, tuple[float, list[str]]] = {}
-_MODEL_CACHE_TTL = 300  # 5 minutes
-
-
-async def _fetch_models_cached(ai: str) -> list[str]:
-    import time
-    from helm.web_routes.helpers import (
-        _fetch_antigravity_models,
-        _fetch_claude_models,
-        _fetch_gemini_models,
-        _fetch_ollama_models,
-        _fetch_openai_models,
-    )
-    _fetch_fns = {
-        "claude":       _fetch_claude_models,
-        "codex":        _fetch_openai_models,
-        "gemini":       _fetch_gemini_models,
-        "antigravity":  _fetch_antigravity_models,
-        "ollama":       _fetch_ollama_models,
-    }
-    fn = _fetch_fns.get(ai)
-    if fn is None:
-        return []
-    now = time.time()
-    cached_at, cached_models = _model_cache.get(ai, (0.0, []))
-    if now - cached_at < _MODEL_CACHE_TTL and cached_models:
-        return cached_models
-    models = await asyncio.to_thread(fn)
-    _model_cache[ai] = (now, models)
-    return models
-
-
 @router.get("/api/models/selected")
 async def get_selected_models():
-    """Return all persisted model selections."""
+    """Return the model each AI's new chats start with."""
     from helm.model_prefs import get_all_prefs
-    selected = get_all_prefs()
-    return {"ok": True, "selected": selected}
+    return {"ok": True, "selected": get_all_prefs()}
 
 
 @router.get("/api/models/{ai}")
-async def get_models(ai: str):
-    """Return available models for AI (cached 5 min)."""
-    models = await _fetch_models_cached(ai)
+async def get_models(ai: str, session: str | None = None):
+    """The model picker for one AI: its options, and which is selected.
+
+    With ?session=<id> of a chat using this AI, `selected` is that chat's model and
+    `last_used` the model Claude reported for its last reply; otherwise `selected`
+    is the model new chats with this AI start with."""
+    from helm import model_catalog
     from helm.model_prefs import get_model_pref
-    selected = get_model_pref(ai)
-    return {"ok": True, "ai": ai, "models": models, "selected": selected}
+    options = await asyncio.to_thread(model_catalog.options, ai)
+    sess = _st.sessions.get(session) if session else None
+    if sess is not None and sess.get("ai") == ai:
+        selected, last_used = sess.get("model"), sess.get("model_used")
+    else:
+        selected, last_used = get_model_pref(ai), None
+    return {"ok": True, "ai": ai, "options": options,
+            "models": [o["id"] for o in options if o["id"]],   # older callers
+            "selected": selected, "last_used": last_used,
+            "default_for_new": get_model_pref(ai),
+            "picker": ai in model_catalog.PICKER_AIS}
 
 
 from pydantic import BaseModel as _BaseModel
@@ -711,24 +691,57 @@ class _SetModelRequest(_BaseModel):
     model: str | None = None
 
 
+def _clean_model(value: str | None) -> str | None:
+    value = (value or "").strip()
+    if len(value) > 200 or any(c.isspace() for c in value):
+        raise ValueError("A model name is one word, like sonnet or claude-sonnet-5-5.")
+    return value or None
+
+
 @router.put("/api/models/{ai}")
 async def set_model(ai: str, req: _SetModelRequest):
-    """Persist model selection for AI and apply to all active sessions."""
-    model = req.model or None
+    """Set the model new chats with this AI start with. Open chats keep their own."""
+    try:
+        model = _clean_model(req.model)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     from helm.model_prefs import set_model_pref
     set_model_pref(ai, model)
-    # Apply to all live sessions for this AI
-    for sess in _st.sessions.values():
-        if sess.get("ai") == ai:
-            sess["model"] = model
     return {"ok": True, "ai": ai, "model": model}
+
+
+@router.put("/api/sessions/{sid}/model")
+async def set_session_model(sid: str, req: _SetModelRequest):
+    """Switch one chat's model, also mid-conversation: the next message uses it.
+    It also becomes the model new chats with this AI start with. Other chats keep theirs."""
+    from helm import model_catalog
+    from helm.broadcast import push_message, push_state
+    from helm.model_prefs import set_model_pref
+    sess = _st.sessions.get(sid)
+    if not sess:
+        return JSONResponse({"ok": False, "error": "No such chat."}, status_code=404)
+    ai = sess.get("ai")
+    if ai not in model_catalog.PICKER_AIS:
+        return JSONResponse({"ok": False, "error": f"Model choice isn't available for {ai or 'this chat'} yet."},
+                            status_code=400)
+    try:
+        model = _clean_model(req.model)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    if model == sess.get("model"):
+        return {"ok": True, "session": sid, "ai": ai, "model": model}
+    sess["model"] = model
+    sess.pop("model_used", None)
+    set_model_pref(ai, model)
+    await push_state()
+    await push_message("system", f"Model for this chat: {model_catalog.label(ai, model)}. "
+                                 "Your next message uses it.", session_id=sid)
+    return {"ok": True, "session": sid, "ai": ai, "model": model}
 
 
 @router.post("/api/models/{ai}/refresh")
 async def refresh_models(ai: str):
-    """Bust cache and re-fetch model list for AI."""
-    import time
-    _model_cache.pop(ai, None)
-    models = await _fetch_models_cached(ai)
-    _model_cache[ai] = (time.time(), models)
+    """Read the AI's model list again (e.g. after installing or signing in)."""
+    from helm import model_catalog
+    models = await asyncio.to_thread(model_catalog.refresh, ai)
     return {"ok": True, "ai": ai, "models": models, "count": len(models)}

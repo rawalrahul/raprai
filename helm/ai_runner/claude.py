@@ -26,6 +26,11 @@ def build_claude_cmd(prompt: str, has_history: bool,
     cmd = ["claude"]
     if model:
         cmd.extend(["--model", model])
+    elif has_history:
+        # --continue with no --model keeps the model the conversation last used, so
+        # after a switch "Default" would stick to it. "default" is Claude's own name
+        # for its default model.
+        cmd.extend(["--model", "default"])
     if has_history:
         cmd.append("--continue")
     if auto_approve:
@@ -104,7 +109,39 @@ def parse_claude_json_output(raw: str) -> dict:
         "output_tokens": int(output_tokens) if output_tokens is not None else None,
         "cost_usd": float(cost_usd) if cost_usd is not None else None,
         "is_json": True,
+        "is_error": bool(data.get("is_error")),
+        "api_error_status": data.get("api_error_status"),
+        "models_used": list((data.get("modelUsage") or {}).keys()),
     }
+
+
+def model_rejected(parsed: dict) -> bool:
+    """True when Claude refused the --model it was given (unknown name, retired model,
+    or one this account can't use). Claude Code then answers with an error result:
+    is_error, HTTP 404, "There's an issue with the selected model (…)"."""
+    if not parsed.get("is_error"):
+        return False
+    return (parsed.get("api_error_status") == 404
+            or "issue with the selected model" in (parsed.get("text") or "").lower())
+
+
+def model_answered(parsed: dict, chosen: str | None) -> str | None:
+    """Which model answered, from the final result's modelUsage (blocking runs).
+
+    modelUsage also lists a small helper model Claude Code runs on the side (Haiku),
+    often with more tokens than the answer, so the answering model is the one that
+    matches the choice, else the one that isn't the helper."""
+    used = [m for m in parsed.get("models_used") or [] if m != "<synthetic>"]
+    if not used:
+        return None
+    if chosen:
+        hit = [m for m in used if chosen.lower() in m.lower()]
+        if hit:
+            return hit[0]
+    if len(used) == 1:
+        return used[0]
+    main = [m for m in used if "haiku" not in m.lower()]
+    return main[0] if len(main) == 1 else None
 
 
 _build_claude_cmd = build_claude_cmd  # legacy alias

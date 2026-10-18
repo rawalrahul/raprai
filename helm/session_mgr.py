@@ -511,6 +511,7 @@ def sessions_state_payload() -> list[dict]:
          "busy": s.get("busy", False), "task_start": s.get("task_start"),
          "usage": usage_for_ai(s.get("ai")),
          "model": s.get("model"),
+         "model_used": s.get("model_used"),
          "context": context_info_for_session(s)}
         for s in _st.sessions.values()
     ]

@@ -138,8 +138,12 @@ def _gemini_cli_aliases() -> list[str]:
 
 
 def _fetch_claude_models() -> list[str]:
-    """Claude CLI aliases (opus, sonnet...) first, then any full model names found."""
-    aliases = _claude_cli_aliases()
+    """Claude CLI aliases (fable, opus, sonnet... from its --help) first, then any full
+    model names found. 'haiku' is always offered: the CLI accepts it, though its --help
+    example doesn't name it. If --help can't be read, the long-standing aliases are used."""
+    aliases = _claude_cli_aliases() or ["opus", "sonnet"]
+    if "haiku" not in aliases:
+        aliases = aliases + ["haiku"]
     return aliases + [m for m in _fetch_claude_model_ids() if m not in aliases]
 
 
