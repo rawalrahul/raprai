@@ -1,7 +1,7 @@
 /**
  * Model picker: a chip in the message box, next to the AI chip, showing the
- * chat's model ("Sonnet ▾"). Clicking it lists the AI's models with a ✓ on the
- * one in use. Picking one switches this chat right away (the next message uses
+ * chat's model and effort ("Opus 5.5 · high ▾"). Clicking it lists the AI's
+ * models with a ✓ on the one in use, and the effort levels that model takes. Picking one switches this chat right away (the next message uses
  * it, also mid-conversation) and becomes the model new chats with that AI start
  * with. Other open chats keep their own model. Shown only for AIs that support
  * it (MODEL_PICKER_AIS). DOM APIs only (no innerHTML with data).
@@ -20,6 +20,12 @@ function _mEl(tag, cls, text) {
 function _modelLabel(ai, id) {
   if (!id) return 'Default';
   return (_modelLabels[ai] && _modelLabels[ai][id]) || id;
+}
+
+/** What the chip shows: the version when the menu knows it ("Opus 5.5"), else the name. */
+function _rememberLabels(ai, options) {
+  _modelLabels[ai] = {};
+  options.forEach(o => { if (o.id) _modelLabels[ai][o.id] = (o.sub && !o.group) ? o.sub : o.label; });
 }
 
 function _focusedSession() {
@@ -104,21 +110,26 @@ async function _fillModelMenu(menu, sess) {
     menu.appendChild(_mEl('div', 'ai-menu-section', 'Could not load models: ' + err.message));
     return;
   }
-  _modelLabels[ai] = {};
-  d.options.forEach(o => { if (o.id) _modelLabels[ai][o.id] = o.label; });
+  _rememberLabels(ai, d.options);
   menu.textContent = '';
   menu.appendChild(_mEl('div', 'ai-menu-section', (AI_LABEL[ai] || ai) + ' model for this chat'));
   const known = d.options.some(o => (o.id || null) === (d.selected || null));
-  const opts = known ? d.options : d.options.concat([{ id: d.selected, label: d.selected }]);
+  const opts = known ? d.options : d.options.concat([{ id: d.selected, label: d.selected, group: 'Your choice' }]);
+  let group = null;
   opts.forEach(o => {
+    if ((o.group || null) !== group) {
+      group = o.group || null;
+      if (group) menu.appendChild(_mEl('div', 'ai-menu-section model-group', group));
+    }
     const on = (o.id || null) === (d.selected || null);
     const b = _mEl('button', 'ai-menu-item model-item');
     b.type = 'button';
     b.setAttribute('role', 'menuitemradio');
     b.setAttribute('aria-checked', on ? 'true' : 'false');
+    if (o.title) b.title = o.title;
     b.appendChild(_mEl('span', 'model-check', on ? '✓' : ''));
     b.appendChild(_mEl('span', 'model-name', o.label));
-    if (!o.id) b.appendChild(_mEl('span', 'model-sub', 'the AI picks'));
+    if (o.sub && o.sub !== o.label) b.appendChild(_mEl('span', 'model-sub', o.sub));
     b.addEventListener('click', () => _chooseModel(sess, o.id));
     menu.appendChild(b);
   });
@@ -126,11 +137,36 @@ async function _fillModelMenu(menu, sess) {
   other.type = 'button';
   other.appendChild(_mEl('span', 'model-check', ''));
   other.appendChild(_mEl('span', 'model-name', 'Other model…'));
+  other.title = 'Type any model or exact version, e.g. claude-opus-4-5';
   other.addEventListener('click', () => {
-    const name = (prompt('Model name, as the AI\'s own docs write it (e.g. claude-sonnet-5-5):', d.selected || '') || '').trim();
+    const name = (prompt('Model name or exact version, as Anthropic writes it (e.g. claude-opus-4-5):', d.selected || '') || '').trim();
     if (name) _chooseModel(sess, name);
   });
   menu.appendChild(other);
+
+  // Effort: the levels Claude Code reports for this chat's model.
+  const cur = opts.find(o => (o.id || null) === (d.selected || null));
+  const levels = (cur && cur.efforts) || [];
+  menu.appendChild(_mEl('div', 'ai-menu-divider'));
+  menu.appendChild(_mEl('div', 'ai-menu-section', 'Effort'));
+  if (!levels.length) {
+    menu.appendChild(_mEl('div', 'model-note', (AI_LABEL[ai] || ai) + " doesn't list effort levels for this model."));
+  } else {
+    const row = _mEl('div', 'effort-row');
+    row.setAttribute('role', 'radiogroup');
+    row.setAttribute('aria-label', 'Effort');
+    [null].concat(levels).forEach(level => {
+      const on = (level || null) === (d.effort || null);
+      const b = _mEl('button', 'effort-item' + (on ? ' on' : ''), level || 'Default');
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+      b.title = level ? 'Effort level ' + level : "Claude's own default effort (your Claude setting, if you set one)";
+      b.addEventListener('click', () => _chooseEffort(sess, level));
+      row.appendChild(b);
+    });
+    menu.appendChild(row);
+  }
   if (d.last_used) {
     menu.appendChild(_mEl('div', 'ai-menu-divider'));
     menu.appendChild(_mEl('div', 'model-note', 'Last reply: ' + d.last_used));
@@ -147,6 +183,18 @@ async function _chooseModel(sess, id) {
   }
   sess.model = id || null;
   sess.model_used = null;
+  _updateModelChip();   // the server's state update follows, with effort reset if the new model doesn't take it
+}
+
+async function _chooseEffort(sess, level) {
+  _closeModelMenu();
+  try {
+    await _modelsApi('/api/sessions/' + encodeURIComponent(sess.id) + '/effort', { method: 'PUT', body: JSON.stringify({ effort: level }) });
+  } catch (err) {
+    if (typeof Toast !== 'undefined') Toast.error('Effort: ' + err.message);
+    return;
+  }
+  sess.effort = level || null;
   _updateModelChip();
 }
 
@@ -158,8 +206,10 @@ function _updateModelChip() {
   const show = !!(sess && MODEL_PICKER_AIS.includes(sess.ai));
   chip.hidden = !show;
   if (!show) { _closeModelMenu(); return; }
-  chip.querySelector('.model-picker-label').textContent = _modelLabel(sess.ai, sess.model);
+  chip.querySelector('.model-picker-label').textContent =
+    _modelLabel(sess.ai, sess.model) + (sess.effort ? ' · ' + sess.effort : '');
   const title = 'Model for this chat: ' + _modelLabel(sess.ai, sess.model) +
+    '\nEffort: ' + (sess.effort || 'Default') +
     (sess.model_used ? '\nLast reply: ' + sess.model_used : '') + '\nClick to change';
   chip.title = title;
   chip.setAttribute('aria-label', title.replace(/\n/g, '. '));
@@ -182,8 +232,7 @@ function _updateModelChip() {
   _buildModelPicker();
   _updateModelChip();
   MODEL_PICKER_AIS.forEach(ai => _modelsApi('/api/models/' + ai).then(d => {
-    _modelLabels[ai] = {};
-    d.options.forEach(o => { if (o.id) _modelLabels[ai][o.id] = o.label; });
+    _rememberLabels(ai, d.options);
     _updateModelChip();
   }).catch(() => {}));
 })();

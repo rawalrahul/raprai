@@ -66,5 +66,16 @@ def set_model_pref(ai: str, model: str | None) -> None:
 def get_all_prefs() -> dict[str, str | None]:
     """Return all persisted model selections."""
     base = dict(_DEFAULTS)
-    base.update(_load())
+    base.update({k: v for k, v in _load().items() if ":" not in k})   # not the "<ai>:effort" entries
     return base
+
+
+def get_effort_pref(ai: str) -> str | None:
+    """The effort level new chats with this AI start with, or None (the AI's own default)."""
+    return _load().get(f"{ai}:effort")
+
+
+def set_effort_pref(ai: str, effort: str | None) -> None:
+    prefs = _load()
+    prefs[f"{ai}:effort"] = effort
+    _save(prefs)

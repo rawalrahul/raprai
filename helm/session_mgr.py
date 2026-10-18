@@ -54,6 +54,15 @@ def make_session(ai: Optional[str], cwd: Optional[str] = None,
             logger.info("codex: saved model %s isn't offered any more, using Codex's default", model)
             model = None
 
+    # Claude chats also start with the effort level picked last (None: Claude's own default).
+    effort = None
+    if ai == "claude":
+        try:
+            from helm.model_prefs import get_effort_pref
+            effort = get_effort_pref(ai)
+        except Exception:
+            effort = None
+
     target_cwd = cwd or _st.last_cwd
     path_id    = path_to_id(target_cwd)
     history    = get_history_messages(path_id)
@@ -80,6 +89,7 @@ def make_session(ai: Optional[str], cwd: Optional[str] = None,
         "history": history,
         # Per-session model override — None means use the integration's default
         "model": model or None,
+        "effort": effort,
         # Ollama REST-API conversation history (None = not yet initialised)
         "ollama_messages": None,
     }
@@ -512,6 +522,7 @@ def sessions_state_payload() -> list[dict]:
          "usage": usage_for_ai(s.get("ai")),
          "model": s.get("model"),
          "model_used": s.get("model_used"),
+         "effort": s.get("effort"),
          "context": context_info_for_session(s)}
         for s in _st.sessions.values()
     ]

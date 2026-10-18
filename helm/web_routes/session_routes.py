@@ -673,13 +673,14 @@ async def get_models(ai: str, session: str | None = None):
     from helm.model_prefs import get_model_pref
     options = await asyncio.to_thread(model_catalog.options, ai)
     sess = _st.sessions.get(session) if session else None
+    from helm.model_prefs import get_effort_pref
     if sess is not None and sess.get("ai") == ai:
-        selected, last_used = sess.get("model"), sess.get("model_used")
+        selected, last_used, effort = sess.get("model"), sess.get("model_used"), sess.get("effort")
     else:
-        selected, last_used = get_model_pref(ai), None
+        selected, last_used, effort = get_model_pref(ai), None, get_effort_pref(ai)
     return {"ok": True, "ai": ai, "options": options,
             "models": [o["id"] for o in options if o["id"]],   # older callers
-            "selected": selected, "last_used": last_used,
+            "selected": selected, "last_used": last_used, "effort": effort,
             "default_for_new": get_model_pref(ai),
             "picker": ai in model_catalog.PICKER_AIS}
 
@@ -716,7 +717,7 @@ async def set_session_model(sid: str, req: _SetModelRequest):
     It also becomes the model new chats with this AI start with. Other chats keep theirs."""
     from helm import model_catalog
     from helm.broadcast import push_message, push_state
-    from helm.model_prefs import set_model_pref
+    from helm.model_prefs import set_effort_pref, set_model_pref
     sess = _st.sessions.get(sid)
     if not sess:
         return JSONResponse({"ok": False, "error": "No such chat."}, status_code=404)
@@ -729,14 +730,54 @@ async def set_session_model(sid: str, req: _SetModelRequest):
     except ValueError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     if model == sess.get("model"):
-        return {"ok": True, "session": sid, "ai": ai, "model": model}
+        return {"ok": True, "session": sid, "ai": ai, "model": model, "effort": sess.get("effort")}
     sess["model"] = model
     sess.pop("model_used", None)
     set_model_pref(ai, model)
+    levels = await asyncio.to_thread(model_catalog.efforts_for, ai, model)   # also names the version
+    note = ""
+    if sess.get("effort") and sess["effort"] not in levels:
+        note = f" It doesn't take effort level {sess['effort']}, so effort is back to Default."
+        sess["effort"] = None
+        set_effort_pref(ai, None)
     await push_state()
-    await push_message("system", f"Model for this chat: {model_catalog.label(ai, model)}. "
+    await push_message("system", f"Model for this chat: {model_catalog.label(ai, model)}.{note} "
                                  "Your next message uses it.", session_id=sid)
-    return {"ok": True, "session": sid, "ai": ai, "model": model}
+    return {"ok": True, "session": sid, "ai": ai, "model": model, "effort": sess.get("effort")}
+
+
+class _SetEffortRequest(_BaseModel):
+    effort: str | None = None
+
+
+@router.put("/api/sessions/{sid}/effort")
+async def set_session_effort(sid: str, req: _SetEffortRequest):
+    """Set one chat's effort level (None: the AI's own default), from the levels its CLI
+    reports for the chat's model. Also the level new chats with this AI start with."""
+    from helm import model_catalog
+    from helm.broadcast import push_message, push_state
+    from helm.model_prefs import set_effort_pref
+    sess = _st.sessions.get(sid)
+    if not sess:
+        return JSONResponse({"ok": False, "error": "No such chat."}, status_code=404)
+    ai = sess.get("ai")
+    if ai not in model_catalog.PICKER_AIS:
+        return JSONResponse({"ok": False, "error": f"Effort isn't available for {ai or 'this chat'} yet."},
+                            status_code=400)
+    effort = (req.effort or "").strip() or None
+    levels = await asyncio.to_thread(model_catalog.efforts_for, ai, sess.get("model"))
+    if effort and effort not in levels:
+        offered = ", ".join(levels) if levels else "none"
+        return JSONResponse({"ok": False, "error": f"{model_catalog.label(ai, sess.get('model'))} doesn't take "
+                                                   f"effort level {effort!r} (it takes: {offered})."}, status_code=400)
+    if effort == sess.get("effort"):
+        return {"ok": True, "session": sid, "effort": effort}
+    sess["effort"] = effort
+    set_effort_pref(ai, effort)
+    await push_state()
+    await push_message("system", f"Effort for this chat: {effort or 'Default'}. Your next message uses it.",
+                       session_id=sid)
+    return {"ok": True, "session": sid, "effort": effort}
 
 
 @router.post("/api/models/{ai}/refresh")

@@ -12,7 +12,8 @@ import re
 def build_claude_cmd(prompt: str, has_history: bool,
                      model: str | None = None,
                      auto_approve: bool = False,
-                     mcp_config: str | None = None) -> list[str]:
+                     mcp_config: str | None = None,
+                     effort: str | None = None) -> list[str]:
     """Build the command-line arguments to invoke the Claude CLI.
 
     Uses --output-format json to get structured output including token counts.
@@ -26,11 +27,8 @@ def build_claude_cmd(prompt: str, has_history: bool,
     cmd = ["claude"]
     if model:
         cmd.extend(["--model", model])
-    elif has_history:
-        # --continue with no --model keeps the model the conversation last used, so
-        # after a switch "Default" would stick to it. "default" is Claude's own name
-        # for its default model.
-        cmd.extend(["--model", "default"])
+    if effort:
+        cmd.extend(["--effort", effort])
     if has_history:
         cmd.append("--continue")
     if auto_approve:
