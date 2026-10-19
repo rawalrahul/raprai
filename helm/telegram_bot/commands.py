@@ -754,8 +754,9 @@ async def tg_text(update, context):
         return
 
     # --- "@codex …": start that AI, or bring it into a group with the open session ---
-    from helm.mention_router import parse_leading
-    if parse_leading(text):
+    # --- "Hey Kelvin …": Auto picks the AI (or the one named right after) ---
+    from helm.mention_router import parse_kelvin, parse_leading
+    if parse_leading(text) or parse_kelvin(text) is not None:
         async def _tg_mention(_text: str = text, _update=update) -> None:
             from helm.mention_router import route
             try:
@@ -975,28 +976,31 @@ async def tg_voice(update, context):
     import sys
     import tempfile
 
-    # Must have a focused session
-    if not _st.focused_id or _st.focused_id not in _st.sessions:
-        if _st.sessions:
+    from helm.mention_router import parse_kelvin
+
+    async def _needs_session() -> bool:
+        """Without "Hey Kelvin", a voice message needs a running focused session."""
+        if not _st.focused_id or _st.focused_id not in _st.sessions:
+            if _st.sessions:
+                await update.message.reply_text(
+                    "👋 Tap a session first (or start with \"Hey Kelvin\"), then send a voice message:",
+                    reply_markup=sessions_keyboard(),
+                )
+            else:
+                await update.message.reply_text(
+                    "👋 No sessions yet. Create one first, or start with \"Hey Kelvin\":",
+                    reply_markup=new_session_keyboard(),
+                )
+            return True
+        sess = _st.sessions.get(_st.focused_id)
+        if sess and sess["status"] == "stopped":
             await update.message.reply_text(
-                "👋 Tap a session first, then send a voice message:",
+                f"✨ *{sess['name']}* is stopped. Resume it or switch session:",
+                parse_mode="Markdown",
                 reply_markup=sessions_keyboard(),
             )
-        else:
-            await update.message.reply_text(
-                "👋 No sessions yet. Create one first:",
-                reply_markup=new_session_keyboard(),
-            )
-        return
-
-    sess = _st.sessions.get(_st.focused_id)
-    if sess and sess["status"] == "stopped":
-        await update.message.reply_text(
-            f"✨ *{sess['name']}* is stopped. Resume it or switch session:",
-            parse_mode="Markdown",
-            reply_markup=sessions_keyboard(),
-        )
-        return
+            return True
+        return False
 
     # Download the voice/audio file from Telegram
     voice = update.message.voice or update.message.audio
@@ -1031,9 +1035,15 @@ async def tg_voice(update, context):
                                             reply_markup=session_controls_keyboard())
             return
 
+        to_kelvin = parse_kelvin(transcript) is not None
+        if not to_kelvin and await _needs_session():
+            return
+
         # Show the transcript to the user
         fs = focused_session()
         label = f"{fs['emoji']} {fs['name']}" if fs else "session"
+        if to_kelvin:
+            label = "🐧 Kelvin"
         import helm.groupchat as _gc
         _grp = _gc.active_group("telegram")
         if _grp:
@@ -1126,7 +1136,8 @@ def _transcribe_audio(audio_path: str) -> str:
         import whisper
 
     model = whisper.load_model("base")
-    result = model.transcribe(audio_path, fp16=False)
+    # The prompt nudges Whisper to spell the wake word "Kelvin" (not "Calvin").
+    result = model.transcribe(audio_path, fp16=False, initial_prompt="Hey Kelvin.")
     return (result.get("text") or "").strip()
 
 

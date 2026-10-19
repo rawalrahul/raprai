@@ -172,3 +172,73 @@ def test_process_message_uses_the_router(env, monkeypatch):
         return "routed" if text.startswith("@") else None
     monkeypatch.setattr(mr, "route", fake_route)
     assert run(REAL_PROCESS_MESSAGE("@codex hi", source="web")) == "routed"
+
+
+# ---------------------------------------------------------------------------
+# "@kelvin …" / "Hey Kelvin …": Auto picks the AI unless one is named
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def kelvin_env(env, monkeypatch):
+    from helm import smart_routing as sr
+    monkeypatch.setattr(sr, "allowed_from_budget", lambda ai: True)
+    return env
+
+
+@pytest.mark.parametrize("text, rest", [
+    ("@kelvin what time is it in Tokyo?", "what time is it in Tokyo?"),
+    ("@Kelvin", ""),
+    ("Hey Kelvin, fix the tests", "fix the tests"),
+    ("hey, kelvin. summarise this", "summarise this"),
+    ("Hi Kelvin!", ""),
+    ("hello kelvin: are you there", "are you there"),
+])
+def test_parse_kelvin(text, rest):
+    assert mr.parse_kelvin(text) == rest
+
+
+@pytest.mark.parametrize("text", ["kelvin", "hey kelvinator", "tell kelvin hi", "hi there", "@codex hi"])
+def test_parse_kelvin_ignores_other_text(text):
+    assert mr.parse_kelvin(text) is None
+
+
+def test_hi_kelvin_greeting_goes_to_the_cheapest_ai(kelvin_env):
+    tmp, sent = kelvin_env
+    reply = run(mr.route("Hi Kelvin", "telegram"))
+    sess = _st.sessions[_st.focused_id]
+    assert sess["ai"] == "codex"                       # cheaper than Claude for a greeting
+    assert sent == [(sess["id"], "Hi Kelvin")]
+    assert reply.startswith("🐧 Kelvin picked Codex") and reply.endswith(f"reply from {sess['id']}")
+
+
+def test_hey_kelvin_coding_task_goes_to_the_strongest_ai(kelvin_env):
+    tmp, sent = kelvin_env
+    run(mr.route("Hey Kelvin, refactor the auth module, then fix the failing tests "
+                 "and update the docs for every changed function", "web"))
+    sess = _st.sessions[_st.focused_id]
+    assert sess["ai"] == "claude" and sent[0][0] == sess["id"]
+    assert sent[0][1].startswith("refactor the auth module")
+
+
+def test_kelvin_reuses_the_focused_session_when_auto_picks_its_ai(kelvin_env):
+    tmp, sent = kelvin_env
+    from helm.session_mgr import make_session
+    s = make_session("codex", cwd=str(tmp))
+    _st.focused_id = s["id"]
+    run(mr.route("@kelvin hi", "whatsapp"))
+    assert _st.focused_id == s["id"] and sent == [(s["id"], "hi")] and len(_st.sessions) == 1
+
+
+@pytest.mark.parametrize("text", ["Hey Kelvin, @codex fix the tests", "Hi Kelvin, ask codex to fix the tests",
+                                  "@kelvin codex, fix the tests"])
+def test_kelvin_with_a_named_ai_uses_that_ai(kelvin_env, text):
+    tmp, sent = kelvin_env
+    run(mr.route(text, "telegram"))
+    sess = _st.sessions[_st.focused_id]
+    assert sess["ai"] == "codex" and sent == [(sess["id"], "fix the tests")]
+
+
+def test_kelvin_with_no_ai_ready_says_so(kelvin_env, monkeypatch):
+    monkeypatch.setattr(mr, "_ready", lambda key: False)
+    reply = run(mr.route("Hey Kelvin, hello", "telegram"))
+    assert reply.startswith("🐧 Kelvin here") and _st.sessions == {}
