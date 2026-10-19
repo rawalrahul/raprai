@@ -1100,45 +1100,8 @@ async def tg_voice(update, context):
                                         reply_markup=session_controls_keyboard())
 
 
-def _ensure_ffmpeg():
-    """Make sure ffmpeg is on PATH. Uses static-ffmpeg as fallback on Windows."""
-    import shutil, subprocess, sys
-    from helm.subprocess_utils import hidden_kwargs
-    if shutil.which("ffmpeg"):
-        return  # already available
-    # Install static-ffmpeg which bundles the binary
-    try:
-        import static_ffmpeg
-    except ImportError:
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "static-ffmpeg", "-q"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            **hidden_kwargs(),
-        )
-        import static_ffmpeg
-    static_ffmpeg.add_paths()
-
-
-def _transcribe_audio(audio_path: str) -> str:
-    """Transcribe audio file using Whisper. Runs in a thread pool."""
-    _ensure_ffmpeg()
-
-    try:
-        import whisper
-    except ImportError:
-        import subprocess, sys
-        from helm.subprocess_utils import hidden_kwargs
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "openai-whisper", "-q"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            **hidden_kwargs(),
-        )
-        import whisper
-
-    model = whisper.load_model("base")
-    # The prompt nudges Whisper to spell the wake word "Kelvin" (not "Calvin").
-    result = model.transcribe(audio_path, fp16=False, initial_prompt="Hey Kelvin.")
-    return (result.get("text") or "").strip()
+# Whisper speech-to-text lives in helm/voice.py, shared with the other chat apps.
+from helm.voice import ensure_ffmpeg as _ensure_ffmpeg, transcribe_file as _transcribe_audio  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

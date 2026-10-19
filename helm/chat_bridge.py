@@ -1,7 +1,8 @@
 """
 helm/chat_bridge.py — Connects any chat app to RAPR's shared commands.
 
-A chat app gives us (sender id, chat id, text). The bridge checks the sender is
+A chat app gives us (sender id, chat id, text), or the audio of a voice message,
+which is transcribed and then handled like typed text. The bridge checks the sender is
 allowed, runs the shared router, and sends the replies back to that chat. It
 also receives group-chat messages so a group the chat is in is relayed there.
 """
@@ -45,6 +46,16 @@ class ChatBridge:
         for reply in replies:
             for part in chunks(reply):
                 await self.send(str(chat_id), part)
+
+    async def on_voice(self, sender_id: str, chat_id: str, audio: bytes, ext: str = "ogg") -> None:
+        """A voice message: transcribe it, then handle the words like typed text."""
+        if not self.is_allowed(sender_id):
+            logger.warning("%s: ignored a voice message from an unauthorised user", self.channel)
+            return
+        from helm.voice import transcript_for_chat
+        text = await transcript_for_chat(audio, ext, lambda t: self.send(str(chat_id), t))
+        if text:
+            await self.on_message(sender_id, chat_id, text)
 
     async def relay_group(self, _group: dict, text: str) -> None:
         """Group messages go to the chat this app last talked in."""
