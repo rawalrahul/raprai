@@ -16,6 +16,7 @@ import helm.state as _st
 HELP = (
     "🐧 RAPR AI\n"
     "Just type to talk to your focused session.\n"
+    "Hey Kelvin … (or @kelvin …) — Kelvin picks the best AI for it\n"
     "/sessions — list sessions\n"
     "/use <number> — switch session\n"
     "/new <ai> — start a session (claude, gemini, codex, ollama…)\n"

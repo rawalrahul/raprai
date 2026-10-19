@@ -20,6 +20,14 @@ Inside a group chat, a leading @mention of an AI that isn't a member adds it
 
 Only mentions at the very start count, and only names of AIs RAPR knows, so
 "ask @codex later" or an email address is just text.
+
+Talking to Kelvin (RAPR itself) instead of one AI — typed or by voice:
+
+  "@kelvin what's a good name for this repo?", "Hey Kelvin, …", "Hi Kelvin"
+    • Names an AI right after ("Hey Kelvin, @codex fix the tests", "Hi Kelvin,
+      ask Gemini …") → that AI, exactly as if it had been @mentioned.
+    • Otherwise Auto (smart_routing) picks the AI: a greeting or short question
+      goes to the cheapest one that's set up, coding work to the strongest.
 """
 
 from __future__ import annotations
@@ -36,6 +44,11 @@ CONTEXT_EXCHANGES = 6            # messages copied from the session into a new g
 
 _LEAD_RE = re.compile(r"^\s*((?:@[\w.\-]+[\s,:]*)+)(.*)$", re.DOTALL)
 _TOKEN_RE = re.compile(r"@([\w.\-]+)")
+_KELVIN_RE = re.compile(r"^\s*(?:@kelvin|(?:hey|hi|hello)[\s,]+kelvin)\b[\s,:;.!?\-]*(.*)$",
+                        re.IGNORECASE | re.DOTALL)
+_ASK_RE = re.compile(r"^(?:ask|use|tell)\s+@?([\w.\-]+)[\s,:]*(?:to\s+)?(.*)$",
+                     re.IGNORECASE | re.DOTALL)
+_WORD_RE = re.compile(r"^@?([\w.\-]+?)[\s,:;.!?]+(.*)$|^@?([\w.\-]+)\W*$", re.DOTALL)
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +91,31 @@ def parse_leading(text: str) -> Optional[tuple[list[str], str]]:
     return keys, m.group(2).strip()
 
 
+def parse_kelvin(text: str) -> Optional[str]:
+    """The rest of a message addressed to Kelvin ("@kelvin …", "hey kelvin …",
+    "hi kelvin"), or None when it isn't addressed to Kelvin."""
+    m = _KELVIN_RE.match(text or "")
+    return m.group(1).strip() if m else None
+
+
+def _named_ai(rest: str) -> Optional[tuple[list[str], str]]:
+    """(AI keys, task) when what follows "Hey Kelvin" names an AI: "@codex …",
+    "Codex, …", "ask/use/tell Gemini (to) …". None means Kelvin should pick."""
+    parsed = parse_leading(rest)
+    if parsed:
+        return parsed
+    names = _ai_names()
+    m = _ASK_RE.match(rest)
+    if m and m.group(1).lower() in names:
+        return [names[m.group(1).lower()]], m.group(2).strip()
+    m = _WORD_RE.match(rest)
+    if m:
+        word = (m.group(1) or m.group(3) or "").lower()
+        if word in names:
+            return [names[word]], (m.group(2) or "").strip()
+    return None
+
+
 def _label(key: str) -> str:
     if key == "claude":
         return "Claude Code"
@@ -114,10 +152,18 @@ async def route(text: str, channel: str) -> Optional[str]:
     or None when the message isn't one (it then goes on as usual)."""
     if channel not in USER_CHANNELS:
         return None
-    parsed = parse_leading(text)
-    if not parsed:
-        return None
-    keys, rest = parsed
+    kelvin = parse_kelvin(text)
+    if kelvin is not None:
+        named = _named_ai(kelvin)
+        if named is None:
+            return await _kelvin_auto(text, kelvin, channel)
+        keys, rest = named
+        text = " ".join(f"@{k}" for k in keys) + (f" {rest}" if rest else "")
+    else:
+        parsed = parse_leading(text)
+        if not parsed:
+            return None
+        keys, rest = parsed
 
     not_ready = [k for k in keys if not _ready(k)]
     if not_ready:
@@ -138,6 +184,36 @@ async def route(text: str, channel: str) -> Optional[str]:
     if len(keys) == 1:
         return await _new_session(keys[0], rest, folder, channel)
     return await _new_group(keys, text, folder, channel)
+
+
+async def _kelvin_auto(text: str, rest: str, channel: str) -> str:
+    """"Hey Kelvin …" without naming an AI: Auto picks one and it answers."""
+    from helm import smart_routing as sr
+    from helm.broadcast import push_message, push_state
+    from helm.session_mgr import session_cwd
+    task = rest or text                       # a bare "Hi Kelvin" is a greeting to answer
+    candidates = [a for a in dict.fromkeys(["claude", *sr.available_from_state()])
+                  if a != "shell" and _ready(a)]
+    decision = sr.decide(task, candidates, allowed=sr.allowed_from_budget)
+    if not decision.ai:
+        return (f"🐧 Kelvin here — {decision.reason}. Set an AI up in "
+                f"Settings → AI Integrations, then try again.")
+    key = decision.ai
+
+    focused = _focused_ai_session()
+    if focused and focused["ai"] == key and not focused.get("busy"):
+        sess = focused
+    else:
+        sess = _start_member_sessions([key], session_cwd())[0]
+        sess.pop("_started_for_group", None)
+        _st.focused_id = sess["id"]
+        await push_state()
+    note = f"🐧 Kelvin picked {_label(key)}: {decision.reason}."
+    logger.info("kelvin: %s", note)
+    await push_message("system", note, source=channel, session_id=sess["id"])
+    from helm.ai_runner.core import process_message
+    reply = await process_message(task, source=channel, session_id=sess["id"])
+    return reply if channel == "web" else f"{note}\n\n{reply}"
 
 
 async def _new_session(key: str, rest: str, folder: str, channel: str) -> str:
