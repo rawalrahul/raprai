@@ -15,6 +15,7 @@ own replies are never taken as commands.
 
 What you can do from WhatsApp:
   plain text            → the focused session, or the group chat you're in
+  a voice message       → transcribed, then the same as typing it
   /sessions             → numbered list of sessions
   /use 2                → focus session 2
   /new claude           → start a session (any AI key: gemini, codex, ollama…)
@@ -169,8 +170,8 @@ async def handle_text(text: str) -> list[str]:
 
 def _ensure_magic() -> None:
     """neonize imports python-magic, which needs the libmagic library. Windows
-    rarely has it, and RAPR only sends text (magic is used for media mime
-    types), so fall back to a stand-in instead of failing the import."""
+    rarely has it, and RAPR only sends text and reads voice notes (magic is
+    used for the mime types of media it sends), so fall back to a stand-in instead of failing the import."""
     import sys
     try:
         import magic  # noqa: F401
@@ -259,6 +260,16 @@ def _message_text(m) -> str:
     return ""
 
 
+def _audio_message(m):
+    """The voice note (or audio file) in a message, or None."""
+    try:
+        if m.HasField("audioMessage"):
+            return m.audioMessage
+    except Exception:
+        pass
+    return None
+
+
 async def send_text(text: str, to=None) -> None:
     """Send text to WhatsApp (to the chat we last heard from by default)."""
     target = to or _reply_to
@@ -294,8 +305,17 @@ async def _on_message(client, ev) -> None:
             return
         text = _message_text(ev.Message)
         if not text:
-            return
-        if src.IsFromMe and is_echo(text):
+            audio = _audio_message(ev.Message)
+            if audio is None:
+                return
+            _reply_to = src.Chat
+            from helm.voice import audio_ext, transcript_for_chat
+            data = await client.download_any(ev.Message)
+            text = await transcript_for_chat(data or b"", audio_ext(audio.mimetype),
+                                             lambda t: send_text(t, to=src.Chat))
+            if not text:
+                return
+        elif src.IsFromMe and is_echo(text):
             return
         _reply_to = src.Chat
         for reply in await handle_text(text):

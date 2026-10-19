@@ -1,9 +1,23 @@
-"""Discord: RAPR AI as a bot in your server or DMs (needs discord.py and a bot token)."""
+"""Discord: RAPR AI as a bot in your server or DMs (needs discord.py and a bot token).
+
+Voice messages (and audio files sent without text) are transcribed and handled
+like typed text.
+"""
 
 from __future__ import annotations
 
 from helm.chat_bridge import ChatBridge
 from helm.config import logger
+
+MAX_AUDIO_BYTES = 25 * 1024 * 1024
+
+
+def _audio_attachment(message):
+    """The first audio attachment of a message, or None."""
+    for a in getattr(message, "attachments", None) or []:
+        if (a.content_type or "").startswith("audio/") and (a.size or 0) <= MAX_AUDIO_BYTES:
+            return a
+    return None
 
 
 async def run(token: str, allowed_user_ids: list[str]) -> None:
@@ -27,6 +41,12 @@ async def run(token: str, allowed_user_ids: list[str]) -> None:
     @client.event
     async def on_message(message):
         if message.author.bot:
+            return
+        audio = None if (message.content or "").strip() else _audio_attachment(message)
+        if audio is not None:
+            from helm.voice import audio_ext
+            await bridge.on_voice(str(message.author.id), str(message.channel.id),
+                                  await audio.read(), audio_ext(audio.content_type, audio.filename))
             return
         await bridge.on_message(str(message.author.id), str(message.channel.id), message.content or "")
 
