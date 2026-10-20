@@ -2,9 +2,12 @@
 voice_routes.py — Web UI voice I/O.
 
   POST /transcribe  — speech-to-text: audio (webm/ogg/wav) -> Whisper -> text.
-  POST /tts         — text-to-speech: text -> audio. Offline by default
-                      (pyttsx3 / OS voices, no API key), ElevenLabs if a key is set.
-  GET  /tts/status  — which TTS backend is active.
+  POST /tts         — text-to-speech: text -> audio. ElevenLabs if a key is set,
+                      else Kokoro on this PC (natural, free), else pyttsx3 / OS voices.
+  GET  /tts/status  — which TTS backend is active, and which Live providers.
+  POST /tts/prepare — install/download Kokoro and Whisper in the background.
+  POST /voice/live/session — a short-lived token for Live voice (OpenAI / Gemini).
+  POST /voice/live/task    — Live voice hands a task to RAPR; returns the reply.
 """
 
 import asyncio
@@ -78,8 +81,11 @@ def _eleven_key() -> str:
 
 
 def tts_backend() -> str:
-    """Return the active TTS backend name: 'elevenlabs' or 'offline'."""
-    return "elevenlabs" if _eleven_key() else "offline"
+    """Return the active TTS backend name: 'elevenlabs', 'kokoro' or 'offline'."""
+    from helm import tts_local
+    if _eleven_key():
+        return "elevenlabs"
+    return "kokoro" if tts_local.is_ready() else "offline"
 
 
 # ElevenLabs voice ids are short alphanumeric tokens. Validate before putting the
@@ -157,7 +163,61 @@ def _tts_offline(text: str) -> bytes:
 @router.get("/tts/status")
 async def tts_status():
     """Report which TTS backend will be used (for the UI to label the control)."""
-    return JSONResponse({"backend": tts_backend()})
+    from helm import tts_local, voice_live
+    return JSONResponse({"backend": tts_backend(), "local": tts_local.status(),
+                         "live": voice_live.providers()})
+
+
+@router.post("/tts/prepare")
+async def tts_prepare():
+    """Start getting the local voice ready (Kokoro + Whisper), without waiting."""
+    from helm import tts_local
+    from helm.voice import warm_up
+    warm_up()
+    return JSONResponse({"backend": tts_backend(), "local": tts_local.prepare()})
+
+
+@router.post("/voice/live/session")
+async def live_session(request: Request):
+    """A one-session token for Live voice. Body: {"provider": "openai"|"gemini"}."""
+    from helm import voice_live
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        data = await asyncio.get_running_loop().run_in_executor(
+            None, voice_live.new_session, body.get("provider"), (body.get("voice") or "").strip())
+        return JSONResponse(data)
+    except LookupError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except Exception as exc:
+        logger.warning("Live voice session failed: %s", exc)
+        return JSONResponse({"error": f"Couldn't start Live voice: {exc}"}, status_code=502)
+
+
+@router.post("/voice/live/task")
+async def live_task(request: Request):
+    """Kelvin (Live voice) hands a task to RAPR. Body: {"task": "...", "ai": "codex"?}.
+    Runs it like a typed message and returns the reply for Kelvin to summarise."""
+    import helm.state as _st
+    from helm import voice_live
+    from helm.ai_runner import process_message
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+    task = (body.get("task") or "").strip()
+    if not task:
+        return JSONResponse({"error": "No task"}, status_code=400)
+    sess = _st.sessions.get(_st.focused_id) if _st.focused_id else None
+    has_session = bool(sess and sess.get("status") != "stopped")
+    text = voice_live.task_message(task, body.get("ai"), has_session)
+    try:
+        reply = await process_message(text, source="web")
+    except Exception as exc:
+        reply = f"The task failed: {exc}"
+    return JSONResponse({"reply": reply or "(no output)"})
 
 
 @router.post("/tts")
@@ -178,13 +238,22 @@ async def text_to_speech(request: Request):
     if len(text) > _TTS_MAX_CHARS:
         text = text[:_TTS_MAX_CHARS]
     voice = (body.get("voice") or "").strip()
+    from helm import tts_local
+    text = tts_local.speakable(text)
+    if not text:
+        return JSONResponse({"error": "Nothing to say"}, status_code=400)
 
     loop = asyncio.get_event_loop()
     try:
         if _eleven_key():
             audio = await loop.run_in_executor(None, _tts_elevenlabs, text, voice)
             media = "audio/mpeg"
+        elif tts_local.is_ready():
+            kvoice = voice if voice in tts_local.VOICES else tts_local.voice_for(body.get("ai"))
+            audio = await loop.run_in_executor(None, tts_local.synthesize, text, kvoice)
+            media = "audio/wav"
         else:
+            tts_local.prepare()            # natural voice next time; OS voice for now
             audio = await loop.run_in_executor(None, _tts_offline, text)
             media = "audio/wav"
         return Response(content=audio, media_type=media)

@@ -175,7 +175,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: blob:; "
             "font-src 'self' data:; "
-            "connect-src 'self' ws: wss:; "
+            # Spoken replies play from blob: URLs; Live voice (OpenAI) posts its
+            # WebRTC offer to api.openai.com (Gemini Live uses wss:).
+            "media-src 'self' blob: data:; "
+            "connect-src 'self' ws: wss: https://api.openai.com; "
             "frame-ancestors 'self'; "
             "base-uri 'self'; "
             "form-action 'self'"

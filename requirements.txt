@@ -64,11 +64,16 @@ comtypes>=1.2.0; sys_platform == "win32"
 # einops>=0.7
 
 # ─────────────────────────────────────────────────────────
-# Optional — Voice transcription (installed on-demand)
+# Optional — Voice (installed on-demand, see helm/voice.py and helm/tts_local.py)
 # Uncomment to pre-install; otherwise auto-installed on first use.
-# WARNING: openai-whisper pulls in PyTorch (~2GB) — do NOT
+# faster-whisper hears you (no PyTorch); kokoro-onnx speaks in a natural
+# voice (model files, ~120 MB, download on first use).
+# WARNING: openai-whisper (the old fallback) pulls in PyTorch (~2GB) — do NOT
 # include in PyInstaller builds.
 # ─────────────────────────────────────────────────────────
+# faster-whisper>=1.1
+# kokoro-onnx>=0.4
+# soundfile>=0.12
 # openai-whisper>=20231117
 static-ffmpeg>=2.5
 
