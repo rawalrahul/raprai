@@ -78,11 +78,33 @@ def _model():
         return model
 
 
+def decode_16k(audio_path: str):
+    """Audio file → 16 kHz mono float32 samples, the input Whisper wants.
+
+    faster-whisper's own decoder passes PyAV an option (metadata_errors) that
+    PyAV 15+ removed, so every voice note failed; this decodes with PyAV
+    directly instead. Any format PyAV reads works (WhatsApp/Telegram Opus,
+    Discord Ogg, Slack WebM/MP4, WAV…)."""
+    import av
+    import numpy as np
+    resampler = av.audio.resampler.AudioResampler(format="s16", layout="mono", rate=16000)
+    chunks = []
+    with av.open(audio_path, mode="r") as container:
+        stream = container.streams.audio[0]
+        for frame in container.decode(stream):
+            frame.pts = None
+            chunks.extend(f.to_ndarray().reshape(-1) for f in resampler.resample(frame))
+        chunks.extend(f.to_ndarray().reshape(-1) for f in resampler.resample(None))
+    if not chunks:
+        return np.zeros(0, dtype=np.float32)
+    return np.concatenate(chunks).astype(np.float32) / 32768.0
+
+
 def transcribe_file(audio_path: str) -> str:
     """Transcribe an audio file (any format ffmpeg reads) with Whisper. Blocking."""
     kind, model = _model()
     if kind == "faster":
-        segments, _info = model.transcribe(audio_path, beam_size=1, vad_filter=True,
+        segments, _info = model.transcribe(decode_16k(audio_path), beam_size=1, vad_filter=True,
                                            initial_prompt=_PROMPT)
         return " ".join(s.text.strip() for s in segments).strip()
     result = model.transcribe(audio_path, fp16=False, initial_prompt=_PROMPT)
