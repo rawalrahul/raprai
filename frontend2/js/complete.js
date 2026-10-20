@@ -1154,8 +1154,8 @@ function send(){
 
 // --- Composer primary button -----------------------------------------------------------------------------------
 // One button, like Claude and ChatGPT: Send when there's text, Stop while the AI
-// is working and the box is empty, otherwise hands-free voice (when the browser
-// can do speech recognition; if not, a disabled Send).
+// is working and the box is empty, otherwise hands-free voice (talk.js; when the
+// browser has no microphone access, a disabled Send).
 const _COMPOSER_MODES = {
   send:  {title: 'Send (Enter)', label: 'Send message'},
   stop:  {title: 'Stop the AI', label: 'Stop the running task'},
@@ -1167,7 +1167,7 @@ function _composerMode(){
   if(el && el.value.trim()) return 'send';
   if(_thinkingState[_focusedId] && _thinkingState[_focusedId].active) return 'stop';
   if(window._handsFree) return 'voice-on';
-  if(window.SpeechRecognition || window.webkitSpeechRecognition) return 'voice';
+  if(typeof _voiceAvailable === 'function' ? _voiceAvailable() : (window.SpeechRecognition || window.webkitSpeechRecognition)) return 'voice';
   return 'send';
 }
 function _updateComposer(){

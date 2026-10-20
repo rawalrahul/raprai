@@ -1,5 +1,5 @@
 /**
- * Bake-off board, ACP agents, and hands-free voice.
+ * Bake-off board and ACP agents (hands-free voice is in talk.js).
  * DOM APIs only (no innerHTML with user data).
  */
 
@@ -240,65 +240,7 @@ function _renderAcpMenu(agents) {
   });
 }
 
-// ── Hands-free voice ─────────────────────────────────────────────────────────────
-
-let _recog = null;
-window._handsFree = false;
-
-function _recogniser() {
-  const C = window.SpeechRecognition || window.webkitSpeechRecognition;
-  return C ? new C() : null;
-}
-
-function toggleHandsFree() {
-  if (window._handsFree) { stopHandsFree(); return; }
-  const r = _recogniser();
-  if (!r) { _toast('warning', 'Hands-free needs a browser with speech recognition (Chrome or Edge).'); return; }
-  r.lang = navigator.language || 'en-US';
-  r.continuous = false;
-  r.interimResults = false;
-  r.onresult = e => {
-    const text = (e.results[0] && e.results[0][0] && e.results[0][0].transcript || '').trim();
-    if (!text) return;
-    const inp = document.getElementById('inp');
-    if (inp) { inp.value = text; if (typeof send === 'function') send(); }
-  };
-  r.onend = () => { if (window._handsFree && !window._speakingReply) try { r.start(); } catch (_) {} };
-  r.onerror = e => { if (e.error === 'not-allowed') { _toast('error', 'Microphone access was refused.'); stopHandsFree(); } };
-  _recog = r;
-  window._handsFree = true;
-  try { r.start(); } catch (_) {}
-  _markHandsFree();
-}
-
-function stopHandsFree() {
-  window._handsFree = false;
-  try { _recog && _recog.stop(); } catch (_) {}
-  _recog = null;
-  _markHandsFree();
-}
-
-function _markHandsFree() {
-  const b = document.getElementById('handsfree-btn');
-  if (b) { b.classList.toggle('active', window._handsFree); b.title = window._handsFree ? 'Hands-free is on (click to stop)' : 'Hands-free: talk instead of typing'; }
-  if (typeof _updateComposer === 'function') _updateComposer();   // the composer's voice button shows this state
-}
-
-/** Speak an assistant reply with its AI's voice, pausing the microphone so it doesn't hear itself. */
-function speakReplyHandsFree(ai, text) {
-  if (!window._handsFree || !window.speechSynthesis || !text) return;
-  window._speakingReply = true;
-  try { _recog && _recog.stop(); } catch (_) {}
-  const u = new SpeechSynthesisUtterance(text.slice(0, 1500));
-  const v = typeof voiceFor === 'function' ? voiceFor(ai) : null;
-  if (v) { u.voice = v; u.lang = v.lang; }
-  const resume = () => {
-    window._speakingReply = false;
-    if (window._handsFree && _recog) try { _recog.start(); } catch (_) {}
-  };
-  u.onend = resume; u.onerror = resume;
-  speechSynthesis.speak(u);
-}
+// Hands-free voice lives in talk.js.
 
 // Load the ACP list when Settings opens.
 (function () {

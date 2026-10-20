@@ -3,7 +3,8 @@ helm/voice.py — Speech-to-text for voice messages, shared by every chat app.
 
 Telegram, WhatsApp, Discord, Slack and the web app's mic all hand audio here.
 Whisper runs locally (installed on first use, like ffmpeg), so voice messages
-cost nothing and never leave this PC.
+cost nothing and never leave this PC. The model is loaded once and kept, so
+only the first message waits for it.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import os
 import tempfile
+import threading
 
 
 def ensure_ffmpeg() -> None:
@@ -31,25 +33,73 @@ def ensure_ffmpeg() -> None:
     static_ffmpeg.add_paths()
 
 
+_models: dict = {}
+_model_lock = threading.Lock()
+_PROMPT = "Hey Kelvin."   # nudges Whisper to spell the wake word "Kelvin" (not "Calvin")
+
+
+def _pip(package: str) -> None:
+    import subprocess, sys
+    from helm.subprocess_utils import hidden_kwargs
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", package, "-q"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        **hidden_kwargs(),
+    )
+
+
+def _model():
+    """The Whisper model, loaded once and kept (loading takes seconds).
+
+    faster-whisper first: about 4x faster on a CPU than openai-whisper and no
+    PyTorch download. openai-whisper stays as the fallback for installs that
+    already have it. VOICE_STT_MODEL picks the size (default "base").
+    """
+    name = os.environ.get("VOICE_STT_MODEL", "base").strip() or "base"
+    with _model_lock:
+        if name in _models:
+            return _models[name]
+        try:
+            try:
+                from faster_whisper import WhisperModel
+            except ImportError:
+                _pip("faster-whisper")
+                from faster_whisper import WhisperModel
+            model = ("faster", WhisperModel(name, device="cpu", compute_type="int8"))
+        except Exception:
+            ensure_ffmpeg()
+            try:
+                import whisper
+            except ImportError:
+                _pip("openai-whisper")
+                import whisper
+            model = ("openai", whisper.load_model(name))
+        _models[name] = model
+        return model
+
+
 def transcribe_file(audio_path: str) -> str:
     """Transcribe an audio file (any format ffmpeg reads) with Whisper. Blocking."""
-    ensure_ffmpeg()
-    try:
-        import whisper
-    except ImportError:
-        import subprocess, sys
-        from helm.subprocess_utils import hidden_kwargs
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "openai-whisper", "-q"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            **hidden_kwargs(),
-        )
-        import whisper
-
-    model = whisper.load_model("base")
-    # The prompt nudges Whisper to spell the wake word "Kelvin" (not "Calvin").
-    result = model.transcribe(audio_path, fp16=False, initial_prompt="Hey Kelvin.")
+    kind, model = _model()
+    if kind == "faster":
+        segments, _info = model.transcribe(audio_path, beam_size=1, vad_filter=True,
+                                           initial_prompt=_PROMPT)
+        return " ".join(s.text.strip() for s in segments).strip()
+    result = model.transcribe(audio_path, fp16=False, initial_prompt=_PROMPT)
     return (result.get("text") or "").strip()
+
+
+def warm_up() -> None:
+    """Load the model in the background so the first voice message is quick."""
+    threading.Thread(target=lambda: _safe(_model), daemon=True, name="whisper-warmup").start()
+
+
+def _safe(fn):
+    try:
+        fn()
+    except Exception as exc:
+        from helm.config import logger
+        logger.warning("voice: Whisper unavailable: %s", exc)
 
 
 async def transcribe_bytes(data: bytes, ext: str = "ogg") -> str:
