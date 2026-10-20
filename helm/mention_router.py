@@ -26,8 +26,11 @@ Talking to Kelvin (RAPR itself) instead of one AI — typed or by voice:
   "@kelvin what's a good name for this repo?", "Hey Kelvin, …", "Hi Kelvin"
     • Names an AI right after ("Hey Kelvin, @codex fix the tests", "Hi Kelvin,
       ask Gemini …") → that AI, exactly as if it had been @mentioned.
-    • Otherwise Auto (smart_routing) picks the AI: a greeting or short question
-      goes to the cheapest one that's set up, coding work to the strongest.
+    • Otherwise the session you're in answers. With no session open (or its AI
+      busy, not installed or over budget), Auto (smart_routing) picks the AI: a
+      greeting or short question goes to the cheapest one that's set up, coding
+      work to the strongest.
+  "Kelvin, …" (no greeting; voice transcripts often drop it) counts too.
 """
 
 from __future__ import annotations
@@ -44,8 +47,11 @@ CONTEXT_EXCHANGES = 6            # messages copied from the session into a new g
 
 _LEAD_RE = re.compile(r"^\s*((?:@[\w.\-]+[\s,:]*)+)(.*)$", re.DOTALL)
 _TOKEN_RE = re.compile(r"@([\w.\-]+)")
-_KELVIN_RE = re.compile(r"^\s*(?:@kelvin|(?:hey|hi|hello)[\s,]+kelvin)\b[\s,:;.!?\-]*(.*)$",
+_KELVIN_RE = re.compile(r"^\s*(?:@kelvin|(?:hey|hi|hello|ok|okay)[\s,]+kelvin)\b[\s,:;.!?\-]*(.*)$",
                         re.IGNORECASE | re.DOTALL)
+# "Kelvin, what's the date?" (voice transcripts often lose the "Hey"). A bare
+# "kelvin" stays the status command, so it needs punctuation or more words.
+_BARE_KELVIN_RE = re.compile(r"^\s*kelvin(?:\s*[,:;.!?\-]+\s*|\s+)(.*)$", re.IGNORECASE | re.DOTALL)
 _ASK_RE = re.compile(r"^(?:ask|use|tell)\s+@?([\w.\-]+)[\s,:]*(?:to\s+)?(.*)$",
                      re.IGNORECASE | re.DOTALL)
 _WORD_RE = re.compile(r"^@?([\w.\-]+?)[\s,:;.!?]+(.*)$|^@?([\w.\-]+)\W*$", re.DOTALL)
@@ -93,8 +99,8 @@ def parse_leading(text: str) -> Optional[tuple[list[str], str]]:
 
 def parse_kelvin(text: str) -> Optional[str]:
     """The rest of a message addressed to Kelvin ("@kelvin …", "hey kelvin …",
-    "hi kelvin"), or None when it isn't addressed to Kelvin."""
-    m = _KELVIN_RE.match(text or "")
+    "hi kelvin", "Kelvin, …"), or None when it isn't addressed to Kelvin."""
+    m = _KELVIN_RE.match(text or "") or _BARE_KELVIN_RE.match(text or "")
     return m.group(1).strip() if m else None
 
 
@@ -187,11 +193,19 @@ async def route(text: str, channel: str) -> Optional[str]:
 
 
 async def _kelvin_auto(text: str, rest: str, channel: str) -> str:
-    """"Hey Kelvin …" without naming an AI: Auto picks one and it answers."""
+    """"Hey Kelvin …" without naming an AI. The session you're in answers when
+    it can (its AI is set up, under budget and not busy); otherwise Auto picks
+    the AI, starting a session for it."""
     from helm import smart_routing as sr
+    from helm.ai_runner.core import process_message
     from helm.broadcast import push_message, push_state
     from helm.session_mgr import session_cwd
     task = rest or text                       # a bare "Hi Kelvin" is a greeting to answer
+
+    focused = _focused_ai_session()
+    if (focused and not focused.get("busy") and _ready(focused["ai"])
+            and sr.allowed_from_budget(focused["ai"])):
+        return await process_message(task, source=channel, session_id=focused["id"])
     candidates = [a for a in dict.fromkeys(["claude", *sr.available_from_state()])
                   if a != "shell" and _ready(a)]
     decision = sr.decide(task, candidates, allowed=sr.allowed_from_budget)
@@ -200,18 +214,13 @@ async def _kelvin_auto(text: str, rest: str, channel: str) -> str:
                 f"Settings → AI Integrations, then try again.")
     key = decision.ai
 
-    focused = _focused_ai_session()
-    if focused and focused["ai"] == key and not focused.get("busy"):
-        sess = focused
-    else:
-        sess = _start_member_sessions([key], session_cwd())[0]
-        sess.pop("_started_for_group", None)
-        _st.focused_id = sess["id"]
-        await push_state()
+    sess = _start_member_sessions([key], session_cwd())[0]
+    sess.pop("_started_for_group", None)
+    _st.focused_id = sess["id"]
+    await push_state()
     note = f"🐧 Kelvin picked {_label(key)}: {decision.reason}."
     logger.info("kelvin: %s", note)
     await push_message("system", note, source=channel, session_id=sess["id"])
-    from helm.ai_runner.core import process_message
     reply = await process_message(task, source=channel, session_id=sess["id"])
     return reply if channel == "web" else f"{note}\n\n{reply}"
 

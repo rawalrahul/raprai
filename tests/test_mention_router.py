@@ -192,6 +192,10 @@ def kelvin_env(env, monkeypatch):
     ("hey, kelvin. summarise this", "summarise this"),
     ("Hi Kelvin!", ""),
     ("hello kelvin: are you there", "are you there"),
+    ("Kelvin, what is the day today?", "what is the day today?"),     # voice often drops the "Hey"
+    ("kelvin what's the weather", "what's the weather"),
+    ("Kelvin?", ""),
+    ("Okay Kelvin, hi", "hi"),
 ])
 def test_parse_kelvin(text, rest):
     assert mr.parse_kelvin(text) == rest
@@ -218,6 +222,39 @@ def test_hey_kelvin_coding_task_goes_to_the_strongest_ai(kelvin_env):
     sess = _st.sessions[_st.focused_id]
     assert sess["ai"] == "claude" and sent[0][0] == sess["id"]
     assert sent[0][1].startswith("refactor the auth module")
+
+
+def test_kelvin_answers_in_the_session_you_opened(kelvin_env):
+    """You opened Antigravity, then said "Hi Kelvin, …": Antigravity answers,
+    no Ollama/Codex session is started behind your back."""
+    tmp, sent = kelvin_env
+    from helm.session_mgr import make_session
+    s = make_session("antigravity", cwd=str(tmp))
+    _st.focused_id = s["id"]
+    reply = run(mr.route("Hi Kelvin. Can you tell me how is the weather today in America?", "whatsapp"))
+    assert _st.focused_id == s["id"] and len(_st.sessions) == 1
+    assert sent == [(s["id"], "Can you tell me how is the weather today in America?")]
+    assert reply == f"reply from {s['id']}"
+
+
+def test_kelvin_picks_another_ai_when_the_open_one_is_busy(kelvin_env):
+    tmp, sent = kelvin_env
+    from helm.session_mgr import make_session
+    s = make_session("antigravity", cwd=str(tmp))
+    s["busy"] = True
+    _st.focused_id = s["id"]
+    reply = run(mr.route("Hey Kelvin, hi", "telegram"))
+    assert _st.focused_id != s["id"] and _st.sessions[_st.focused_id]["ai"] == "codex"
+    assert reply.startswith("🐧 Kelvin picked Codex")
+
+
+def test_kelvin_without_a_greeting_works_with_no_session_open(kelvin_env):
+    tmp, sent = kelvin_env
+    import helm.chat_router as cr
+    replies = run(cr.handle("whatsapp", "Kelvin, what is the day today?"))
+    sess = _st.sessions[_st.focused_id]
+    assert sent == [(sess["id"], "what is the day today?")]
+    assert "No session is focused" not in replies[0]
 
 
 def test_kelvin_reuses_the_focused_session_when_auto_picks_its_ai(kelvin_env):
