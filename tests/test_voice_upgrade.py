@@ -56,17 +56,42 @@ def test_whisper_model_is_loaded_once_and_reused(monkeypatch, tmp_path):
         def __init__(self, name, **kw):
             loads.append((name, kw))
 
-        def transcribe(self, path, **kw):
-            assert kw["initial_prompt"] == "Hey Kelvin." and kw["vad_filter"]
+        def transcribe(self, audio, **kw):
+            assert audio == "decoded" and kw["initial_prompt"] == "Hey Kelvin." and kw["vad_filter"]
             return iter([types.SimpleNamespace(text=" Hey Kelvin,"), types.SimpleNamespace(text=" hi ")]), None
     monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=FakeModel))
     monkeypatch.setattr(voice, "_models", {})
+    monkeypatch.setattr(voice, "decode_16k", lambda path: "decoded")
     monkeypatch.setenv("VOICE_STT_MODEL", "base")
     f = tmp_path / "a.wav"
     f.write_bytes(b"RIFF")
     assert voice.transcribe_file(str(f)) == "Hey Kelvin, hi"
     assert voice.transcribe_file(str(f)) == "Hey Kelvin, hi"
     assert loads == [("base", {"device": "cpu", "compute_type": "int8"})]
+
+
+def test_voice_notes_decode_to_16k_mono_without_faster_whispers_decoder(tmp_path):
+    """faster-whisper's decoder passes PyAV `metadata_errors`, which PyAV 15+
+    rejects ("open() got an unexpected keyword argument"); we decode ourselves."""
+    av = pytest.importorskip("av")
+    np = pytest.importorskip("numpy")
+    path = str(tmp_path / "note.ogg")                      # a WhatsApp-style Opus voice note
+    t = np.arange(48000 * 2) / 48000
+    tone = (0.3 * np.sin(2 * np.pi * 440 * t)).astype(np.float32).reshape(1, -1)
+    out = av.open(path, "w")
+    st = out.add_stream("libopus", rate=48000)
+    st.layout = "mono"
+    frame = av.AudioFrame.from_ndarray(tone, format="flt", layout="mono")
+    frame.sample_rate = 48000
+    for f in av.audio.resampler.AudioResampler(format="flt", layout="mono", rate=48000).resample(frame):
+        for pkt in st.encode(f):
+            out.mux(pkt)
+    for pkt in st.encode(None):
+        out.mux(pkt)
+    out.close()
+    samples = voice.decode_16k(path)
+    assert samples.dtype == np.float32 and abs(len(samples) / 16000 - 2.0) < 0.1
+    assert 0.2 < float(abs(samples).max()) < 0.4
 
 
 # ── /tts picks the best voice it has ───────────────────────────────────────────
