@@ -124,6 +124,24 @@ def test_bakeoff_round_trip(repo, fake_agents, monkeypatch, tmp_path):
     assert err and "No bake-off" in text
 
 
+def test_bakeoff_status_answers_inside_codex_tool_timeout(tmp_path, monkeypatch):
+    """Codex gives up on a tool after 60 seconds, so one status call never waits that long."""
+    from types import SimpleNamespace
+    clock = [0.0]
+    monkeypatch.setattr(mcp, "time", SimpleNamespace(monotonic=lambda: clock[0],
+                                                     sleep=lambda sec: clock.__setitem__(0, clock[0] + sec)))
+    s = mcp.Server(out=None, cwd=str(tmp_path))
+    s.bakeoffs["b1"] = SimpleNamespace(id="b1", status="running", task="fix add", test_command=None,
+                                       attempts=[SimpleNamespace(ai="codex", seconds=0)])
+    for asked in ({}, {"wait_seconds": 240}):
+        clock[0] = 0.0
+        text, err = call(s, "bakeoff_status", id="b1", **asked)
+        assert not err and "still working" in text and "Call bakeoff_status again" in text
+        assert clock[0] < 60
+    schema = mcp.TOOLS["bakeoff_status"][0]["inputSchema"]["properties"]["wait_seconds"]
+    assert schema["default"] <= schema["maximum"] < 60
+
+
 @pytest.fixture
 def fake_claude(tmp_path):
     """A stand-in `claude` command on PATH that answers like Claude Code's JSON output."""

@@ -38,7 +38,7 @@ You probably already pay for one or two AI coding agents, and each lives in its 
 |---|---|
 | 💬 **Group chats** | Several AIs in one conversation. `@mention` who should answer, or `@all`. Ready-made **crews** give each AI a job: code review, research, launch, debate. |
 | 🧪 **Bake-off** | Give the same task to several AIs. Each works in its own copy of your project; compare the diffs, test results and time, then merge the winner. Share the result as a card, or publish it to the public [RAPR Arena](https://www.raprai.com/arena) leaderboard. |
-| 🔌 **Second opinions from your editor** | RAPR is an MCP server: from Claude Code, Cursor or Codex, ask another AI to review your changes, answer a question or join a bake-off. `claude mcp add rapr -- rapr mcp`. Runs on your computer; your files stay untouched unless you allow edits. |
+| 🔌 **Second opinions from your editor** | RAPR is an MCP server: from Claude Code, Codex or Cursor, ask another AI to review your changes, answer a question or join a bake-off. Runs on your computer; your files stay untouched unless you allow edits. [Set it up](#use-rapr-inside-claude-code-or-codex) |
 | 🐧 **Monthly recap** | Your month as a shareable card: your AI crew and its MVP, streaks, bake-offs, and what running AIs locally saved you. Worked out on your computer. |
 | 🧭 **Smart routing** | Choose "Auto" and RAPR picks the AI for each task: free local models for easy work, the strongest coding agent for hard work, skipping any AI that's over budget. |
 | 📱 **Phone control** | Telegram bot and WhatsApp (scan a QR code, no Business API). Start sessions, send tasks, approve actions, get files back. |
@@ -99,6 +99,28 @@ On first launch, a short setup page asks for a PIN and, optionally, a Telegram b
 Your chats and settings live in `%LOCALAPPDATA%\RAPR AI` (Windows) or `~/Library/Application Support/RAPR AI` (Mac), so updating keeps them. Used the old Windows `.exe` installer? Run the Windows command: it uses the same folder, so everything carries over. Then remove the old app in Windows Settings → Apps.
 
 **From source:** see the [full guide](docs/guide.md#prerequisites).
+
+## Use RAPR inside Claude Code or Codex
+
+RAPR is an MCP server, so the AI you're already coding with can ask the others for help. After installing RAPR, add it once:
+
+```bash
+claude mcp add --scope user rapr -- rapr mcp     # Claude Code
+codex mcp add rapr -- rapr mcp                   # Codex
+```
+
+On Windows, end both with `-- cmd /c rapr mcp`. For Codex, also add `tool_timeout_sec = 600` under `[mcp_servers.rapr]` in `~/.codex/config.toml`: Codex gives up on a tool after 60 seconds, and a review usually takes a few minutes. Cursor, Windsurf and other clients: add a server with the command `rapr` and the argument `mcp`.
+
+Then ask in plain words: *"get a second opinion from Codex on my changes"*, *"ask Claude how it would structure this"*, *"run a bake-off between Claude and Codex on this task, with pytest -q"*.
+
+| Tool | What it does |
+|---|---|
+| `second_opinion` | Another AI reviews your uncommitted changes (or the last commit, or changes since a branch you name) and reports bugs, most serious first. |
+| `ask_agent` | Puts any question or task to another AI and returns its reply. |
+| `start_bakeoff`, `bakeoff_status`, `merge_bakeoff`, `discard_bakeoff` | A bake-off from your editor: 2 to 4 AIs, each in its own copy of the project; merge the one you like. |
+| `list_agents` | The AIs installed and signed in on this computer. |
+
+The other AI works in a temporary copy of your project, so your files only change if you allow edits or merge a bake-off. Nothing is hosted and the RAPR app doesn't need to be open. More in the [full guide](docs/guide.md#use-rapr-from-claude-code-cursor-or-codex-mcp).
 
 ## How it works
 

@@ -1,6 +1,6 @@
 {
   "name": "rapr-ai",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "Run Claude Code, Codex, Antigravity, Ollama and more side by side, let them work together in group chats, and control them from your browser, Telegram or WhatsApp.",
   "author": {
     "name": "Rahul Rawal",
@@ -9,5 +9,5 @@
   "homepage": "https://github.com/rawalrahul/raprai",
   "repository": "https://github.com/rawalrahul/raprai",
   "license": "MIT",
-  "keywords": ["claude-code", "codex", "ollama", "multi-agent", "group-chat", "self-hosted"]
+  "keywords": ["claude-code", "codex", "mcp-server", "ollama", "multi-agent", "group-chat", "self-hosted"]
 }

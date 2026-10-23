@@ -315,21 +315,44 @@ Finished bake-offs are kept (the numbers only, not the code), so they count towa
 
 ## Use RAPR from Claude Code, Cursor or Codex (MCP)
 
-RAPR is also an MCP server, so the AI you're coding with can call the others. In Claude Code:
+RAPR is also an MCP server, so the AI you're coding with can call the others. The `rapr mcp` command comes with the Windows and Mac installs; from a source checkout, use `python /path/to/raprai/rapr_mcp.py` wherever you see `rapr mcp` below.
+
+### Claude Code
 
 ```
-claude mcp add rapr -- rapr mcp
+claude mcp add --scope user rapr -- rapr mcp
 ```
 
-On Windows, use `claude mcp add rapr -- cmd /c rapr mcp`. From a source checkout, use `-- python /path/to/raprai/rapr_mcp.py`.
+On Windows: `claude mcp add --scope user rapr -- cmd /c rapr mcp`. `--scope user` makes RAPR available in every project; leave it out to add RAPR to the current project only. Check it with `claude mcp list` (it should say *Connected*), or `/mcp` inside Claude Code.
 
-For **Cursor**, **Windsurf**, **Codex** and other clients, add a server with the command `rapr mcp` (on Windows: command `cmd`, arguments `/c rapr mcp`). For example, in Cursor's `~/.cursor/mcp.json`:
+### Codex
+
+```
+codex mcp add rapr -- rapr mcp
+```
+
+On Windows: `codex mcp add rapr -- cmd /c rapr mcp`. Then give RAPR more time: Codex stops waiting for a tool after 60 seconds, and another AI's review usually takes longer. Open `~/.codex/config.toml` (on Windows `%USERPROFILE%\.codex\config.toml`) and add the `tool_timeout_sec` line to the `[mcp_servers.rapr]` section the command wrote:
+
+```toml
+[mcp_servers.rapr]
+command = "rapr"
+args = ["mcp"]
+tool_timeout_sec = 600
+```
+
+Check it with `codex mcp list`, or `/mcp` inside Codex.
+
+### Cursor, Windsurf and other MCP clients
+
+Add a server with the command `rapr` and the argument `mcp` (on Windows: command `cmd`, arguments `/c rapr mcp`). For example, in Cursor's `~/.cursor/mcp.json`:
 
 ```json
 { "mcpServers": { "rapr": { "command": "rapr", "args": ["mcp"] } } }
 ```
 
-Then ask in plain words: *"get a second opinion from Codex on my changes"*, *"ask Antigravity how it would structure this"*, *"run a bake-off between Claude and Codex on this task, with pytest -q"*.
+### Using it
+
+Ask in plain words: *"get a second opinion from Codex on my changes"*, *"ask Antigravity how it would structure this"*, *"run a bake-off between Claude and Codex on this task, with pytest -q"*. From Codex, ask for Claude's opinion the same way.
 
 | Tool | What it does |
 |---|---|
@@ -340,7 +363,7 @@ Then ask in plain words: *"get a second opinion from Codex on my changes"*, *"as
 
 - **It runs on your computer.** Your MCP client starts `rapr mcp` itself and talks to it over stdin/stdout. Nothing is hosted, and the RAPR app doesn't need to be open. The AIs run through their own command-line tools with your sign-ins, as in a bake-off.
 - **Your files are safe by default.** `second_opinion` and `ask_agent` run the other AI in a temporary copy of the project, including your uncommitted changes. If it edits anything, you get the diff back; your files don't change. Pass `allow_edits` to `ask_agent` to let it work in the real folder.
-- Each call takes as long as the other AI does, usually a minute or a few. Bake-offs run in the background: `start_bakeoff` returns an id, and `bakeoff_status` waits for the results. Bake-offs from MCP are kept like the app's, so they count in your monthly recap.
+- Each call takes as long as the other AI does, usually a minute or a few. Bake-offs run in the background: `start_bakeoff` returns an id, and `bakeoff_status` waits up to 50 seconds per call (inside Codex's time limit, even without `tool_timeout_sec`), so your AI calls it again until the results are in. Bake-offs from MCP are kept like the app's, so they count in your monthly recap.
 
 
 **🐧 Your month with RAPR** (top of the **Usage** panel, or in the AI menu) turns a month of work into a card: tasks sent, AI replies, active days and longest streak, your AI crew and its MVP, bake-offs judged, tasks sent from your phone, and a title for the month ("The Conductor", "Night Owl", "Local Hero"…). Use **‹ Previous** to look back. At the start of each month RAPR offers last month's recap once.
