@@ -1,7 +1,8 @@
 """RAPR AI as an MCP server for Claude Code, Cursor, Codex and other MCP clients.
 
-    claude mcp add rapr -- rapr mcp                       # installed RAPR
-    claude mcp add rapr -- python /path/to/raprai/rapr_mcp.py   # from source
+    claude mcp add --scope user rapr -- rapr mcp          # Claude Code, installed RAPR
+    codex mcp add rapr -- rapr mcp                        # Codex (set tool_timeout_sec, see the guide)
+    claude mcp add --scope user rapr -- python /path/to/raprai/rapr_mcp.py   # from source
 
 See helm/mcp_server.py and the "Use RAPR from Claude Code, Cursor or Codex" section of docs/guide.md.
 """

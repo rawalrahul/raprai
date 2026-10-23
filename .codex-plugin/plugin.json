@@ -9,5 +9,5 @@
   "homepage": "https://github.com/rawalrahul/raprai",
   "repository": "https://github.com/rawalrahul/raprai",
   "license": "MIT",
-  "keywords": ["claude-code", "codex", "ollama", "multi-agent", "group-chat", "self-hosted"]
+  "keywords": ["claude-code", "codex", "mcp-server", "ollama", "multi-agent", "group-chat", "self-hosted"]
 }

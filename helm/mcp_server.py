@@ -3,7 +3,8 @@ helm/mcp_server.py — RAPR AI as an MCP server: ask another AI, get a second
 opinion, or run a bake-off, from inside Claude Code, Cursor, Codex or any other
 MCP client.
 
-    claude mcp add rapr -- rapr mcp
+    claude mcp add --scope user rapr -- rapr mcp     # Claude Code
+    codex mcp add rapr -- rapr mcp                   # Codex
 
 The client starts `rapr mcp` on your own computer and talks to it over
 stdin/stdout (MCP's "stdio" transport). Nothing is hosted and the RAPR app
