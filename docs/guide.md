@@ -363,7 +363,7 @@ Ask in plain words: *"get a second opinion from Codex on my changes"*, *"ask Ant
 
 - **It runs on your computer.** Your MCP client starts `rapr mcp` itself and talks to it over stdin/stdout. Nothing is hosted, and the RAPR app doesn't need to be open. The AIs run through their own command-line tools with your sign-ins, as in a bake-off.
 - **Your files are safe by default.** `second_opinion` and `ask_agent` run the other AI in a temporary copy of the project, including your uncommitted changes. If it edits anything, you get the diff back; your files don't change. Pass `allow_edits` to `ask_agent` to let it work in the real folder.
-- Each call takes as long as the other AI does, usually a minute or a few. Bake-offs run in the background: `start_bakeoff` returns an id, and `bakeoff_status` waits for the results. Bake-offs from MCP are kept like the app's, so they count in your monthly recap.
+- Each call takes as long as the other AI does, usually a minute or a few. Bake-offs run in the background: `start_bakeoff` returns an id, and `bakeoff_status` waits up to 50 seconds per call (inside Codex's time limit, even without `tool_timeout_sec`), so your AI calls it again until the results are in. Bake-offs from MCP are kept like the app's, so they count in your monthly recap.
 
 
 **🐧 Your month with RAPR** (top of the **Usage** panel, or in the AI menu) turns a month of work into a card: tasks sent, AI replies, active days and longest streak, your AI crew and its MVP, bake-offs judged, tasks sent from your phone, and a title for the month ("The Conductor", "Night Owl", "Local Hero"…). Use **‹ Previous** to look back. At the start of each month RAPR offers last month's recap once.

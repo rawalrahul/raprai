@@ -34,6 +34,10 @@ PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 DIFF_LIMIT = 60_000        # characters of diff given to a reviewer
 REPLY_LIMIT = 40_000       # characters of an AI's reply returned to the client
 ATTEMPT_DIFF_LIMIT = 8_000
+# bakeoff_status waits at most this long per call, so it answers inside MCP clients'
+# tool time limits (Codex gives up after 60 seconds unless tool_timeout_sec is raised).
+STATUS_WAIT_DEFAULT = 45
+STATUS_WAIT_MAX = 50
 
 INSTRUCTIONS = (
     "RAPR AI runs other AI coding agents installed on this computer (Claude Code, Codex, "
@@ -306,6 +310,8 @@ def _bakeoff_report(b, include_diffs: bool) -> str:
             lines.append("What it said:\n" + _clip(a.output.strip(), 1500))
         if include_diffs and a.diff.strip():
             lines.append("Diff:\n" + _clip(a.diff, ATTEMPT_DIFF_LIMIT))
+    if b.status in ("created", "running"):
+        lines.append("\nStill running. Call bakeoff_status again to keep waiting.")
     if b.status == "done":
         lines.append("\nNext: merge_bakeoff with the agent you prefer (it applies that attempt to the project), "
                      "or discard_bakeoff. The result is also kept in RAPR, where it counts in the monthly recap.")
@@ -363,7 +369,7 @@ def _get_bakeoff(args: dict, ctx: "Server"):
 
 def tool_bakeoff_status(args: dict, ctx: "Server") -> str:
     b = _get_bakeoff(args, ctx)
-    wait = max(0, min(int(args.get("wait_seconds", 60)), 240))
+    wait = max(0, min(int(args.get("wait_seconds", STATUS_WAIT_DEFAULT)), STATUS_WAIT_MAX))
     end = time.monotonic() + wait
     while b.status in ("created", "running") and time.monotonic() < end:
         time.sleep(1)
@@ -445,10 +451,10 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
     }, tool_start_bakeoff),
     "bakeoff_status": ({
         "description": "Wait for a bake-off (up to wait_seconds) and report each AI's time, files and lines "
-                       "changed, test result, what it said and its diff.",
+                       "changed, test result, what it said and its diff. If it's still running, call again.",
         "inputSchema": {"type": "object", "required": ["id"], "properties": {
             "id": {"type": "string"},
-            "wait_seconds": {"type": "integer", "minimum": 0, "maximum": 240, "default": 60},
+            "wait_seconds": {"type": "integer", "minimum": 0, "maximum": STATUS_WAIT_MAX, "default": STATUS_WAIT_DEFAULT},
             "include_diffs": {"type": "boolean", "default": True},
         }},
         "annotations": {"readOnlyHint": True},
