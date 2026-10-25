@@ -242,6 +242,17 @@ def tool_list_agents(args: dict, ctx: "Server") -> str:
     return "AIs available through RAPR on this computer:\n" + "\n".join(f"- {k} ({v})" for k, v in have.items())
 
 
+def tool_latest_brief(args: dict, ctx: "Server") -> str:
+    """Your latest brief from the RAPR app: what needs you, across every AI's connected apps."""
+    from helm import brief
+    latest = brief.latest()
+    if not latest:
+        return ("No brief yet. In the RAPR app, open Settings → Your brief, pick which AIs should look "
+                "through their connected apps, and press 'Send me one now'.")
+    return brief.text(latest, how_to_act=False) + (
+        "\n\nTo act on an item, open RAPR (Needs you) or reply /do <number> on Telegram or WhatsApp.")
+
+
 def tool_ask_agent(args: dict, ctx: "Server") -> str:
     agent, prompt = args["agent"], args["prompt"].strip()
     if not prompt:
@@ -410,6 +421,13 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
         "inputSchema": {"type": "object", "properties": {}},
         "annotations": {"readOnlyHint": True},
     }, tool_list_agents),
+    "latest_brief": ({
+        "description": "What needs the user right now, from their latest RAPR brief: approvals waiting, "
+                       "unfinished sessions, scheduled-task results, and what each of their AIs found in the "
+                       "apps it is connected to (email, calendar, chat, GitHub...). Read-only.",
+        "inputSchema": {"type": "object", "properties": {}},
+        "annotations": {"readOnlyHint": True},
+    }, tool_latest_brief),
     "second_opinion": ({
         "description": "Have a different AI review the current code changes (uncommitted work, or the last "
                        "commit if there is none) and report bugs and risks. It works in a temporary copy, so "

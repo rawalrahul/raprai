@@ -1,0 +1,73 @@
+/* Needs you (left sidebar) and Settings → Your brief. js/needs.js builds the markup. */
+
+#sb-panel-needs { padding: 6px 8px 10px; }
+
+.needs-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 4px 6px; }
+.needs-when { font-size: 11px; color: var(--text-dim, var(--text-tertiary)); }
+.needs-checked { font-size: 10.5px; color: var(--text-dim, var(--text-tertiary)); padding: 0 4px 6px; cursor: help; }
+
+.needs-group {
+  font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--text-dim, var(--text-tertiary)); padding: 10px 4px 4px;
+}
+
+.needs-item {
+  display: block; padding: 8px 9px; margin: 0 0 6px;
+  border: 1px solid var(--border-dim, var(--border-subtle)); border-radius: var(--rad-md, 6px);
+  background: var(--bg-elevated);
+}
+.needs-approval { border-color: var(--color-warning, #f59e0b); }
+.needs-title { font-size: 12.5px; font-weight: 500; color: var(--text-main, var(--text-primary)); line-height: 1.35; word-break: break-word; }
+.needs-why { font-size: 11.5px; color: var(--text-dim, var(--text-secondary)); margin-top: 3px; line-height: 1.35; word-break: break-word; }
+.needs-app {
+  font-size: 10px; margin-left: 6px; padding: 0 6px; border-radius: 999px;
+  background: var(--bg-hover, var(--bg-tertiary)); color: var(--text-dim, var(--text-secondary)); white-space: nowrap;
+}
+.needs-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--color-warning, #f59e0b); }
+.urg-high .needs-dot { background: var(--color-danger, #ef4444); }
+.urg-low .needs-dot { background: var(--text-quaternary, #6b7280); }
+.needs-link { font-size: 11px; color: var(--accent, var(--text-link)); }
+
+.needs-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+.needs-btn {
+  font-size: 11px; padding: 3px 9px; border-radius: var(--rad-sm, 4px); cursor: pointer;
+  border: 1px solid var(--border-dim, var(--border-default)); background: transparent; color: var(--text-main, var(--text-primary));
+}
+.needs-btn:hover { background: var(--bg-hover); }
+.needs-btn:disabled { opacity: .6; cursor: default; }
+.needs-btn.do, .needs-btn.ok { border-color: var(--accent, var(--color-primary)); color: var(--accent, var(--color-primary)); }
+.needs-btn.no { color: var(--color-danger, #ef4444); }
+.needs-btn.skip { color: var(--text-dim, var(--text-tertiary)); }
+.needs-btn.needs-run { font-size: 10.5px; padding: 2px 8px; }
+
+.needs-result summary { cursor: pointer; list-style: none; }
+.needs-result summary::-webkit-details-marker { display: none; }
+.needs-result.failed { border-color: var(--color-danger, #ef4444); }
+.needs-result-text { white-space: pre-wrap; font-size: 11px; max-height: 220px; overflow: auto; margin: 6px 0 0; color: var(--text-dim, var(--text-secondary)); }
+
+/* Count on the rail icon */
+#left-sidebar .sb-rail-btn[data-count]::after {
+  content: attr(data-count); position: absolute; top: 2px; right: 1px;
+  min-width: 14px; height: 14px; padding: 0 3px; border-radius: 999px;
+  font-size: 9px; font-weight: 700; line-height: 14px; text-align: center;
+  background: var(--color-danger, #ef4444); color: #fff;
+}
+
+/* Settings → Your brief */
+.brief-source { display: grid; grid-template-columns: auto 130px 1fr 130px auto; gap: 6px; align-items: center; }
+.brief-suggestions { display: flex; flex-direction: column; gap: 4px; padding: 2px 0; }
+.needs-btn.suggest { text-align: left; border-style: dashed; color: var(--text-dim, var(--text-secondary)); }
+.reach-list { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; font-size: 12px; }
+.reach-sum { font-weight: 600; }
+.reach-row { display: grid; grid-template-columns: 130px 1fr; gap: 8px; align-items: start; }
+.reach-ai { color: var(--text-dim, var(--text-secondary)); }
+.reach-apps { display: flex; flex-wrap: wrap; gap: 4px; }
+.reach-chip { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border-dim, var(--border-default)); }
+.reach-chip.on { border-color: var(--color-success, #22c55e); }
+.reach-chip.off { opacity: .55; }
+
+@media (max-width: 640px) {
+  .brief-source { grid-template-columns: auto 1fr; }
+  .brief-source input.wide, .brief-source input:nth-of-type(3) { grid-column: 1 / -1; }
+  .reach-row { grid-template-columns: 1fr; }
+}

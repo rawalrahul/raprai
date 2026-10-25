@@ -146,6 +146,12 @@ push_subscriptions.json
 group_chats.json
 kelvin_desktop.json
 kelvin_tips.json
+brief.json
+brief_latest.json
+brief_state.json
+schedule_results.json
+reach.json
+/brief/
 helmhq.db*
 helm/learning/routing_table.json
 

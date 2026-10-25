@@ -47,6 +47,7 @@ from .acp_routes import router as acp_router
 from .cloud_routes import router as cloud_router
 from .learning_routes import router as learning_router
 from .demo_routes import router as demo_router
+from .brief_routes import router as brief_router
 
 # Include all routers in the app
 app.include_router(auth_router)
@@ -81,6 +82,7 @@ app.include_router(acp_router)
 app.include_router(cloud_router)
 app.include_router(learning_router)
 app.include_router(demo_router)
+app.include_router(brief_router)
 
 # Re-export model fetchers so they can be imported as: from helm.web_routes import _fetch_claude_models
 from .helpers import (

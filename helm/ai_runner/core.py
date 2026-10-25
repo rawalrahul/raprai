@@ -543,7 +543,9 @@ def run_ai_popen(cmd: list[str], cwd: str, name: str, sess: dict,
     else:
         _timeout = CLAUDE_TIMEOUT if CLAUDE_TIMEOUT > 0 else None
     from helm.paths import child_env
-    _env = child_env(cmd, extra_env)
+    # RAPR_SESSION_ID lets tool calls made from inside the AI (helm/mcp/call_tool.py)
+    # say which session they belong to, for approvals.
+    _env = child_env(cmd, {**(extra_env or {}), "RAPR_SESSION_ID": str(sess.get("id", ""))})
     try:
         proc = subprocess.Popen(
             cmd,
@@ -994,8 +996,13 @@ async def process_message(text: str, source: str = "web",
 
     await push_message("user", text, ai=None, source=source, session_id=sid)
 
+    # A background look (your brief, helm/brief.py) isn't you talking to the AI: its
+    # instructions aren't corrections, and it teaches the learning system nothing.
+    _background = bool(sess.get("read_only"))
+
     # Detect explicit correction/acceptance signals — 3x weight in routing stats
-    _detect_correction(text, sess, ai, _clf.get("task_type", "unknown"))
+    if not _background:
+        _detect_correction(text, sess, ai, _clf.get("task_type", "unknown"))
 
     # Inject file-deletion safety preamble into every AI prompt
     safe_text = _SAFETY_PREAMBLE + text
@@ -1008,7 +1015,7 @@ async def process_message(text: str, source: str = "web",
             fingerprint=_clf.get("task_fingerprint"),
             ai=ai,
         )
-        if _learned_ctx:
+        if _learned_ctx and not _background:
             safe_text = _learned_ctx + safe_text
     except Exception:
         pass
@@ -1067,34 +1074,36 @@ async def process_message(text: str, source: str = "web",
         except Exception:
             pass
 
-        # Enqueue task record for async analysis (playbook generation, antipattern extraction)
-        try:
-            from helm.learning.analyzer import enqueue as _enqueue_analysis
-            from helm.learning.analyzer import drain_queue as _drain_analysis
-            _analysis_record = {
-                "task_id": _task_id or "",
-                "task_type": _clf.get("task_type", "unknown"),
-                "task_fingerprint": _clf.get("task_fingerprint"),
-                "task_summary": (text or "")[:200],
-                "ai_used": actual_ai,
-                "ai_model_version": sess.get("model") if sess else None,
-                "duration_seconds": elapsed,
-                "success": (not _is_infra_failure(output)) if output else False,
-                "success_confidence": 0.7 if (output and not _is_infra_failure(output)) else 0.3,
-                "errors_hit": [],
-                "session_id": sid or "",
-            }
-            _enqueue_analysis(_analysis_record)
-            asyncio.create_task(_drain_analysis())
-        except Exception:
-            pass
+        # Background looks (your brief) teach the learning system nothing (see above).
+        if not _background:
+            # Enqueue task record for async analysis (playbook generation, antipattern extraction)
+            try:
+                from helm.learning.analyzer import enqueue as _enqueue_analysis
+                from helm.learning.analyzer import drain_queue as _drain_analysis
+                _analysis_record = {
+                    "task_id": _task_id or "",
+                    "task_type": _clf.get("task_type", "unknown"),
+                    "task_fingerprint": _clf.get("task_fingerprint"),
+                    "task_summary": (text or "")[:200],
+                    "ai_used": actual_ai,
+                    "ai_model_version": sess.get("model") if sess else None,
+                    "duration_seconds": elapsed,
+                    "success": (not _is_infra_failure(output)) if output else False,
+                    "success_confidence": 0.7 if (output and not _is_infra_failure(output)) else 0.3,
+                    "errors_hit": [],
+                    "session_id": sid or "",
+                }
+                _enqueue_analysis(_analysis_record)
+                asyncio.create_task(_drain_analysis())
+            except Exception:
+                pass
 
-        # Feed cross-AI comparison buffer
-        try:
-            from helm.learning.cross_ai import record_task as _record_cross_ai
-            _record_cross_ai(_analysis_record)
-        except Exception:
-            pass
+            # Feed cross-AI comparison buffer
+            try:
+                from helm.learning.cross_ai import record_task as _record_cross_ai
+                _record_cross_ai(_analysis_record)
+            except Exception:
+                pass
 
 
         # Audit: log any destructive file commands in the AI output
@@ -1388,7 +1397,9 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
     if ai == "claude":
         await push_thinking(True, "claude", session_id=sid)
         has_history = len(sess["claude_msgs"]) > 0
-        enriched_text = inject_skill_prefix(safe_text, ai="claude", match_text=text)
+        # A read-only look (your brief) gets no skill guide: it should only look.
+        enriched_text = safe_text if sess.get("read_only") else \
+            inject_skill_prefix(safe_text, ai="claude", match_text=text)
         enriched_text = inject_plugin_context(enriched_text)
 
         # Inject shared AI memory into prompt
@@ -1450,12 +1461,18 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
                 _has_mcp, _computer_on,
             )
 
+        # Ask before Claude acts in a connected app: RAPR's MCP servers, the ones
+        # added to Claude Code and claude.ai connectors alike (helm/outward.py).
+        from helm.outward import claude_hook_settings
+        _gate_settings = claude_hook_settings(sid)
+
         # Build command — with native MCP if subprocess servers exist
         cmd = build_claude_cmd(
             enriched_text, has_history,
             model=sess.get("model"),
             auto_approve=True,
             mcp_config=_mcp_config_path,
+            settings=_gate_settings,
         )
 
         # ── Live-progress helper (default OFF; RAPR_LIVE_PROGRESS=1) ──────────
@@ -1520,6 +1537,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
                     model=sess.get("model"),
                     auto_approve=True,
                     mcp_config=_mcp_config_path,
+                    settings=_gate_settings,
                 )
                 raw = await _claude_raw(_cmd)
                 parsed = parse_claude_json_output(raw)
@@ -1573,7 +1591,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
         if not _is_failure(output):
             await push_message("assistant", output, ai="claude", source=source, session_id=sid)
             await handle_diff(before, after, source, cwd, session_id=sid)
-            if not detect_skill(text) and _is_coherent_task(text):
+            if not detect_skill(text) and _is_coherent_task(text) and not sess.get("read_only"):
                 asyncio.create_task(
                     asyncio.to_thread(auto_create_skill_template, text, "claude", output)
                 )
@@ -1606,7 +1624,8 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
     elif ai in _st.integrations:
         await push_thinking(True, ai, session_id=sid)
         skill_matched = detect_skill(text)
-        enriched_text = inject_skill_prefix(safe_text, ai=ai, match_text=text)
+        enriched_text = safe_text if sess.get("read_only") else \
+            inject_skill_prefix(safe_text, ai=ai, match_text=text)
         enriched_text = inject_plugin_context(enriched_text)
 
         # Inject shared AI memory into prompt
@@ -1801,7 +1820,7 @@ async def _run_single_ai(ai: str, sess: dict, text: str, safe_text: str,
             # Cap history at 10 exchanges
             if len(sess["_integration_history"]) > 10:
                 sess["_integration_history"] = sess["_integration_history"][-10:]
-            if not skill_matched and _is_coherent_task(text):
+            if not skill_matched and _is_coherent_task(text) and not sess.get("read_only"):
                 asyncio.create_task(
                     asyncio.to_thread(auto_create_skill_template, text, ai, output)
                 )

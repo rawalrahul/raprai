@@ -22,10 +22,11 @@
 <link rel="stylesheet" href="/css/groupchat.css?v=3">
 <link rel="stylesheet" href="/css/header.css?v=3">
 <link rel="stylesheet" href="/css/sidebar.css?v=1">
+<link rel="stylesheet" href="/css/needs.css?v=1">
 <link rel="stylesheet" href="/css/composer.css?v=1">
 <link rel="stylesheet" href="/css/picker.css?v=1">
 <!-- Applies saved theme, accent, size and layout before first paint -->
-<script src="/js/customize.js?v=1"></script>
+<script src="/js/customize.js?v=2"></script>
 </head>
 <body>
 <div id="app" class="main-layout">
@@ -33,6 +34,7 @@
 <!-- --- Icon sprite (sidebar + customize panel) --- -->
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
   <defs>
+    <symbol id="i-needs" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 20a1.9 1.9 0 0 0 3.4 0"/></symbol>
     <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></symbol>
     <symbol id="i-templates" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="8" height="7" rx="1.5"/><rect x="15" y="14" width="6" height="7" rx="1.5"/></symbol>
     <symbol id="i-scheduled" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M12 14v3l2 1"/></symbol>
@@ -84,6 +86,22 @@
 
   <div class="sb-main">
   <div class="sb-sections" id="sb-sections" role="navigation" aria-label="Main sidebar sections">
+
+    <!-- Needs you (js/needs.js): approvals, your brief, scheduled results -->
+    <div class="sb-section open" data-section="needs" id="sb-section-needs">
+      <div class="sb-section-header" onclick="toggleSbSection(this)" role="button" aria-expanded="true" aria-controls="sb-panel-needs">
+        <svg class="ico sb-section-arrow" aria-hidden="true"><use href="#i-chevron"/></svg>
+        <svg class="ico sb-section-icon" aria-hidden="true"><use href="#i-needs"/></svg>
+        <span class="sb-section-label">Needs you</span>
+        <span class="sb-section-count" id="sb-count-needs" aria-live="polite"></span>
+        <span class="sb-section-actions">
+          <button onclick="event.stopPropagation();loadNeeds()" class="sb-section-action" title="Refresh" aria-label="Refresh what needs you"><svg class="ico"><use href="#i-refresh"/></svg></button>
+        </span>
+      </div>
+      <div class="sb-section-body" id="sb-panel-needs">
+        <div class="sb-empty" role="status">Loading…</div>
+      </div>
+    </div>
 
     <!-- History -->
     <div class="sb-section open" data-section="history" id="sb-section-history">
@@ -641,6 +659,55 @@ Example:
         <div id="upd-panel" class="upd-panel"><small>Checking…</small></div>
       </div>
 
+      <!-- Your brief (js/needs.js) -->
+      <div class="settings-section" id="brief-section">
+        <div class="settings-section-title">Your brief</div>
+        <div class="settings-row" style="display:block">
+          <small>Each morning RAPR lists what needs you: approvals, unfinished sessions, scheduled results, and what each AI you pick finds in the apps <b>it</b> is connected to (Claude Code's claude.ai connectors and MCP servers, Codex's, Gemini's). It arrives on Telegram, WhatsApp, Discord, Slack, your phone and under <b>Needs you</b>, with a button to hand each item to its AI. Those looks only read; anything an AI later wants to send or change asks you first.</small>
+        </div>
+        <div class="settings-row">
+          <label for="brief-enabled">Send my brief</label>
+          <input type="checkbox" id="brief-enabled">
+        </div>
+        <div class="settings-row">
+          <label for="brief-time">At</label>
+          <input class="settings-input" type="time" id="brief-time" value="08:00" style="width:auto">
+        </div>
+        <div class="settings-row">
+          <label for="brief-every">Check in again
+            <small>Only when something new needs you, until 9 pm.</small>
+          </label>
+          <select class="settings-input" id="brief-every" style="width:auto">
+            <option value="0">No</option>
+            <option value="2">Every 2 hours</option>
+            <option value="3">Every 3 hours</option>
+            <option value="4">Every 4 hours</option>
+          </select>
+        </div>
+        <div class="settings-row" style="display:block">
+          <label>Ask these AIs to look
+            <small>Each line runs one AI with one instruction. Use several AIs, or the same AI twice, to cover more apps and accounts (a work Gmail in Claude, a personal one in Codex).</small>
+          </label>
+        </div>
+        <div id="brief-sources" style="display:flex;flex-direction:column;gap:6px;padding:4px 0"></div>
+        <div id="brief-suggestions" class="brief-suggestions"></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;padding:6px 0 10px">
+          <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="briefAddSource()">+ Add</button>
+          <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="briefSaveSettings()">Save</button>
+          <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="briefRunNow()">Send me one now</button>
+          <span id="brief-msg" style="font-size:11px;color:var(--accent);align-self:center"></span>
+        </div>
+        <div class="settings-row" style="display:block">
+          <label>What your AIs can reach
+            <small>The apps each AI is already connected to. RAPR uses them through that AI, with its sign-in; nothing is copied.</small>
+          </label>
+        </div>
+        <div id="reach-list" class="reach-list"><small>Open to check…</small></div>
+        <div style="padding:4px 0 8px">
+          <button class="settings-save-btn" style="font-size:11px;padding:4px 12px" onclick="loadReach(true)">Check again</button>
+        </div>
+      </div>
+
       <!-- Security -->
       <div class="settings-section">
         <div class="settings-section-title">Security</div>
@@ -769,8 +836,28 @@ Example:
         <!-- Approval rules and audit log -->
         <div class="settings-section" id="safety-section">
           <div class="settings-section-title">Approvals &amp; audit</div>
+          <div class="settings-row">
+            <label for="st-OUTWARD_ACTIONS">Ask before acting in your apps
+              <small>When an AI wants to send an email, post a message, comment, merge, pay or delete something in a connected app, it asks you first: here, on Telegram, WhatsApp and your phone. Covers everything Claude Code can reach (its MCP servers, claude.ai connectors and RAPR's apps) and tools any AI calls through RAPR. Codex and Gemini follow their own approval settings for apps in their own settings. Reading never asks.</small>
+            </label>
+            <select class="settings-input" id="st-OUTWARD_ACTIONS" style="width:auto">
+              <option value="ask">Ask me</option>
+              <option value="allow">Don't ask (only my rules)</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <label for="st-OUTWARD_WAIT_MINUTES">Wait for my answer
+              <small>With no answer by then, the action is skipped and the AI says it's waiting for you.</small>
+            </label>
+            <select class="settings-input" id="st-OUTWARD_WAIT_MINUTES" style="width:auto">
+              <option value="2">2 minutes</option>
+              <option value="10" selected>10 minutes</option>
+              <option value="30">30 minutes</option>
+              <option value="120">2 hours</option>
+            </select>
+          </div>
           <div class="settings-row" style="display:block">
-            <small>Your rules decide some actions without asking. <b>ask</b> always asks, <b>deny</b> refuses, <b>allow</b> approves. The pattern is a regular expression, checked against the action's description. The first enabled match wins.</small>
+            <small>Your rules decide some actions without asking. <b>ask</b> always asks, <b>deny</b> refuses, <b>allow</b> approves. The pattern is a regular expression, checked against the action's description, which names the app and the tool (for example <code>slack.*post</code> or <code>gmail.*send</code>). The first enabled match wins.</small>
           </div>
           <div id="rules-list" style="display:flex;flex-direction:column;gap:6px;padding:6px 0"></div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;padding:4px 0 10px">
@@ -1838,7 +1925,7 @@ Example:
 </div>
 
 <script src="/js/kelvin.js?v=8"></script>
-<script src="/js/complete.js?v=22"></script>
+<script src="/js/complete.js?v=23"></script>
 <script src="/js/ai_list.js?v=1"></script>
 <script src="/js/packages.js?v=6"></script>
 <script src="/js/memory.js?v=2"></script>
@@ -1854,8 +1941,9 @@ Example:
 <script src="/js/share.js?v=1"></script>
 <script src="/js/cloud.js?v=2"></script>
 <script src="/js/safety.js?v=6"></script>
+<script src="/js/needs.js?v=1"></script>
 <script src="/js/demos.js?v=2"></script>
-<script src="/js/sidebar.js?v=1"></script>
+<script src="/js/sidebar.js?v=2"></script>
 <script src="/js/updates.js?v=3"></script>
 <script>
 // Register PWA service worker

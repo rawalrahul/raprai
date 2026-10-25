@@ -24,9 +24,10 @@ from helm.terminal import TerminalSession
 # ---------------------------------------------------------------------------
 
 def make_session(ai: Optional[str], cwd: Optional[str] = None,
-                 model: Optional[str] = None) -> dict:
+                 model: Optional[str] = None, fresh: bool = False) -> dict:
     """Create, launch, and register a new session. Returns the session dict.
-    Automatically resumes history if a log exists for the given CWD.
+    Automatically resumes history if a log exists for the given CWD, unless
+    `fresh` (background runs such as the morning brief start clean).
     """
     _st.session_counter += 1
     sid = f"s{_st.session_counter}"
@@ -56,7 +57,7 @@ def make_session(ai: Optional[str], cwd: Optional[str] = None,
 
     target_cwd = cwd or _st.last_cwd
     path_id    = path_to_id(target_cwd)
-    history    = get_history_messages(path_id)
+    history    = [] if fresh else get_history_messages(path_id)
 
     t = TerminalSession()
     if ai is None:

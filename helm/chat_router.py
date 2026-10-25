@@ -3,8 +3,8 @@ helm/chat_router.py — One set of chat commands for every chat app.
 
 WhatsApp, Discord and Slack (and Telegram's text commands, in time) all take
 the same messages: plain text goes to the focused session or group, /sessions,
-/use, /new, /group, /approvals, /kelvin, /status, /help. This module does the
-work once; each chat app only moves messages in and out.
+/use, /new, /group, /approvals, /brief, /do, /skip, /kelvin, /status, /help.
+This module does the work once; each chat app only moves messages in and out.
 """
 
 from __future__ import annotations
@@ -22,6 +22,8 @@ HELP = (
     "/new <ai> — start a session (claude, gemini, codex, ollama…)\n"
     "/group — group chats with several AIs (/group help)\n"
     "/kelvin — is RAPR on?\n"
+    "/brief — what needs you, from all your AIs' apps (/brief now for a fresh one)\n"
+    "/do <number> — hand a brief item to its AI; /skip <number> — drop it\n"
     "/approvals — actions waiting for your OK; /approve <id> or /deny <id>\n"
     "/status — what's running\n"
     "/help — this message"
@@ -70,6 +72,33 @@ def approval_command(text: str) -> Optional[str]:
     return None
 
 
+async def brief_command(channel: str, text: str) -> Optional[list[str]]:
+    """Replies for /brief, /do and /skip, or None when it isn't one of them."""
+    from helm import brief
+    parts = text.split()
+    cmd = parts[0].lower() if parts else ""
+    arg = parts[1] if len(parts) > 1 else ""
+    if cmd in ("/brief", "brief", "/needs"):
+        latest = brief.latest()
+        if arg.lower() == "now" or not latest:
+            latest = await brief.run("manual", deliver=False)
+            if latest is None:
+                return ["A brief is already being put together; it'll arrive shortly."]
+        return [brief.text(latest)]
+    if cmd == "/skip":
+        return [f"Dropped item {arg}." if brief.set_status(arg, "dismissed")
+                else f"There's no item {arg} in your latest brief. See /brief."]
+    if cmd == "/do":
+        from helm.ai_runner import process_message
+        sess, prompt = await brief.start_item(arg, source=channel)
+        if not sess:
+            return [prompt]
+        reply = await process_message(prompt, source=channel, session_id=sess["id"])
+        return [f"▶ {sess['emoji']} {sess['name']} took item {arg}. Anything it wants to send "
+                f"or change asks you first.", reply or "(no output)"]
+    return None
+
+
 _CURRENT = {"channel": "chat"}
 
 
@@ -95,6 +124,9 @@ async def handle(channel: str, text: str) -> list[str]:
     approval_reply = approval_command(text)
     if approval_reply:
         return [approval_reply]
+    brief_reply = await brief_command(channel, text)
+    if brief_reply is not None:
+        return brief_reply
     if low in ("/status", "status"):
         return [status_text()]
     if low in ("/sessions", "sessions"):

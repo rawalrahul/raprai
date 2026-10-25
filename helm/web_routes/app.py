@@ -54,7 +54,7 @@ _PLUGIN_PUBLIC_PREFIXES = (
 
 # MCP endpoints are NOT fully public — they require localhost origin
 # and a bearer token that's auto-generated at startup.
-_MCP_PREFIXES = ("/mcp/call", "/mcp/servers")
+_MCP_PREFIXES = ("/mcp/call", "/mcp/servers", "/mcp/gate")
 
 # Bearer token for subprocess MCP calls + Chrome plugin auth.
 # Persisted to .env so it survives restarts (Chrome plugin stores it once).
@@ -374,6 +374,8 @@ _SETTINGS_KEYS = [
     "KELVIN_DESKTOP_PET",
     "KELVIN_DESKTOP_SIZE",
     "KELVIN_DAILY_CHECKIN",
+    "OUTWARD_ACTIONS",
+    "OUTWARD_WAIT_MINUTES",
     "PIPELINE_CONTEXT_THRESHOLD",
     "LOCAL_AI_URL",
     "LOCAL_AI_MODEL",

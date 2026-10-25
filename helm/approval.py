@@ -196,6 +196,7 @@ async def _send_approval_to_telegram(req: dict):
         "pipeline_step": "🔧",
         "file_delete": "🗑️",
         "destructive_command": "⚠️",
+        "outward_action": "📤",
     }.get(req["action"], "❓")
 
     text = (

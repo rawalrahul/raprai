@@ -118,6 +118,7 @@ def scan_pending_tasks(max_logs: int = 10, max_age_hours: float = 0) -> list[dic
     # Get folder (CWD) info per history_id
     history_ids = list(dict.fromkeys(r["history_id"] for r in rows))[:max_logs]
     folder_map = {}
+    path_map = {}
     for hid in history_ids:
         cwd_row = db.execute(
             """SELECT path FROM messages
@@ -127,6 +128,7 @@ def scan_pending_tasks(max_logs: int = 10, max_age_hours: float = 0) -> list[dic
         ).fetchone()
         if cwd_row and cwd_row["path"]:
             folder_map[hid] = pathlib.Path(cwd_row["path"]).name or cwd_row["path"]
+            path_map[hid] = cwd_row["path"]
 
     pending = []
     hid_set = set(history_ids)
@@ -142,6 +144,7 @@ def scan_pending_tasks(max_logs: int = 10, max_age_hours: float = 0) -> list[dic
                 pending.append({
                     "history_id": hid,
                     "folder": folder_map.get(hid, hid),
+                    "path": path_map.get(hid, ""),
                     "ai": row["ai"] or "",
                     "snippet": snippet,
                     "ts": row["ts"] or 0,
@@ -360,6 +363,15 @@ async def heartbeat_runner():
                     logger.info("Heartbeat: memory decay archived %d stale memories", decay_result["archived"])
             except Exception as e:
                 logger.debug("Heartbeat: memory decay failed: %s", e)
+
+            # Your brief (helm/brief.py) lists unfinished sessions; don't send both.
+            try:
+                from helm.brief import load_settings as _brief_settings
+                if _brief_settings().get("enabled"):
+                    logger.info("Heartbeat: the brief covers check-ins — staying silent.")
+                    continue
+            except Exception as e:
+                logger.debug("Heartbeat: brief settings unavailable: %s", e)
 
             # Scan history
             pending = await asyncio.to_thread(scan_pending_tasks)

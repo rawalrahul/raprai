@@ -248,7 +248,7 @@ def _stream_cli(scmd, cwd, sess, stdin_text, extra_env, timeout, on_event, tag="
     Raises StreamUnavailable on spawn/read failure or timeout."""
     import os as _os
     from helm.paths import child_env
-    env = child_env(scmd, extra_env)
+    env = child_env(scmd, {**(extra_env or {}), "RAPR_SESSION_ID": str(sess.get("id", ""))})
     try:
         proc = subprocess.Popen(
             scmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

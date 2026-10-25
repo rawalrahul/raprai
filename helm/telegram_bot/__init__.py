@@ -36,6 +36,9 @@ from .commands import (
 # Group chats
 from .groups import tg_group, group_callback
 
+# Your brief
+from .brief import tg_brief, brief_callback
+
 # Callbacks (inline keyboard callbacks)
 from .callbacks import action_callback, pipeline_callback, approval_callback, agent_callback
 

@@ -6,7 +6,7 @@
 (function(){
   const KEY = 'raprUI';
 
-  const SECTION_IDS = ['history','templates','scheduled','usage','pipelines','agents','memory','groups','council','demos','packages'];
+  const SECTION_IDS = ['needs','history','templates','scheduled','usage','pipelines','agents','memory','groups','council','demos','packages'];
 
   const DEFAULTS = {
     theme: 'dark',          // dark | light | system
@@ -23,7 +23,7 @@
       labels: false,        // labels under rail icons
       order: SECTION_IDS.slice(),
       hidden: [],
-      active: 'history',
+      active: 'needs',
     },
   };
 
@@ -77,6 +77,7 @@
       out.sidebar.labels = !!s.labels;
       if(Array.isArray(s.order)){
         const known = s.order.filter(id => SECTION_IDS.includes(id));
+        if(!s.order.includes('needs')) known.unshift('needs');   // new: first for everyone
         out.sidebar.order = [...new Set(known.concat(SECTION_IDS))];
       }
       if(Array.isArray(s.hidden)) out.sidebar.hidden = s.hidden.filter(id => SECTION_IDS.includes(id));
