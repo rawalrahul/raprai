@@ -4,7 +4,7 @@
 
 # RAPR AI
 
-**Run Claude Code, Codex, Antigravity, Ollama and more side by side, let them work together in group chats, and control them from your browser, Telegram or WhatsApp.**
+**Every AI you already pay for, working as one team. They reach every app any of them is connected to, brief you each morning on what needs you, and ask before they act. From your browser, your phone, or inside Claude Code.**
 
 [![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Frawalrahul%2Fraprai%2Fmain%2F.codex-plugin%2Fplugin.json&query=%24.version&label=version)](release-notes/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -25,25 +25,42 @@
 
 ## Why RAPR AI
 
-You probably already pay for one or two AI coding agents, and each lives in its own terminal. RAPR AI puts them all in one place:
+You probably already pay for one or two AIs, and each lives in its own app or terminal with its own connected apps. RAPR AI puts them all in one place, and the whole is bigger than any one of them:
 
-- **Use them together, not one at a time.** Put Claude Code, Codex and Antigravity in one group chat. Ask once; they answer, review each other's work and hand off with `@mentions`.
-- **Leave your desk.** Every session is reachable from your phone through Telegram or WhatsApp, and you get a notification when an AI needs your approval.
-- **Bring the AIs you already have.** RAPR runs the official command-line tools with your own sign-ins, so your existing plans and limits just work. There's nothing to sign up for.
-- **Free and open source** under the MIT license. Everything runs on your computer (or your own server).
+- **More reach than any single AI.** Claude Code has your claude.ai connectors (Gmail, Calendar, Slack, Drive…) and its MCP servers; Codex and Gemini have theirs; RAPR adds its own (any MCP server, Zapier, Composio). RAPR uses each app through the AI that already has it, with that AI's sign-in, so nothing is set up twice. Different accounts can live in different AIs: a work Gmail through Claude, a personal one through Codex.
+- **It comes to you.** Each morning your **brief** lists what needs you, from all of those apps at once plus your approvals, unfinished sessions and scheduled tasks, with one tap to hand each item to the AI that has the app. Schedules and check-ins run as often as you like, on your computer or your own server.
+- **It asks before it acts.** When an AI wants to send an email, post, merge, pay or delete in a connected app, it waits for your OK on your phone or in the app. That covers everything Claude Code can reach (its MCP servers, your claude.ai connectors and RAPR's apps) and tools any AI calls through RAPR, under one set of your rules and a tamper-evident audit log.
+- **Use them together, not one at a time.** Group chats, bake-offs and second opinions: Claude builds it, Codex reviews it, the best answer wins.
+- **Everywhere you are.** Browser, Telegram, WhatsApp, Discord, Slack, phone notifications, and inside Claude Code, Codex, Cursor or Windsurf as an MCP server.
+- **Bring the AIs you already have.** RAPR runs the official command-line tools with your own sign-ins, so your existing plans and limits just work. Nothing to sign up for. **Free and open source** (MIT); everything runs on your computer or your own server.
+
+## What only RAPR does
+
+An assistant from one AI company sees that company's connectors, runs that company's model, and lives in that company's app. RAPR sits above all of them:
+
+| | One AI's own assistant | RAPR AI |
+|---|---|---|
+| **Apps it can see** | That AI's connectors | Every connected app of every AI you use, plus any MCP server, Zapier or Composio |
+| **Accounts** | Usually one per app | Several: each AI can hold a different account of the same app |
+| **Who does the work** | Its own model | Claude Code, Codex, Antigravity, Copilot, Cursor, Ollama and more; pick one, let **Auto** choose, or make them compete |
+| **Schedules and briefs** | What that product offers | As many as you want, on your computer or server, running on your AI plans |
+| **Where you use it** | Its own apps | Browser, Telegram, WhatsApp, Discord, Slack, and inside Claude Code, Codex, Cursor and Windsurf (MCP) |
+| **Before it acts** | Its own rules | Your rules and one audit log over everything Claude Code reaches and every tool call through RAPR |
+| **Price** | A subscription | Free (MIT), on the plans you already have |
 
 ## What you can do
 
 | | |
 |---|---|
+| ☀️ **Your brief** | Each morning (and check-ins if you like) one list of what needs you: approvals, unfinished sessions, scheduled results, and what each AI you pick finds in its own connected apps. Arrives on Telegram, WhatsApp, Discord, Slack, your phone and under **Needs you**; one tap hands an item to the AI that has the app. |
+| 🛡️ **Asks before acting** | An AI that wants to send, post, comment, merge, pay or delete in a connected app waits for your OK first, including Claude Code's own MCP servers and claude.ai connectors. Your rules can always allow, always ask or never allow; every decision is logged. |
 | 💬 **Group chats** | Several AIs in one conversation. `@mention` who should answer, or `@all`. Ready-made **crews** give each AI a job: code review, research, launch, debate. |
 | 🧪 **Bake-off** | Give the same task to several AIs. Each works in its own copy of your project; compare the diffs, test results and time, then merge the winner. Share the result as a card, or publish it to the public [RAPR Arena](https://www.raprai.com/arena) leaderboard. |
-| 🔌 **Second opinions from your editor** | RAPR is an MCP server: from Claude Code, Codex or Cursor, ask another AI to review your changes, answer a question or join a bake-off. Runs on your computer; your files stay untouched unless you allow edits. [Set it up](#use-rapr-inside-claude-code-or-codex) |
+| 🔌 **RAPR inside your editor** | RAPR is an MCP server: from Claude Code, Codex, Cursor or Windsurf, ask another AI to review your changes, answer a question or join a bake-off, or ask "what needs me today?" for your brief. Runs on your computer; your files stay untouched unless you allow edits. [Set it up](#use-rapr-inside-claude-code-or-codex) |
 | 🐧 **Monthly recap** | Your month as a shareable card: your AI crew and its MVP, streaks, bake-offs, and what running AIs locally saved you. Worked out on your computer. |
 | 🧭 **Smart routing** | Choose "Auto" and RAPR picks the AI for each task: free local models for easy work, the strongest coding agent for hard work, skipping any AI that's over budget. |
-| 📱 **Phone control** | Telegram bot and WhatsApp (scan a QR code, no Business API). Start sessions, send tasks, approve actions, get files back. |
+| 📱 **Phone control** | Telegram bot, WhatsApp (scan a QR code, no Business API), Discord and Slack. Start sessions, send tasks, approve actions, get your brief and hand items off with `/do`, get files back. |
 | 🖥️ **Parallel sessions** | Many sessions at once, each with its own AI, folder and history. Resume any past conversation. |
-| 🛡️ **Your rules** | Decide what always needs a yes, what is never allowed and what can run on its own. Every decision is logged. |
 | 🧠 **Shared memory & playbooks** | What one AI learns is available to the others. RAPR keeps how-to notes from past tasks. |
 | ☁️ **Your own server** | One command installs RAPR on any Linux server (Oracle's free tier works) with a free public address, so it runs while your laptop is off. |
 
@@ -111,7 +128,7 @@ codex mcp add rapr -- rapr mcp                   # Codex
 
 On Windows, end both with `-- cmd /c rapr mcp`. For Codex, also add `tool_timeout_sec = 600` under `[mcp_servers.rapr]` in `~/.codex/config.toml`: Codex gives up on a tool after 60 seconds, and a review usually takes a few minutes. Cursor, Windsurf and other clients: add a server with the command `rapr` and the argument `mcp`.
 
-Then ask in plain words: *"get a second opinion from Codex on my changes"*, *"ask Claude how it would structure this"*, *"run a bake-off between Claude and Codex on this task, with pytest -q"*.
+Then ask in plain words: *"get a second opinion from Codex on my changes"*, *"ask Claude how it would structure this"*, *"run a bake-off between Claude and Codex on this task, with pytest -q"*, *"what needs me today?"*.
 
 | Tool | What it does |
 |---|---|
@@ -119,19 +136,22 @@ Then ask in plain words: *"get a second opinion from Codex on my changes"*, *"as
 | `ask_agent` | Puts any question or task to another AI and returns its reply. |
 | `start_bakeoff`, `bakeoff_status`, `merge_bakeoff`, `discard_bakeoff` | A bake-off from your editor: 2 to 4 AIs, each in its own copy of the project; merge the one you like. |
 | `list_agents` | The AIs installed and signed in on this computer. |
+| `latest_brief` | What needs you, from your latest brief in the RAPR app. |
 
 The other AI works in a temporary copy of your project, so your files only change if you allow edits or merge a bake-off. Nothing is hosted and the RAPR app doesn't need to be open. More in the [full guide](docs/guide.md#use-rapr-from-claude-code-cursor-or-codex-mcp).
 
 ## How it works
 
 ```
- Browser  ─┐                                     ┌─ Claude Code  (~/projects/web)
- Telegram ─┼─▶  RAPR AI  (one Python process) ──┼─ Codex        (~/projects/web)
- WhatsApp ─┘    sessions · group chats · rules   ├─ Antigravity  (~/projects/api)
-                                                 └─ Ollama       (offline)
+ Browser   ─┐                                    ┌─ Claude Code ─ Gmail, Calendar, Slack (claude.ai), GitHub
+ Telegram  ─┤                                    ├─ Codex ─────── Linear, a second Gmail
+ WhatsApp  ─┼─▶  RAPR AI  (one Python process) ──┼─ Antigravity
+ Discord   ─┤    sessions · brief · group chats  ├─ Ollama        (offline)
+ Slack     ─┤    approvals · rules · audit       └─ RAPR's own MCP servers, Zapier, Composio
+ Your editor (Claude Code, Cursor, Windsurf: MCP)
 ```
 
-RAPR starts each AI's own command-line tool in the folder you choose and streams its replies to every channel. Your chats, settings and keys stay in RAPR's data folder on your machine; keys are encrypted.
+RAPR starts each AI's own command-line tool in the folder you choose and streams its replies to every channel. Each AI keeps its own connected apps (Claude Code's claude.ai connectors and MCP servers, Codex's, Gemini's); RAPR reaches them by asking that AI, and adds a hook so Claude Code asks you before it acts in one. Your chats, settings and keys stay in RAPR's data folder on your machine; keys are encrypted.
 
 ## Documentation
 

@@ -201,6 +201,7 @@ Tap **➕ New Session** → pick an AI.
 | `/codex` | Creates a new Codex session |
 | `/status` | Lists all sessions with status, AI, and directory |
 | `/kelvin` | Is RAPR on? Uptime, what's running, approvals waiting, next schedule, keep-awake. No reply means RAPR is off or the PC is asleep |
+| `/brief` | Your latest brief, with a button per item: ▶ hands it to its AI, ✕ drops it, ✅/❌ answers an approval. `/brief now` puts a fresh one together |
 | `/stop` | Stops the focused session |
 | `/interrupt` | Sends Ctrl+C to the focused session |
 | `/stop_ai` | Removes the AI from the focused session (keeps terminal running as shell) |
@@ -287,6 +288,41 @@ Each session's files, CWD, and conversation history are completely independent. 
 
 ---
 
+## Your brief and Needs you
+
+Every morning RAPR puts one short list of what needs you in front of you, the way an assistant would, but built from **all** the AIs you already use.
+
+**Where it looks**
+
+- **Inside RAPR**, at no cost: approvals waiting for you, sessions you left unfinished, and what your scheduled tasks answered (failures first).
+- **Through your AIs' own apps.** Each AI keeps its own connections: Claude Code has your claude.ai connectors (Gmail, Google Calendar, Slack, Drive…) and the MCP servers you added to it; Codex and Gemini have theirs. RAPR doesn't need a second copy of any of them, or of their sign-ins: it asks the AI that has the app to look. Pick several AIs, or the same AI twice, and the brief covers several accounts (a work Gmail through Claude, a personal one through Codex) and more apps than any one AI reaches.
+
+**Set it up:** **Settings → Your brief**.
+
+1. **Send my brief** at a time you choose (08:00 by default), and optionally **Check in again** every 2, 3 or 4 hours until 9 pm. A check-in only arrives when something new needs you.
+2. **Ask these AIs to look**: each line is one AI and what it should look at, in plain words, for example *Claude Code: my Gmail, calendar and Slack* or *Codex: GitHub, with the gh command: pull requests waiting for my review and failing checks*. Add a folder to run it inside a project, so it checks that repository. Under the list, RAPR suggests lines from the apps each AI already has.
+3. **What your AIs can reach** lists every AI's connected apps, and RAPR's own (Packages). **Check again** asks the AIs afresh.
+
+**How it arrives:** on Telegram, with a button per item; on WhatsApp, Discord and Slack as a numbered list; as a phone notification; and in the app under **Needs you**, the first section of the sidebar. The bell's badge counts what's waiting.
+
+**One tap to hand it off.** Each item can carry a next step (draft the reply, fix the failing test, review the pull request). **▶ Hand to Claude** (or Codex, or whichever AI found it) starts a session with that AI, with the item and its link as the task. On WhatsApp, Discord or Slack reply `/do 2`; `/skip 2` drops an item, `/brief` shows the latest brief and `/brief now` puts a fresh one together. Approvals in the brief can be answered right there.
+
+**What it costs and what it can do:** the looks run on your own AI plans and count toward their usage, like any other task; inside-RAPR items cost nothing. The looks only read: if an AI tries to send or change something during one, RAPR refuses it and tells the AI to list it as a suggestion. When you hand an item off, anything that AI then wants to send or change asks you first (below). While the brief is on, the old Heartbeat check-in stays quiet so you don't get both. Turn the brief off in the same place.
+
+## Ask before an AI acts in your apps
+
+When an AI wants to **send an email, post a message, comment, merge, pay, sign or delete** something in a connected app, it asks you first, like a risky command does: in the app (the banner and **Needs you**), on Telegram, WhatsApp and your phone (on Discord and Slack, `/approvals` lists them). You see which AI, which app, and the details (recipient, subject, channel, pull request…). Reading never asks. With no answer within 10 minutes (**Wait for my answer**), the action is skipped and the AI is told it's waiting for your OK, so it can carry on with the rest.
+
+This covers:
+
+- **Claude Code**, through a hook RAPR adds when it starts Claude: RAPR's own MCP servers, the MCP servers you added to Claude Code, and your claude.ai connectors.
+- **Any AI calling tools through RAPR itself**: RAPR's tool loop and its local tool endpoint.
+- **ACP agents** already ask through their own permission requests.
+
+Codex and Gemini call the apps in their own settings directly, including RAPR's apps (RAPR copies them there), so those calls follow Codex's and Gemini's own approval settings.
+
+**Your rules decide first.** **Settings → Approvals & audit** rules now apply to every tool call: `allow` + `slack.*post` lets Slack posts through without asking, `deny` + `merge` never lets an AI merge, `ask` + `postgres.*query` asks even for a tool that only reads. The description a rule matches names the AI, the action and the app, e.g. *Claude wants to send email in Gmail*. Every decision is in the audit log. To stop asking altogether, set **Ask before acting in your apps** to *Don't ask (only my rules)*.
+
 ## Group chats
 
 Open **👥 Group Chats** in the header (or the sidebar section), pick any of your open AI sessions, and chat with all of them at once.
@@ -360,6 +396,7 @@ Ask in plain words: *"get a second opinion from Codex on my changes"*, *"ask Ant
 | `ask_agent` | Sends any question or task to another AI and returns its reply. |
 | `start_bakeoff`, `bakeoff_status`, `merge_bakeoff`, `discard_bakeoff` | The same bake-off as in the app: 2 to 4 AIs, each in its own copy of the project. Merge the one you like (staged, not committed). |
 | `list_agents` | The AIs that are installed and set up on this computer. |
+| `latest_brief` | What needs you, from your latest brief in the RAPR app: approvals, unfinished work, scheduled results and what your AIs found in their apps. |
 
 - **It runs on your computer.** Your MCP client starts `rapr mcp` itself and talks to it over stdin/stdout. Nothing is hosted, and the RAPR app doesn't need to be open. The AIs run through their own command-line tools with your sign-ins, as in a bake-off.
 - **Your files are safe by default.** `second_opinion` and `ask_agent` run the other AI in a temporary copy of the project, including your uncommitted changes. If it edits anything, you get the diff back; your files don't change. Pass `allow_edits` to `ask_agent` to let it work in the real folder.
@@ -387,6 +424,9 @@ Free WhatsApp control through [neonize](https://github.com/krypton-byte/neonize)
 | `/sessions`, `/use 2` | List sessions, switch to session 2 |
 | `/new claude` | Start a session (any AI: `gemini`, `codex`, `ollama`, …) |
 | `/group …` | Group chats, same commands as on Telegram |
+| `/brief`, `/brief now` | Your latest brief, or a fresh one |
+| `/do 2`, `/skip 2` | Hand brief item 2 to its AI, or drop it |
+| `/approvals`, `/approve <id>`, `/deny <id>` | Actions waiting for your OK |
 | `/status`, `/help` | What's running; the command list |
 
 RAPR only acts on your "Message yourself" chat and on numbers you add under **Also accept messages from** (for when RAPR is linked to a spare number). Chats with other people, groups and statuses are ignored. **Unlink** in Settings, or removing the device on your phone, disconnects it. WhatsApp's terms don't cover unofficial clients, so a dedicated or spare number is the safest choice.

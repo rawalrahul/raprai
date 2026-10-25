@@ -3,19 +3,22 @@ helm/outward.py — Ask before an AI acts outside your computer.
 
 When an AI wants to send an email, post a message, comment on a pull request,
 merge, pay, sign or delete something in a connected app, it asks you first,
-the same way risky commands do: in the app, on Telegram, WhatsApp, Discord,
-Slack and your phone. Your rules (Settings → Approvals & audit) still decide:
+the same way risky commands do: in the app, on Telegram, WhatsApp and your
+phone. Your rules (Settings → Approvals & audit) still decide:
 "allow" lets an action through without asking, "deny" refuses it, "ask" asks
 even for a tool that only reads.
 
-Every route an AI has to a connected app goes through gate():
+These routes go through gate():
   - tools RAPR runs for an AI: its text tool loop (ai_runner/agent_loop.py)
-    and the /mcp/call endpoint that Codex and Gemini use
+    and the /mcp/call endpoint (helm/mcp/call_tool.py)
   - Claude Code's own tool calls, through a PreToolUse hook
     (helm/mcp/tool_gate_hook.py → POST /mcp/gate). That covers RAPR's MCP
     servers, the MCP servers you added to Claude Code and your claude.ai
     connectors.
   - ACP agents already ask through their own permission requests (helm/acp.py).
+Codex and Gemini call the MCP servers in their own settings directly (RAPR
+copies its servers there too, mcp/manager.py), so those calls follow their own
+approval settings.
 
 Settings (.env / Settings → Approvals & audit):
   OUTWARD_ACTIONS       "ask" (default) or "allow" (never ask; your rules still apply)
