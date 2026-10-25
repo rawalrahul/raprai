@@ -205,8 +205,9 @@ function connect(){
     else if(d.type==='schedule_list') renderSchedules(d.tasks);
     else if(d.type==='pipeline_update') handlePipelineUpdate(d.pipeline);
     else if(d.type==='pipeline_step_stream') handleStepStream(d.pipeline_id, d.step_id, d.chunk);
-    else if(d.type==='approval_request') showApprovalBanner(d.approval);
-    else if(d.type==='approval_resolved') hideApprovalBanner();
+    else if(d.type==='approval_request') { showApprovalBanner(d.approval); if(typeof loadNeeds==='function') loadNeeds(); }
+    else if(d.type==='approval_resolved') { hideApprovalBanner(); if(typeof loadNeeds==='function') loadNeeds(); }
+    else if((d.type==='brief' || d.type==='needs_changed') && typeof loadNeeds==='function') loadNeeds();
     else if(d.type==='agent_run_update' && typeof handleAgentRunUpdate==='function') handleAgentRunUpdate(d.run);
     else if(d.type==='agent_run_stream' && typeof handleAgentRunStream==='function') handleAgentRunStream(d.run_id, d.node_id, d.chunk);
     else if(d.type==='agent_run_waiting_input' && typeof handleAgentRunWaitingInput==='function') handleAgentRunWaitingInput(d);
@@ -2448,7 +2449,7 @@ function loadSettings(){
                   'CLAUDE_TIMEOUT','SESSION_DAYS','WEB_PORT','WEB_HOST',
                   'HEARTBEAT_ENABLED','HEARTBEAT_AI',
                   'AI_MAX_RETRIES','AI_AUTO_SWITCH',
-                  'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD','TELEGRAM_KELVIN_STICKERS','CHAT_APPS_SYNC','KELVIN_KEEP_AWAKE','KELVIN_DESKTOP_PET','KELVIN_DESKTOP_SIZE','KELVIN_DAILY_CHECKIN',
+                  'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD','TELEGRAM_KELVIN_STICKERS','CHAT_APPS_SYNC','KELVIN_KEEP_AWAKE','KELVIN_DESKTOP_PET','KELVIN_DESKTOP_SIZE','KELVIN_DAILY_CHECKIN','OUTWARD_ACTIONS','OUTWARD_WAIT_MINUTES',
                   'LOCAL_AI_URL','LOCAL_AI_MODEL',
                   'COMPUTER_USE','COMPUTER_USE_TIER2','OMNIPARSER_ENABLED'];
     keys.forEach(k=>{
@@ -2535,7 +2536,7 @@ function saveSettings(){
                 'CLAUDE_TIMEOUT','SESSION_DAYS','WEB_PORT','WEB_HOST',
                 'HEARTBEAT_ENABLED','HEARTBEAT_AI',
                 'AI_MAX_RETRIES','AI_AUTO_SWITCH',
-                'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD','TELEGRAM_KELVIN_STICKERS','CHAT_APPS_SYNC','KELVIN_KEEP_AWAKE','KELVIN_DESKTOP_PET','KELVIN_DESKTOP_SIZE','KELVIN_DAILY_CHECKIN',
+                'PIPELINE_PLANNER_AI','PIPELINE_MAX_PARALLEL','PIPELINE_AUTO_SUGGEST','PIPELINE_CONTEXT_THRESHOLD','TELEGRAM_KELVIN_STICKERS','CHAT_APPS_SYNC','KELVIN_KEEP_AWAKE','KELVIN_DESKTOP_PET','KELVIN_DESKTOP_SIZE','KELVIN_DAILY_CHECKIN','OUTWARD_ACTIONS','OUTWARD_WAIT_MINUTES',
                 'LOCAL_AI_URL','LOCAL_AI_MODEL',
                 'COMPUTER_USE','COMPUTER_USE_TIER2','OMNIPARSER_ENABLED'];
   const body = {};

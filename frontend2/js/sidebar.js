@@ -7,6 +7,7 @@
 
 (function(){
   const DEFS = {
+    needs:     {label: 'Needs you'},
     history:   {label: 'History'},
     templates: {label: 'Templates'},
     scheduled: {label: 'Scheduled'},

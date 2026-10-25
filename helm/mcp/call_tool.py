@@ -44,12 +44,22 @@ def _auth_headers() -> dict:
     return headers
 
 
+def _call_timeout() -> float:
+    """An action that changes something waits for your OK (OUTWARD_WAIT_MINUTES)."""
+    try:
+        wait = float(os.environ.get("OUTWARD_WAIT_MINUTES", "10")) * 60
+    except ValueError:
+        wait = 600.0
+    return max(30.0, wait) + 60
+
+
 def mcp_call(tool_name: str, arguments: dict | None = None) -> str:
     """Call an MCP tool via the RAPR AI HTTP API. Returns the result string."""
     url = f"{_BASE}/mcp/call"
     payload = json.dumps({
         "name": tool_name,
         "arguments": arguments or {},
+        "session_id": os.environ.get("RAPR_SESSION_ID", ""),
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -60,7 +70,7 @@ def mcp_call(tool_name: str, arguments: dict | None = None) -> str:
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=_call_timeout()) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             if data.get("ok"):
                 return data.get("result", "")

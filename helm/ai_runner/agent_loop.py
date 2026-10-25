@@ -109,6 +109,15 @@ async def _execute_mcp_tool(name: str, arguments: dict) -> dict:
         return {"name": name, "output": f"Error: {exc}", "error": True}
 
 
+async def _gated_mcp_tool(name: str, arguments: dict, session_id: str) -> dict:
+    """Run an MCP tool, asking you first when it would act outside your computer."""
+    from helm.outward import gate
+    allowed, reason = await gate(name, arguments, session_id=session_id)
+    if not allowed:
+        return {"name": name, "output": f"Not done: {reason}", "error": True}
+    return await _execute_mcp_tool(name, arguments)
+
+
 async def run_with_tools(
     run_fn: Callable[[str], Awaitable[str]],
     initial_prompt: str,
@@ -172,7 +181,7 @@ async def run_with_tools(
             name = tc["name"]
             args = tc["arguments"]
             if mgr and mgr.is_mcp_tool(name):
-                coros.append(_execute_mcp_tool(name, args))
+                coros.append(_gated_mcp_tool(name, args, session_id))
                 indices.append(i)
             elif is_builtin_tool(name):
                 coros.append(_execute_builtin(name, args, cwd))

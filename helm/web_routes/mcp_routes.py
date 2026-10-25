@@ -284,6 +284,7 @@ async def call_mcp_tool(request: Request):
 
     name = body.get("name", "").strip()
     arguments = body.get("arguments") or {}
+    session_id = str(body.get("session_id") or "")
 
     if not name:
         return JSONResponse({"ok": False, "error": "Missing 'name' field"}, status_code=400)
@@ -315,13 +316,13 @@ async def call_mcp_tool(request: Request):
 
     # Try exact match first
     if mgr.is_mcp_tool(name):
-        return await _execute_tool(mgr, name, arguments)
+        return await _execute_tool(mgr, name, arguments, session_id)
 
     # Try fuzzy matching
     resolved = _resolve_tool_name(mgr, name)
     if resolved:
         logger.info("MCP API: resolved '%s' → '%s'", name, resolved)
-        return await _execute_tool(mgr, resolved, arguments)
+        return await _execute_tool(mgr, resolved, arguments, session_id)
 
     # Not found
     logger.warning("MCP API: unknown tool '%s'", name)
@@ -332,6 +333,25 @@ async def call_mcp_tool(request: Request):
         "hint": f"Active servers: {', '.join(available)}. "
                 f"Built-in: create_presentation, create_pdf, create_document.",
     }, status_code=404)
+
+
+@router.post("/mcp/gate")
+async def gate_tool_call(request: Request):
+    """Claude Code's hook asks here before each MCP tool call (helm/mcp/tool_gate_hook.py).
+
+    Body: {"tool_name": "mcp__claude_ai_Gmail__send_email", "tool_input": {...}, "session_id": "s3"}
+    Returns: {"allowed": true} or {"allowed": false, "reason": "..."} once you've answered.
+    """
+    from helm.outward import gate
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"allowed": False, "reason": "RAPR couldn't read the tool call."}, status_code=400)
+    session_id = str(body.get("session_id") or "").strip("-") or None
+    tool_input = body.get("tool_input") if isinstance(body.get("tool_input"), dict) else {}
+    allowed, reason = await gate(str(body.get("tool_name") or ""), tool_input,
+                                 session_id=session_id, ai="claude")
+    return JSONResponse({"allowed": allowed, "reason": reason})
 
 
 def _resolve_tool_name(mgr, name: str) -> str | None:
@@ -359,8 +379,12 @@ def _resolve_tool_name(mgr, name: str) -> str | None:
     return None
 
 
-async def _execute_tool(mgr, name: str, arguments: dict) -> JSONResponse:
-    """Execute a resolved MCP tool call."""
+async def _execute_tool(mgr, name: str, arguments: dict, session_id: str = "") -> JSONResponse:
+    """Execute a resolved MCP tool call (outward actions ask you first)."""
+    from helm.outward import gate
+    allowed, reason = await gate(name, arguments, session_id=session_id or None)
+    if not allowed:
+        return JSONResponse({"ok": False, "error": f"Not done: {reason}"}, status_code=403)
     try:
         result = await asyncio.wait_for(mgr.call_tool(name, arguments), timeout=30)
         logger.info("MCP API call: %s → %d chars", name, len(result))

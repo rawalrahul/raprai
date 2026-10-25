@@ -112,6 +112,7 @@ default_models: dict[str, str] = {}      # ai_key -> default model name
 # ---------------------------------------------------------------------------
 
 approval_queue: dict[str, dict] = {}     # approval_id -> request dict
+gate_url: str = ""                         # where AI hooks ask for approval (helm/outward.py); set once the web server starts
 
 # ---------------------------------------------------------------------------
 # Agent state (workflow automation DAG runner)

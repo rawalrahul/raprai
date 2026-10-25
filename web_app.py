@@ -292,6 +292,7 @@ async def _main():
             tg_voice, tg_file,
         )
         from helm.telegram_bot.groups import tg_group, group_callback, register as _register_tg_groups
+        from helm.telegram_bot.brief import tg_brief, brief_callback
         _register_tg_groups()
 
         _st.telegram_app = (
@@ -327,6 +328,7 @@ async def _main():
         tg.add_handler(CommandHandler("pipeline",      tg_pipeline))
         tg.add_handler(CommandHandler("agent",         tg_agent))
         tg.add_handler(CommandHandler("group",         tg_group))
+        tg.add_handler(CommandHandler("brief",         tg_brief))
         # Inline keyboard callbacks — action/ms: buttons BEFORE browse_callback
         tg.add_handler(CallbackQueryHandler(action_callback, pattern=r"^(action:|ms:)"))
         tg.add_handler(CallbackQueryHandler(pipeline_callback, pattern=r"^pl:"))
@@ -334,6 +336,7 @@ async def _main():
         tg.add_handler(CallbackQueryHandler(agent_callback, pattern=r"^ag:"))
         tg.add_handler(CallbackQueryHandler(group_callback, pattern=r"^gc:"))
         tg.add_handler(CallbackQueryHandler(heartbeat_callback, pattern=r"^heartbeat:"))
+        tg.add_handler(CallbackQueryHandler(brief_callback, pattern=r"^brief:"))
         tg.add_handler(CallbackQueryHandler(browse_callback))
         # Voice / audio messages
         tg.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, tg_voice))
@@ -392,6 +395,7 @@ async def _main():
                 tg_voice, tg_file,
             )
             from helm.telegram_bot.groups import tg_group, group_callback, register as _register_tg_groups
+            from helm.telegram_bot.brief import tg_brief, brief_callback
             _register_tg_groups()
             _st.telegram_app = (
                 Application.builder().token(token).concurrent_updates(True).build()
@@ -427,12 +431,14 @@ async def _main():
             tg.add_handler(CommandHandler("pipeline",      tg_pipeline))
             tg.add_handler(CommandHandler("agent",         tg_agent))
             tg.add_handler(CommandHandler("group",         tg_group))
+            tg.add_handler(CommandHandler("brief",         tg_brief))
             tg.add_handler(CallbackQueryHandler(action_callback, pattern=r"^(action:|ms:)"))
             tg.add_handler(CallbackQueryHandler(pipeline_callback, pattern=r"^pl:"))
             tg.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^appr:"))
             tg.add_handler(CallbackQueryHandler(agent_callback, pattern=r"^ag:"))
             tg.add_handler(CallbackQueryHandler(group_callback, pattern=r"^gc:"))
             tg.add_handler(CallbackQueryHandler(heartbeat_callback, pattern=r"^heartbeat:"))
+            tg.add_handler(CallbackQueryHandler(brief_callback, pattern=r"^brief:"))
             tg.add_handler(CallbackQueryHandler(browse_callback))
             tg.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, tg_voice))
             tg.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, tg_file))
@@ -458,6 +464,9 @@ async def _main():
     actual_port = find_free_port(WEB_HOST, WEB_PORT)
     # Store actual port so OAuth callbacks use the right port
     os.environ["WEB_PORT"] = str(actual_port)
+    # Claude Code's hook asks RAPR here before an AI acts in a connected app.
+    if WEB_HOST in ("127.0.0.1", "0.0.0.0", "localhost", "::", ""):
+        _st.gate_url = f"http://127.0.0.1:{actual_port}"
     # And on disk, so launchers (the macOS app) can open the right address.
     try:
         from helm.paths import user_data_dir
@@ -587,6 +596,8 @@ async def _main():
     asyncio.create_task(cron_runner())
     from helm.kelvin_report import daily_checkin_loop
     asyncio.create_task(daily_checkin_loop())
+    from helm.brief import brief_loop
+    asyncio.create_task(brief_loop())
     asyncio.create_task(heartbeat_runner())
     from helm.audit import anchor_loop
     asyncio.create_task(anchor_loop())

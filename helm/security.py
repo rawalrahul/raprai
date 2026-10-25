@@ -192,7 +192,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 # ---------------------------------------------------------------------------
 
 # Paths exempt from rate limiting (static assets, health checks, websocket)
-_RATE_LIMIT_EXEMPT = ("/static", "/health", "/ws")
+# /mcp/gate: Claude Code's hook asks once per tool call (localhost + bearer token only).
+_RATE_LIMIT_EXEMPT = ("/static", "/health", "/ws", "/mcp/gate")
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -244,7 +245,7 @@ _CSRF_PROTECTED_PREFIXES = (
 )
 
 # Paths exempt from CSRF (used by AI subprocesses without browser cookies)
-_CSRF_EXEMPT = ("/mcp/call", "/mcp/servers", "/health")
+_CSRF_EXEMPT = ("/mcp/call", "/mcp/servers", "/mcp/gate", "/health")
 
 
 class CSRFMiddleware(BaseHTTPMiddleware):

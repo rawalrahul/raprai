@@ -243,9 +243,15 @@ async def run_scheduled_task(task: dict) -> None:
         except Exception:
             pass
 
-    # Run the prompt
-    await process_message(task["prompt"], source="schedule", session_id=sess["id"])
-
+    # Run the prompt; keep the answer for your brief and the Needs-you list
+    output = await process_message(task["prompt"], source="schedule", session_id=sess["id"])
+    try:
+        from helm.brief import record_result
+        from helm.broadcast import broadcast
+        record_result(task, output or "")
+        await broadcast({"type": "needs_changed"})
+    except Exception as exc:
+        logger.warning("Could not keep the result of %s: %s", task["id"], exc)
 
     task["run_count"] = task.get("run_count", 0) + 1
     task["last_run"]  = time.time()

@@ -12,7 +12,8 @@ import re
 def build_claude_cmd(prompt: str, has_history: bool,
                      model: str | None = None,
                      auto_approve: bool = False,
-                     mcp_config: str | None = None) -> list[str]:
+                     mcp_config: str | None = None,
+                     settings: str | None = None) -> list[str]:
     """Build the command-line arguments to invoke the Claude CLI.
 
     Uses --output-format json to get structured output including token counts.
@@ -22,6 +23,8 @@ def build_claude_cmd(prompt: str, has_history: bool,
     mcp_config:   path to a JSON file for --mcp-config (native MCP tool
                   calling — lets Claude connect to MCP servers directly
                   instead of going through the text-based agent loop).
+    settings:     JSON for --settings: the hook that asks you before Claude
+                  acts in a connected app (helm/outward.py).
     """
     cmd = ["claude"]
     if model:
@@ -33,6 +36,8 @@ def build_claude_cmd(prompt: str, has_history: bool,
         cmd.append(os.environ.get("CLAUDE_SKIP_PERMS_FLAG", "--dangerously-skip-permissions"))
     if mcp_config:
         cmd.extend(["--mcp-config", mcp_config])
+    if settings:
+        cmd.extend(["--settings", settings])
     cmd.extend(["--output-format", "json", "-p", prompt])
     return cmd
 
