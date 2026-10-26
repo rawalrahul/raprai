@@ -5,7 +5,22 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Google Fonts ──────────────────────────────────────────────────────── */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+/* Shipped with RAPR (frontend2/assets/fonts, SIL OFL): works offline and nothing goes to Google.
+   shortcut: Latin letters only; add the latin-ext/cyrillic files from Fontsource if users need them. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('/assets/fonts/inter.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url('/assets/fonts/jetbrains-mono.woff2') format('woff2');
+}
 
 /* ── HARD override original vars with premium palette ─────────────────── */
 :root {
