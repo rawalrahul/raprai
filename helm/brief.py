@@ -249,7 +249,7 @@ async def run_source(src: dict, max_items: int) -> dict:
             kill_session_proc(sess)
             sess["terminal"].stop()
         except Exception:
-            pass
+            logger.debug("Brief: couldn't stop the background session", exc_info=True)
         _st.deleted_session_cwds[sess["id"]] = folder
         _st.sessions.pop(sess["id"], None)
         await push_state()

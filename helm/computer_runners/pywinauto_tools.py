@@ -19,8 +19,11 @@ in ``asyncio.to_thread`` (see builtin_tools._run_computer_sync).
 
 from __future__ import annotations
 
+import logging
 import json
 import sys
+
+logger = logging.getLogger(__name__)
 
 
 def _require_windows() -> str | None:
@@ -150,7 +153,7 @@ def type_in_control(args: dict) -> str:
                 ctrl.set_edit_text(text)
                 return f"Set text on control ({len(text)} chars)"
             except Exception:
-                pass
+                logger.debug("set_edit_text failed; typing the text instead", exc_info=True)
         ctrl.type_keys(text, with_spaces=True, pause=0.01)
         return f"Typed into control ({len(text)} chars)"
     except Exception as e:

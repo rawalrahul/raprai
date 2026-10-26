@@ -28,7 +28,7 @@ def _model() -> str:
         dm = _st.default_models.get("local_ai", "")
         if dm:
             return dm
-    except Exception:
+    except (ImportError, AttributeError):
         pass
     return os.environ.get("LOCAL_AI_MODEL", _DEFAULT_MODEL).strip()
 

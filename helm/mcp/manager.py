@@ -209,7 +209,7 @@ class MCPManager:
         try:
             await self._chrome_client.stop()
         except Exception:
-            pass
+            logger.debug("Couldn't stop the Chrome extension client", exc_info=True)
         self._clients.clear()
         self._tool_map.clear()
         self._initialized = False
@@ -220,11 +220,11 @@ class MCPManager:
             try:
                 client._stop_sync()
             except Exception:
-                pass
+                logger.debug("Couldn't stop an MCP server at exit", exc_info=True)
         try:
             self._chrome_client._stop_sync()
         except Exception:
-            pass
+            logger.debug("Couldn't stop the Chrome extension client at exit", exc_info=True)
 
     # ── Tool routing ──────────────────────────────────────────────────────
 

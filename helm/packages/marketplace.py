@@ -259,7 +259,7 @@ def search_catalog(
             pkg_id = pkg.get("id") or pkg.get("slug") or ""
             pkg["installed"] = pkg_id in installed_ids
     except Exception:
-        pass
+        logger.debug("Couldn't mark installed packages", exc_info=True)
 
     return results[:limit]
 
@@ -454,7 +454,7 @@ def check_updates(force: bool = False) -> list[dict]:
                         "name": catalog_map[cat_id].get("name", cat_id),
                     })
     except Exception:
-        pass
+        logger.debug("Couldn't list installed MCP servers", exc_info=True)
 
     updates = []
     for pkg in installed:

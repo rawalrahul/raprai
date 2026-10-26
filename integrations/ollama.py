@@ -33,7 +33,7 @@ def _model() -> str:
         dm = _st.default_models.get("ollama", "")
         if dm:
             return dm
-    except Exception:
+    except (ImportError, AttributeError):
         pass
     return os.environ.get("OLLAMA_MODEL", "qwen3:4b").strip()
 

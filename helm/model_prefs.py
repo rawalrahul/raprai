@@ -10,9 +10,12 @@ fallback until the first new choice is saved.
 
 from __future__ import annotations
 
+import logging
 import json
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _OLD_PREFS_PATH = Path(__file__).parent / "config" / "selected_models.json"
 
@@ -35,7 +38,7 @@ def _load() -> dict:
             if path.exists():
                 return json.loads(path.read_text(encoding="utf-8"))
         except Exception:
-            pass
+            logger.warning("Couldn't read the saved model choices in %s", path, exc_info=True)
     return dict(_DEFAULTS)
 
 
@@ -48,7 +51,7 @@ def _save(prefs: dict) -> None:
             json.dump(prefs, f, indent=2)
         os.replace(tmp, str(path))
     except Exception:
-        pass
+        logger.warning("Couldn't save the model choice", exc_info=True)
 
 
 def get_model_pref(ai: str) -> str | None:

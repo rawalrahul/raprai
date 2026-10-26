@@ -181,7 +181,7 @@ def setup_crash_logging():
         import platform
         logger.info("OS: %s | Machine: %s", platform.platform(), platform.machine())
     except Exception:
-        pass
+        logger.debug("Couldn't log the OS details", exc_info=True)
     logger.info("=" * 60)
 
 
@@ -343,7 +343,7 @@ async def graceful_shutdown():
                 elif hasattr(proc, "terminate"):
                     proc.terminate()
                 stopped += 1
-            except Exception:
+            except OSError:
                 pass
             sess["busy"] = False
             sess.pop("proc", None)
@@ -400,7 +400,7 @@ async def graceful_shutdown():
     for handler in logger.handlers:
         try:
             handler.flush()
-        except Exception:
+        except (OSError, ValueError):
             pass
 
     logger.info("Shutdown complete.")

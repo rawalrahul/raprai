@@ -49,7 +49,7 @@ def _log(msg: str) -> None:
     try:
         with _ERROR_LOG.open("a", encoding="utf-8") as f:
             f.write(f"{datetime.now(timezone.utc).isoformat()} db: {msg}\n")
-    except Exception:
+    except OSError:
         pass
 
 

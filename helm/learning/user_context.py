@@ -7,11 +7,14 @@ Subsequent imports load from the cached file.
 
 from __future__ import annotations
 
+import logging
 import json
 import shutil
 import sys
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _LEARNING_DIR = Path(__file__).parent
 _CONTEXT_PATH = _LEARNING_DIR / "user_context.json"
@@ -50,7 +53,7 @@ def _detect_resolution() -> dict:
             scale = round(dpi / 96.0, 2)
             return {"width": w, "height": h, "dpi": dpi, "scale": scale}
     except Exception:
-        pass
+        logger.debug("Couldn't read the screen size from Windows", exc_info=True)
     # Fallback via tkinter (cross-platform)
     try:
         import tkinter as tk
@@ -61,7 +64,7 @@ def _detect_resolution() -> dict:
         root.destroy()
         return {"width": w, "height": h, "dpi": 96, "scale": 1.0}
     except Exception:
-        pass
+        logger.debug("Couldn't read the screen size from Tk", exc_info=True)
     return {"width": 1920, "height": 1080, "dpi": 96, "scale": 1.0}
 
 
@@ -84,7 +87,7 @@ def _detect_default_browser() -> str:
                     return name
             return prog_id
     except Exception:
-        pass
+        logger.debug("Couldn't read the default browser from Windows", exc_info=True)
     # Unix fallback
     for cmd in ["xdg-settings get default-web-browser", "defaults read com.apple.LaunchServices"]:
         try:
@@ -96,7 +99,7 @@ def _detect_default_browser() -> str:
                     if name in out:
                         return name
         except Exception:
-            pass
+            logger.debug("Couldn't read the default browser", exc_info=True)
     return "unknown"
 
 
@@ -122,7 +125,7 @@ def _count_monitors() -> int:
         if sys.platform == "win32":
             import ctypes
             return ctypes.windll.user32.GetSystemMetrics(80)  # SM_CMONITORS
-    except Exception:
+    except (AttributeError, OSError):
         pass
     return 1
 
@@ -155,7 +158,7 @@ def detect_and_save() -> dict:
             _CONTEXT_PATH.unlink()
         tmp.rename(_CONTEXT_PATH)
     except Exception:
-        pass
+        logger.debug("Couldn't save the user context", exc_info=True)
     return ctx
 
 
@@ -169,7 +172,7 @@ def load_context() -> dict:
             _ctx = json.loads(_CONTEXT_PATH.read_text(encoding="utf-8"))
             return _ctx
         except Exception:
-            pass
+            logger.debug("Couldn't read the saved user context", exc_info=True)
     _ctx = detect_and_save()
     return _ctx
 
@@ -189,7 +192,7 @@ def update_context(updates: dict) -> dict:
         tmp.rename(_CONTEXT_PATH)
         _ctx = ctx
     except Exception:
-        pass
+        logger.debug("Couldn't save the user context", exc_info=True)
     return ctx
 
 
@@ -215,4 +218,4 @@ if not _CONTEXT_PATH.exists():
     try:
         detect_and_save()
     except Exception:
-        pass
+        logger.debug("Couldn't detect the user context", exc_info=True)

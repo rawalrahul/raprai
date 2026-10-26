@@ -107,7 +107,7 @@ async def _push_state() -> None:
         from helm.broadcast import broadcast
         await broadcast({"type": "whatsapp_status", **public_state()})
     except Exception:
-        pass
+        logger.debug("Couldn't broadcast the WhatsApp status", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +256,7 @@ def _message_text(m) -> str:
         if m.HasField("extendedTextMessage"):
             return m.extendedTextMessage.text
     except Exception:
-        pass
+        logger.debug("Couldn't read a WhatsApp message's text", exc_info=True)
     return ""
 
 
@@ -266,7 +266,7 @@ def _audio_message(m):
         if m.HasField("audioMessage"):
             return m.audioMessage
     except Exception:
-        pass
+        logger.debug("Couldn't read a WhatsApp message's audio", exc_info=True)
     return None
 
 

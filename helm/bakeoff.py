@@ -13,6 +13,7 @@ tested with fake AIs and used with the real ones.
 
 from __future__ import annotations
 
+import logging
 import asyncio
 import re
 import shutil
@@ -22,6 +23,8 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 # runner(ai, prompt, cwd) -> the AI's final text
 Runner = Callable[[str, str, str], Awaitable[str]]
@@ -190,12 +193,12 @@ def cleanup(bo: BakeOff) -> None:
             try:
                 _git(bo.repo, "worktree", "remove", "--force", a.path)
             except Exception:
-                pass
+                logger.debug("Bake-off: couldn't remove the copy %s", a.path, exc_info=True)
             if a.branch:
                 try:
                     _git(bo.repo, "branch", "-D", a.branch)
                 except Exception:
-                    pass
+                    logger.debug("Bake-off: couldn't delete branch %s", a.branch, exc_info=True)
         shutil.rmtree(a.path, ignore_errors=True)
     shutil.rmtree(Path(bo.attempts[0].path).parent, ignore_errors=True) if bo.attempts else None
 

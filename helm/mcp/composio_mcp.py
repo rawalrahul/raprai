@@ -139,7 +139,7 @@ def status() -> dict:
             running = client.is_running()
             tool_count = client.get_tool_count()
     except Exception:
-        pass
+        logger.debug("Couldn't read the Composio server status", exc_info=True)
     return {
         "id": SERVER_ID,
         "connected": connected,

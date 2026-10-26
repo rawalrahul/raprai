@@ -92,7 +92,7 @@ class TerminalSession:
         try:
             for line in self._proc.stdout:
                 self._q.put(line)
-        except Exception:
+        except (OSError, ValueError):
             pass
         self._q.put(None)
 
@@ -182,6 +182,6 @@ class TerminalSession:
         if self._proc:
             try:
                 self._proc.kill()
-            except Exception:
+            except OSError:
                 pass
             self._proc = None

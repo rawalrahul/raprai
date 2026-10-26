@@ -111,7 +111,7 @@ def install_plugin(
                 from helm.plugins import load_plugins
                 load_plugins()
             except Exception:
-                pass
+                logger.warning("Rolled back the plugin, but couldn't reload plugins", exc_info=True)
         raise InstallError(f"Plugin installation failed: {e}") from e
 
 

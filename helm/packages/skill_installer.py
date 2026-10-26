@@ -111,7 +111,7 @@ def install_skill(
                 from helm.skills import scan_skills
                 scan_skills()
             except Exception:
-                pass
+                logger.warning("Rolled back the skill, but couldn't rescan skills", exc_info=True)
         raise InstallError(f"Skill installation failed: {e}") from e
 
 
@@ -156,7 +156,7 @@ def toggle_skill(package_id: str, enabled: bool) -> dict:
                     install_dir = candidate
                     break
         except Exception:
-            pass
+            logger.debug("Couldn't look for the skill in the skills folders", exc_info=True)
 
     if not install_dir.exists():
         return {"ok": False, "error": f"Skill '{package_id}' not found"}

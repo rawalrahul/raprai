@@ -1145,7 +1145,7 @@ def generate_skill(prompt: str, ai: str, error_output: str = "",
                 if shutil.which(cli_name):
                     candidates.append(ai_key)
             except Exception:
-                pass
+                logger.debug("Couldn't check whether %s's CLI is installed", ai_key, exc_info=True)
 
     if not candidates:
         logger.warning("generate_skill: no AI CLI available for skill generation")

@@ -281,7 +281,7 @@ def _extract_text(raw: str) -> str:
         obj = json.loads(raw)
         if isinstance(obj, dict) and "result" in obj:
             return str(obj["result"])
-    except Exception:
+    except (TypeError, ValueError):
         pass
     return raw
 
@@ -332,7 +332,7 @@ def _kill_running(group: dict) -> None:
     if proc and proc.poll() is None:
         try:
             proc.kill()
-        except Exception:
+        except OSError:
             pass
 
 
@@ -502,7 +502,7 @@ async def run_room_turn(group_id: str, token: str) -> None:
                     from helm.kelvin_stickers import done_sticker_for_task
                     done_sticker_for_task(time.time() - started, last_reply, source="group")
                 except Exception:
-                    pass
+                    logger.debug("Couldn't show the done sticker", exc_info=True)
 
 
 async def send_user_message(group: dict, text: str, source: str = "web") -> dict:

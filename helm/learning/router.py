@@ -5,10 +5,13 @@ Phase 1: shadow mode only — compute recommendations but don't enforce.
 Phase 2 (future): enforce routing when confidence > 0.8.
 """
 
+import logging
 import json
 import os
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _HERE = Path(__file__).parent
 _SEED_PATH = _HERE / "seed" / "default_routing.json"
@@ -29,7 +32,7 @@ def _resolve_table_path(user_id_hash: str = "") -> Path:
             if p.exists():
                 return p
     except Exception:
-        pass
+        logger.debug("Couldn't find the user's routing table", exc_info=True)
     return _TABLE_PATH
 
 
@@ -129,7 +132,7 @@ def get_recommendation(task_type: str, available_ais: list[str],
                     "source": "none", "shadow_mode": True,
                     "reason": "learning disabled", "budget_warn": False}
     except Exception:
-        pass
+        logger.debug("Couldn't check whether learning is on", exc_info=True)
 
     # Budget filter — remove blocked/over-90% AIs; keep warned (80-90%) with flag
     eligible, warned = _apply_budget_filter(available_ais)
@@ -277,5 +280,5 @@ def update_stats(task_type: str, ai: str, duration_seconds: float,
             err_log = Path(__file__).parent / "telemetry_errors.log"
             with open(err_log, "a", encoding="utf-8") as f:
                 f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ')} router.update_stats error: {e}\n")
-        except Exception:
+        except OSError:
             pass

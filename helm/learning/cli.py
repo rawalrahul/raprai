@@ -415,8 +415,8 @@ def cmd_status(_args: argparse.Namespace) -> int:
         from helm.learning.db import get_stats
         s = get_stats()
         print(f"Similarity index: {s['total_fingerprints']} fingerprints, {s['merged']} merged")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Similarity index: unavailable ({e})")
 
     return 0
 

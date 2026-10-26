@@ -172,7 +172,7 @@ def install_package(
             try:
                 shutil.rmtree(str(staging))
             except Exception:
-                pass
+                logger.warning("Couldn't remove the staging folder %s", staging, exc_info=True)
 
 
 def _install_by_type(

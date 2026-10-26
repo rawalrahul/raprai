@@ -142,7 +142,7 @@ class MCPClient:
             self._proc.stdin.write(json.dumps(msg) + "\n")
             self._proc.stdin.flush()
         except Exception:
-            pass
+            logger.debug("MCP '%s': couldn't send a notification", self.server_id, exc_info=True)
 
     # ── stderr ────────────────────────────────────────────────────────────
 
@@ -169,7 +169,7 @@ class MCPClient:
                 if c:
                     self.auth_code = c.group(1)
         except Exception:
-            pass
+            logger.debug("MCP '%s': stderr reader stopped", self.server_id, exc_info=True)
 
     def get_stderr_tail(self, lines: int = 8) -> str:
         return "\n".join(list(self._stderr_tail)[-lines:])
@@ -290,10 +290,10 @@ class MCPClient:
                 try:
                     self._proc.kill()
                     self._proc.wait(timeout=2)
-                except Exception:
+                except (OSError, subprocess.SubprocessError):
                     pass
             except Exception:
-                pass
+                logger.debug("MCP '%s': error while stopping", self.server_id, exc_info=True)
             self._proc = None
         self._initialized = False
         self._tools = []
@@ -310,7 +310,7 @@ class MCPClient:
         if proc and proc.poll() is None:
             try:
                 proc.kill()
-            except Exception:
+            except OSError:
                 pass
 
     async def stop(self):

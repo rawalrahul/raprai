@@ -42,7 +42,7 @@ try:
     _fh.setLevel(logging.DEBUG)
     _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
     _nc_log.addHandler(_fh)
-except Exception:
+except OSError:
     pass
 
 
@@ -55,7 +55,7 @@ def _sandbox_name() -> str:
         dm = _st.default_models.get("nemoclaw", "")
         if dm:
             return dm
-    except Exception:
+    except (ImportError, AttributeError):
         pass
     return os.environ.get("NEMOCLAW_SANDBOX", "mynemo").strip()
 
