@@ -9,25 +9,23 @@ Covers: tg_start, tg_menu, tg_launch, tg_claude, tg_codex, tg_gemini, tg_stop_ai
 import asyncio
 import json
 import os
-import pathlib
-from datetime import datetime, timedelta
+import time
+from datetime import datetime
 from typing import Optional
 
 import helm.state as _st
 from helm.config import (
-    ALLOWED_USER_IDS, CRONITER_OK, HISTORY_ID_RE,
-    WEB_PORT, logger,
+    CRONITER_OK, WEB_PORT, logger,
 )
 from helm.paths import user_data_dir
 
 from .auth import authorized_only, tg_send_chunks
-from .browse import show_browse
 from .keyboards import (
     sessions_keyboard, session_controls_keyboard, new_session_keyboard,
 )
 
 try:
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+    from telegram import Update
     from telegram.ext import ContextTypes
     _TG_OK = True
 except ImportError:
@@ -233,14 +231,12 @@ async def tg_cmd(update, context):
 @authorized_only
 async def tg_status(update, context):
     """Show status of all active sessions."""
-    from helm.session_mgr import session_status_icon
     from helm.config import CLAUDE_TIMEOUT
     if not _st.sessions:
         await update.message.reply_text("No sessions. Use /start to create one.")
         return
     lines = ["*Active Sessions:*"]
     for sess in sorted(_st.sessions.values(), key=lambda s: s["last_used"], reverse=True):
-        icon = session_status_icon(sess)
         focused = " ← focused" if sess["id"] == _st.focused_id else ""
         lines.append(f"✨ *{sess['name']}* [{sess['ai'] or 'shell'}]{focused}\n"
                      f"  📂 {sess['cwd']}")
@@ -321,7 +317,7 @@ async def tg_stop(update, context):
 @authorized_only
 async def tg_cwd(update, context):
     """Show or change the working directory of the focused session."""
-    from helm.session_mgr import focused_session, session_cwd
+    from helm.session_mgr import focused_session
     from helm.ai_runner import change_cwd
     arg = (update.message.text or "").partition(" ")[2].strip()
     sess = focused_session()
@@ -859,8 +855,7 @@ async def tg_text(update, context):
             from helm.pipeline.planner import looks_complex
             if looks_complex(text):
                 # Auto-invoke pipeline instead of sending to a single AI
-                from helm.pipeline.planner import plan_pipeline, discover_available_ais
-                from helm.pipeline.models import pipeline_state_payload, pipeline_progress
+                from helm.pipeline.planner import plan_pipeline
                 from helm.pipeline.executor import broadcast_pipeline_update
                 from .keyboards import pipeline_approval_keyboard
 
@@ -970,10 +965,7 @@ async def tg_voice(update, context):
     """Transcribe voice/audio messages via Whisper and forward to the active AI."""
     from helm.session_mgr import focused_session
     from helm.ai_runner import process_message
-    from helm.broadcast import push_state
     import os
-    import subprocess
-    import sys
     import tempfile
 
     from helm.mention_router import parse_kelvin
@@ -1101,7 +1093,7 @@ async def tg_voice(update, context):
 
 
 # Whisper speech-to-text lives in helm/voice.py, shared with the other chat apps.
-from helm.voice import ensure_ffmpeg as _ensure_ffmpeg, transcribe_file as _transcribe_audio  # noqa: E402
+from helm.voice import transcribe_file as _transcribe_audio  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -1117,7 +1109,6 @@ async def tg_file(update, context):
     """
     from helm.session_mgr import focused_session
     from helm.ai_runner import process_message
-    import tempfile
 
     # Must have a focused session
     if not _st.focused_id or _st.focused_id not in _st.sessions:
@@ -1236,9 +1227,8 @@ async def tg_file(update, context):
 async def tg_pipeline(update, context):
     """/pipeline <prompt> — Decompose a complex task into a multi-AI pipeline."""
     from helm.session_mgr import focused_session, session_cwd
-    from helm.broadcast import push_message, push_state
-    from helm.pipeline.planner import plan_pipeline, discover_available_ais
-    from helm.pipeline.models import pipeline_state_payload, pipeline_progress
+    from helm.pipeline.planner import plan_pipeline
+    from helm.pipeline.models import pipeline_progress
     from helm.pipeline.executor import broadcast_pipeline_update
     from .keyboards import pipeline_approval_keyboard, pipeline_list_keyboard
     import os

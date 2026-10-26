@@ -12,7 +12,6 @@ import asyncio
 import re
 import time
 import uuid
-from typing import Optional
 
 import helm.state as _st
 from helm.config import logger

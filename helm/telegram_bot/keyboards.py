@@ -139,7 +139,6 @@ def pipeline_list_keyboard():
 
 def agent_list_keyboard():
     """One button per saved agent + a back button."""
-    from helm.agent.models import agent_slug
     rows: list = []
     for ag in sorted(_st.agents.values(), key=lambda a: a.get("name", "")):
         label = f"✦ {ag['name']}"

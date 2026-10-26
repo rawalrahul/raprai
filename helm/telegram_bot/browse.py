@@ -25,7 +25,6 @@ _BROWSE_PAGE_SIZE = 8
 
 async def show_browse(target, user_id: int, path: str, edit: bool = False, page: int = 0):
     """Render a paginated directory listing as a Telegram inline keyboard."""
-    from helm.session_mgr import session_cwd
     try:
         p = pathlib.Path(path).resolve()
         all_dirs = sorted(

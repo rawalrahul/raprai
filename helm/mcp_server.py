@@ -303,7 +303,6 @@ def tool_second_opinion(args: dict, ctx: "Server") -> str:
 
 
 def _bakeoff_report(b, include_diffs: bool) -> str:
-    import helm.bakeoff as bakeoff
     lines = [f"Bake-off {b.id}: {b.status}", f"Task: {b.task}"]
     if b.test_command:
         lines.append(f"Test command: {b.test_command}")

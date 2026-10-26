@@ -14,7 +14,6 @@ import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 from helm.config import logger
 from helm.db import db_path, DB_NAME

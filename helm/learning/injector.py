@@ -8,7 +8,6 @@ Reads playbooks and antipatterns directly from disk — does NOT import playbook
 from __future__ import annotations
 
 import json
-import os
 import time
 from pathlib import Path
 from typing import Optional

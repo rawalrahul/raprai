@@ -178,7 +178,7 @@ async def _call_planner_ai(planner_ai: str, prompt: str, cwd: str) -> str:
             ],
             "stream": False,
         }
-        try:
+        def _post() -> dict:
             req = urllib.request.Request(
                 "http://localhost:11434/api/chat",
                 data=json.dumps(payload).encode(),
@@ -186,7 +186,11 @@ async def _call_planner_ai(planner_ai: str, prompt: str, cwd: str) -> str:
                 method="POST",
             )
             with urllib.request.urlopen(req, timeout=120) as resp:
-                data = json.loads(resp.read())
+                return json.loads(resp.read())
+
+        try:
+            # In a thread: planning can take minutes, and RAPR keeps running meanwhile.
+            data = await asyncio.to_thread(_post)
             result = (data.get("message", {}).get("content") or "").strip()
             if not result:
                 logger.error("Ollama planner returned empty content (model=%s)", model)

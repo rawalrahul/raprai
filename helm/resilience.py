@@ -13,7 +13,6 @@ All resilience features are wired up via functions called from web_app.py.
 """
 
 import logging
-import os
 import pathlib
 import shutil
 import socket
@@ -335,7 +334,7 @@ async def graceful_shutdown():
 
     # Stop all active AI subprocesses
     stopped = 0
-    for sid, sess in list(_st.sessions.items()):
+    for sess in list(_st.sessions.values()):
         proc = sess.get("proc")
         if proc is not None:
             try:
@@ -415,7 +414,6 @@ def log_startup_health():
     """Log a health summary on startup for diagnostics."""
     try:
         import shutil
-        import platform
 
         # Disk space
         total, used, free = shutil.disk_usage(str(user_data_dir()))

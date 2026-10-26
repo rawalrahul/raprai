@@ -7,7 +7,6 @@ Each playbook has versioned files (v1.md, v2.md, ...) and current.md (always = l
 
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 

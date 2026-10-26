@@ -5,7 +5,6 @@ does not read a piped prompt (it tried to run a tool for it instead); `agy model
 prints "<id>   <label>" lines; --output-format stream-json prints events keyed
 by "event". The fake agy below replays that real output.
 """
-import json
 import os
 import subprocess
 import sys

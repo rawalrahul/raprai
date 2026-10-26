@@ -335,7 +335,7 @@ async def save_token(plugin_id: str, request: Request):
         valid_envs.add(ev)
 
     if token_env not in valid_envs:
-        return JSONResponse({"error": f"Invalid token_env for this plugin"}, status_code=400)
+        return JSONResponse({"error": "Invalid token_env for this plugin"}, status_code=400)
 
     # Validate the token against the API before saving
     validation = _validate_token(info, value)

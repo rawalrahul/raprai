@@ -18,7 +18,6 @@ def test_custom_command_supports_python_placeholder_and_model():
 
 
 def test_openai_compat_cli_reads_api_key_from_env(monkeypatch):
-    from helm.ai_runner import _openai_compat_cli
 
     monkeypatch.setenv("CUSTOM_AI_TEST_API_KEY", "secret-token")
     args = [

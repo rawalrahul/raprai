@@ -41,6 +41,32 @@ def _get_mcp_manager():
 
 _OLLAMA_URL = "http://localhost:11434/api/chat"
 
+
+# Both helpers block (a local model can take minutes to answer): call them with
+# asyncio.to_thread so the wait doesn't freeze RAPR's event loop, and with it
+# the web UI, chat apps and every other session.
+
+def installed_models() -> list[str]:
+    """Names of the models Ollama has installed (``ollama list``); [] if none or no Ollama."""
+    try:
+        r = subprocess.run(["ollama", "list"], capture_output=True, text=True,
+                           timeout=5, **hidden_kwargs())
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [line.split()[0] for line in r.stdout.strip().splitlines()[1:] if line.split()]
+
+
+def _chat(payload: dict, timeout: int) -> dict:
+    """POST *payload* to Ollama's chat API and return its decoded reply."""
+    req = urllib.request.Request(
+        _OLLAMA_URL,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read())
+
 _OLLAMA_TOOL_SUPPORT: dict[str, bool] = {
     "qwen2.5":          True,
     "qwen3":            True,
@@ -976,19 +1002,7 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
     cwd   = sess["cwd"]
     model = sess.get("model") or _st.default_models.get("ollama", "") or os.environ.get("OLLAMA_MODEL", "")
     if not model:
-        try:
-            _r = subprocess.run(
-                ["ollama", "list"],
-                capture_output=True, text=True, timeout=5,
-                **hidden_kwargs(),
-            )
-            for _line in _r.stdout.strip().splitlines()[1:]:
-                _parts = _line.split()
-                if _parts:
-                    model = _parts[0].strip()
-                    break
-        except Exception:
-            pass
+        model = next(iter(await asyncio.to_thread(installed_models)), "")
     if not model:
         model = "qwen3:4b"
 
@@ -1091,14 +1105,7 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
         }
 
         try:
-            req = urllib.request.Request(
-                _OLLAMA_URL,
-                data=json.dumps(payload).encode(),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=600) as resp:
-                data = json.loads(resp.read())
+            data = await asyncio.to_thread(_chat, payload, 600)
 
         except urllib.error.URLError as exc:
             logger.warning("Ollama REST API unreachable (%s) — falling back to CLI", exc)
@@ -1227,14 +1234,7 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
                 "stream":   False,
                 # No "tools" key — forces text-only response
             }
-            _summary_req = urllib.request.Request(
-                _OLLAMA_URL,
-                data=json.dumps(_summary_payload).encode(),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(_summary_req, timeout=120) as _summary_resp:
-                _summary_data = json.loads(_summary_resp.read())
+            _summary_data = await asyncio.to_thread(_chat, _summary_payload, 120)
             _total_prompt_tokens += int(_summary_data.get("prompt_eval_count", 0))
             _total_eval_tokens   += int(_summary_data.get("eval_count", 0))
             _summary_msg = _summary_data.get("message", {})

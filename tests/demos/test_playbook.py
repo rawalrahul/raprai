@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from helm.demos.playbook import actions_to_markdown, save_playbook
+from helm.demos.playbook import actions_to_markdown
 
 
 _SAMPLE_ACTIONS = [

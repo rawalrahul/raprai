@@ -16,7 +16,7 @@ Rules:
 import time
 from typing import Optional, TYPE_CHECKING
 
-from helm.config import _DEFAULT_CWD, ALLOWED_USER_IDS, USAGE_PERIOD_SECONDS
+from helm.config import _DEFAULT_CWD, ALLOWED_USER_IDS
 
 if TYPE_CHECKING:
     from telegram.ext import Application

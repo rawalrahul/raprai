@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable
 
 from helm.config import logger
 from helm.broadcast import push_message
@@ -175,7 +175,7 @@ async def run_with_tools(
         indices = []
         results = [None] * len(tool_calls)
 
-        from helm.builtin_tools import is_builtin_tool, execute_builtin_tool
+        from helm.builtin_tools import is_builtin_tool
 
         for i, tc in enumerate(tool_calls):
             name = tc["name"]
@@ -208,7 +208,6 @@ async def run_with_tools(
 
         # Build compact follow-up prompt
         results_text = _format_tool_results([r for r in results if r])
-        text_without_tools = _strip_tool_calls(output)
 
         accumulated_context += f"\n{results_text}\n"
 

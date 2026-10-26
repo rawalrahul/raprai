@@ -20,7 +20,6 @@ import json
 import pathlib
 import sqlite3
 import threading
-from typing import Optional
 
 from helm.config import logger
 from helm.paths import user_data_dir
@@ -278,7 +277,6 @@ def _import_legacy_data(conn: sqlite3.Connection):
     if not CHAT_LOG_DIR.exists():
         return
 
-    import re
     from helm.config import HISTORY_ID_RE
 
     imported_messages = 0

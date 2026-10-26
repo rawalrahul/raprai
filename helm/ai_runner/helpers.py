@@ -7,7 +7,6 @@ Covers: forward_to_telegram, tg_update_focus, tg_progress_notify, change_cwd.
 import asyncio
 import pathlib
 import re
-import time
 from typing import Optional
 
 import helm.state as _st

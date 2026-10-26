@@ -9,13 +9,12 @@ Storage: SQLite `scheduled_tasks` table (via helm/db.py).
 """
 
 import asyncio
-import json
 import time
 from datetime import datetime
 from typing import Optional
 
 import helm.state as _st
-from helm.config import CHAT_LOG_DIR, CRONITER_OK, logger
+from helm.config import CRONITER_OK, logger
 
 if CRONITER_OK:
     from croniter import croniter as _Croniter

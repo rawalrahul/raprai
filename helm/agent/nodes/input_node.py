@@ -202,7 +202,6 @@ async def extract_file_text_from_telegram(
     try:
         import os
         import tempfile
-        import time as _time
 
         tg_file = await bot.get_file(file_id)
         suffix = ".bin"
@@ -241,7 +240,7 @@ async def extract_file_text_from_telegram(
                     break
                 except OSError:
                     if _attempt == 0:
-                        _time.sleep(0.1)
+                        await asyncio.sleep(0.1)
 
     except Exception as exc:
         from helm.config import logger

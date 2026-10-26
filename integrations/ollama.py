@@ -16,7 +16,6 @@ Installed models on this machine (from `ollama list`):
 """
 
 import os
-import sys
 
 # ── Identity ─────────────────────────────────────────────────────────────────
 

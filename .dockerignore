@@ -1,12 +1,44 @@
+# Keep the image to the app itself. When you build from a folder you've run
+# RAPR in, that folder also holds your keys, chats and database (see .gitignore).
+
+# Source control, caches, build output
 .git
 **/__pycache__
 **/*.pyc
-.env
-*.db
-tests
+.pytest_cache
+.ruff_cache
 node_modules
 installer_output
 web_app.dist
 web_app.build
 build.log
+tests
 release-notes
+
+# Secrets
+.env
+*.env
+.vault_key
+credentials.json
+custom_mcp_servers.json
+push_keys.json
+
+# Your data
+*.db
+*.db-shm
+*.db-wal
+chat_logs/
+chat_logs_backup/
+logs/
+*.log
+audit.jsonl
+packages_cache/
+packages_staging/
+helmpack_cache/
+.rapr_screenshots/
+brief/
+*.json.bak
+helm/learning/task_logs/
+helm/learning/user_context.json
+helm/learning/routing_table.json
+helm/learning/ENABLED

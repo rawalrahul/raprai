@@ -76,11 +76,10 @@ async def _execute_windows_shell(command: str, timeout: float, cwd: str, env: di
     )
     args = [executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command]
     proc = None
-    started = asyncio.get_running_loop().time()
     # B11: CREATE_NEW_PROCESS_GROUP lets taskkill /T target the whole tree.
     creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     try:
-        proc = subprocess.Popen(
+        proc = subprocess.Popen(  # noqa: ASYNC220 -- starting it doesn't wait; see the docstring
             args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -88,12 +87,14 @@ async def _execute_windows_shell(command: str, timeout: float, cwd: str, env: di
             env=env,
             creationflags=creationflags,
         )
-        while proc.poll() is None:
-            if timeout and timeout > 0 and asyncio.get_running_loop().time() - started > timeout:
-                _kill_windows_tree(proc)
-                return f"Error: command timed out after {timeout}s\nCommand: {command}"
-            await asyncio.sleep(0.05)
-        stdout, stderr = proc.communicate()
+        # communicate() reads the output while it waits. Waiting for the exit
+        # first hung any command that printed more than the pipe holds.
+        try:
+            stdout, stderr = await asyncio.to_thread(
+                proc.communicate, timeout=timeout if timeout and timeout > 0 else None)
+        except subprocess.TimeoutExpired:
+            _kill_windows_tree(proc)
+            return f"Error: command timed out after {timeout}s\nCommand: {command}"
         return _format_shell_output(stdout, stderr)
     except asyncio.CancelledError:
         if proc and proc.poll() is None:

@@ -1,7 +1,6 @@
 """helm/council/runner.py — Low-level AI runner for council: no session history save."""
 
 import asyncio
-import os
 import re
 import subprocess
 from typing import AsyncGenerator

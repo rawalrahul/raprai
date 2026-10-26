@@ -10,7 +10,6 @@ import asyncio
 import os
 import pathlib
 import time
-from typing import Optional
 
 import helm.state as _st
 from helm.config import logger
@@ -19,7 +18,7 @@ from helm.session_mgr import make_session
 
 from .models import (
     find_step, ready_steps, is_pipeline_done, is_pipeline_blocked,
-    pipeline_state_payload, pipeline_progress, compute_edges,
+    pipeline_state_payload, pipeline_progress,
 )
 from .context import build_step_context, maybe_summarize
 
@@ -225,7 +224,7 @@ async def _execute_step(pipeline: dict, step: dict, semaphore: asyncio.Semaphore
             usage = child_sess.get("usage_stats", {})
             step["actual_tokens"] = usage.get("total_tokens", 0)
             if step["actual_tokens"]:
-                from helm.pipeline.cost import _PRICING, _chars_to_tokens
+                from helm.pipeline.cost import _PRICING
                 pricing = _PRICING.get(step_ai, _PRICING.get("claude"))
                 in_tok = usage.get("input_tokens", 0)
                 out_tok = usage.get("output_tokens", 0)

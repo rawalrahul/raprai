@@ -1,6 +1,5 @@
 """Approval rules (ask / deny / allow) and the audit log."""
 import asyncio
-import importlib
 import json
 import os
 import sys

@@ -2,6 +2,7 @@
 helm/web_routes/file_routes.py — Generated files listing, diagnostics export.
 """
 
+import asyncio
 import json
 import os
 import pathlib
@@ -86,13 +87,16 @@ async def diagnostics_export():
             "cli_found": bool(_find_cli(key)),
         })
 
-    # CLI versions
-    for cli_name in ("claude", "gemini", "codex", "ollama"):
+    # CLI versions (in a thread: each can take up to 5 seconds)
+    def _version(cli_name: str) -> str:
         try:
             r = _sub.run([cli_name, "--version"], capture_output=True, text=True, timeout=5)
-            diag["system"][f"{cli_name}_version"] = r.stdout.strip()[:100] or r.stderr.strip()[:100]
+            return r.stdout.strip()[:100] or r.stderr.strip()[:100]
         except Exception:
-            diag["system"][f"{cli_name}_version"] = "not found"
+            return "not found"
+
+    for cli_name in ("claude", "gemini", "codex", "ollama"):
+        diag["system"][f"{cli_name}_version"] = await asyncio.to_thread(_version, cli_name)
 
     # Recent log entries (last 100 lines from Python logger)
     import logging

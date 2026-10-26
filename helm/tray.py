@@ -242,11 +242,11 @@ def start_tray(port: int, shutdown_callback=None):
 
     _pet_menu = Menu(*(
         [MenuItem(_pet_mode_labels[m], _set_pet(set_pet_mode, m), radio=True,
-                  checked=(lambda m: lambda item: _pet_mode() == m)(m))
+                  checked=lambda item, m=m: _pet_mode() == m)
          for m in ("always", "working", "off")]
         + [Menu.SEPARATOR]
         + [MenuItem(z.title(), _set_pet(set_pet_size, z), radio=True,
-                    checked=(lambda z: lambda item: _pet_size() == z)(z))
+                    checked=lambda item, z=z: _pet_size() == z)
            for z in _pet_sizes]
     ))
 
@@ -259,7 +259,7 @@ def start_tray(port: int, shutdown_callback=None):
         MenuItem("Kelvin on desktop", _pet_menu),
         MenuItem("Keep PC awake", Menu(*[
             MenuItem(_awake_labels[m], _set_awake(m), radio=True,
-                     checked=(lambda m: lambda item: _awake_mode() == m)(m))
+                     checked=lambda item, m=m: _awake_mode() == m)
             for m in _awake_modes
         ])),
         MenuItem("Start on Login", on_toggle_autostart,

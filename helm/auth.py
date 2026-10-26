@@ -17,7 +17,6 @@ import time
 from typing import Optional
 
 from fastapi import Request
-from fastapi.responses import RedirectResponse
 
 try:
     import bcrypt as _bcrypt

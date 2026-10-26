@@ -9,7 +9,6 @@ import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 from helm.config import logger
 from .base import BackupProvider

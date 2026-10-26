@@ -18,7 +18,6 @@ Usage:
 """
 
 import os
-import json
 import time
 from typing import Optional
 

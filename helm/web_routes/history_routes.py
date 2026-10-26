@@ -11,7 +11,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 import helm.state as _st
-from helm.config import CHAT_LOG_DIR, HISTORY_ID_RE, logger
+from helm.config import logger
 from helm.history import (
     is_valid_history_id, load_chat_names, rebuild_hist_cache_sync,
     save_chat_name, get_history_messages,

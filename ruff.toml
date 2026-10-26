@@ -1,0 +1,28 @@
+# Lint rules checked by CI (.github/workflows/tests.yml, "lint" job).
+# Run locally with:  ruff check .
+#
+# These catch bugs, not style: undefined names and unused code (F), syntax
+# errors (E9), blocking calls that freeze the server's event loop (ASYNC), and
+# common loop and default-argument mistakes (B).
+
+extend-exclude = ["frontend2", "chrome-extension", "web_app.build", "web_app.dist"]
+
+[lint]
+select = [
+    "E9",
+    "F",
+    "ASYNC210",   # blocking HTTP call in an async function
+    "ASYNC220",   # blocking subprocess start in an async function
+    "ASYNC221",   # waiting for a subprocess in an async function
+    "ASYNC251",   # time.sleep in an async function
+    "B006",       # mutable default argument
+    "B007",       # unused loop variable
+    "B023",       # closure captures a loop variable
+    "B033",       # duplicate item in a set literal
+]
+
+[lint.per-file-ignores]
+# Packages re-export their submodules' handlers.
+"**/__init__.py" = ["F401"]
+# Their blocking calls run in a worker thread: callers go through off_loop().
+"helm/cloud_backup/providers/*.py" = ["ASYNC210"]

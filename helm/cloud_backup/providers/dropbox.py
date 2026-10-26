@@ -10,7 +10,6 @@ import os
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 

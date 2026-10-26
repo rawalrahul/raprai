@@ -1,5 +1,4 @@
 """Crews: group chats where each AI has a role."""
-import asyncio
 import os
 import sys
 

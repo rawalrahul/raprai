@@ -11,14 +11,12 @@ Legacy JSONL data is auto-imported by helm/db.py on first startup.
 
 import json
 import pathlib
-import re
 import time
 from datetime import datetime
 from typing import Optional
 
 import helm.state as _st
 from helm.config import (
-    CHAT_LOG_DIR,
     HISTORY_ID_RE,
     logger,
 )

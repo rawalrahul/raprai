@@ -17,7 +17,6 @@ import shutil
 import tempfile
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 

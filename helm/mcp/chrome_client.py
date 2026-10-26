@@ -304,7 +304,7 @@ class ChromeBrowserClient:
         self._connected_at = None
         self._extension_info = {}
         # Cancel all pending requests
-        for msg_id, future in self._pending.items():
+        for future in self._pending.values():
             if not future.done():
                 future.set_exception(
                     RuntimeError("Chrome extension disconnected")

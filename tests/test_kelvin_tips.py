@@ -1,7 +1,6 @@
 """Tips that explain RAPR keeps running: shown sparingly, never nagging."""
 import os
 import sys
-import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -24,7 +23,7 @@ def test_first_run_tip_only_once_ever(monkeypatch, tmp_path):
 
 def test_window_closed_tip_once_per_run_and_three_times_total(monkeypatch, tmp_path):
     shown, notify = _fresh(monkeypatch, tmp_path)
-    for run in range(5):
+    for _run in range(5):
         monkeypatch.setattr(tips, "_shown_closed_this_run", False)   # a new app start
         tips.window_closed_tip(notify)
         tips.window_closed_tip(notify)                               # closed again same run

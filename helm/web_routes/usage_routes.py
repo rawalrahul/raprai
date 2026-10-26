@@ -13,10 +13,10 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 import helm.state as _st
-from helm.config import logger, USAGE_PERIOD_SECONDS
+from helm.config import USAGE_PERIOD_SECONDS
 from helm.session_mgr import (
     usage_reset_if_needed, usage_ai_label, usage_cap_minutes,
-    usage_for_ai, fmt_reset_eta,
+    fmt_reset_eta,
 )
 
 router = APIRouter()

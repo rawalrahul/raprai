@@ -328,7 +328,6 @@ def test_dry_run_http_node_skipped():
 
 def test_dry_run_ai_node_not_skipped():
     """Dry-run flag does NOT skip AI nodes — only side-effect nodes."""
-    import asyncio
     from helm.agent.executor import _SIDE_EFFECT_TYPES
     assert "shell" in _SIDE_EFFECT_TYPES
     assert "http" in _SIDE_EFFECT_TYPES
