@@ -36,6 +36,22 @@ from typing import Callable, Optional
 
 from helm.config import logger
 
+
+def activity_emitter(session_id: str, ai: str) -> Callable[[dict], None]:
+    """A callback for the stream readers below: sends each step to the web UI.
+    The readers run in a worker thread, so it hands the broadcast to this loop."""
+    import asyncio
+    loop = asyncio.get_running_loop()
+
+    def emit(ev: dict) -> None:
+        try:
+            from helm.broadcast import broadcast
+            asyncio.run_coroutine_threadsafe(
+                broadcast({"type": "activity", "session_id": session_id, "ai": ai, **ev}), loop)
+        except Exception:
+            logger.debug("Couldn't send a live-progress step", exc_info=True)
+    return emit
+
 try:
     from helm.subprocess_utils import hidden_kwargs
 except Exception:  # pragma: no cover

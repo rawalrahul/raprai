@@ -70,10 +70,12 @@ without breaking those functions up would only move the mess.
 - **C2, slash commands out:** `/model`, `/remember` and `/pipeline` move from
   `process_message` to `ai_runner/slash_commands.py`. `process_message` asks
   that module whether a message is a command.
-- **C3, one runner per AI type:** `_run_single_ai` becomes a short dispatcher,
-  and its branches move to `ai_runner/runners/` (`claude.py`, `cli.py`,
-  `ollama.py`, `shell.py`). The live-progress helper that's copied in the
-  Claude and CLI branches becomes one function.
+- **C3, one runner per AI type:** `_run_single_ai` becomes a short dispatcher.
+  Its branches move next to the code they belong with: `run_claude` in
+  `claude.py`, `run_ollama` in `ollama.py`, `run_cli_ai` in a new
+  `cli_runner.py` (the short shell branch stays). The prompt enrichment and
+  live-progress helper copied in the Claude and CLI branches become one
+  function each (`prompt.py`, `streaming.py`).
 - **C4, prompt preparation:** the safety preamble, learned context, memory and
   correction detection move to `ai_runner/prompt.py`, one function per step.
   What's left in `process_message` reads as the list of steps.
@@ -121,9 +123,9 @@ lists under D2, D3 and D4; each batch deletes its own lines from that list.
 | C1 | Tests for `process_message` and `_run_single_ai` | Done (#106) |
 | C2 | Slash commands out of `process_message` | Done (#107) |
 | B1 | Browser smoke test in CI | Done (#108) |
-| E1 | Ship the fonts | This PR |
+| E1 | Ship the fonts | Done (#110) |
 | B2 | Split `complete.js` | Done (#109) |
-| C3 | One runner per AI type | |
+| C3 | One runner per AI type | This PR |
 | D2 | Swallowed errors: web routes | |
 | C4 | Prompt preparation out of `process_message` | |
 | D3 | Swallowed errors: running AIs | |
