@@ -25,10 +25,30 @@ import helm.auth as _auth
 
 app = FastAPI(title="RAPR AI")
 
-# Serve app assets placed alongside web_app.py
+# /static serves only these logos (login page, setup wizard, web UI and
+# notifications), from the app folder next to web_app.py. It needs no login, and
+# it used to serve that whole folder: run from source, the folder also holds
+# .env, .vault_key and the database, so anyone who could reach RAPR could
+# download them.
 from helm.paths import PROJECT_ROOT
-_static_dir = PROJECT_ROOT
-app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+from starlette.exceptions import HTTPException as _StarletteHTTPException
+
+PUBLIC_ASSETS = frozenset({
+    "rapr-logo.png",
+    "logo-watermark-dark.png",
+    "logo-watermark-light.png",
+})
+
+
+class _PublicAssets(StaticFiles):
+    """StaticFiles that serves PUBLIC_ASSETS and nothing else."""
+    async def get_response(self, path, scope):
+        if path not in PUBLIC_ASSETS:
+            raise _StarletteHTTPException(status_code=404)
+        return await super().get_response(path, scope)
+
+
+app.mount("/static", _PublicAssets(directory=str(PROJECT_ROOT)), name="static")
 
 
 # ---------------------------------------------------------------------------
@@ -431,7 +451,7 @@ if _USE_SEPARATED_FRONTEND:
             app.mount(f"/{sub}", _RevalidatedStatic(directory=str(sub_dir)), name=f"frontend-{sub}")
 
     # Serve PWA manifest.json and service worker from frontend root
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, JSONResponse
 
     @app.get("/manifest.json")
     async def pwa_manifest():
