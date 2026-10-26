@@ -37,7 +37,7 @@ def _write_error(msg: str) -> None:
         log = _HERE / "telemetry_errors.log"
         with log.open("a", encoding="utf-8") as f:
             f.write(f"{datetime.now(timezone.utc).isoformat()} analyzer: {msg}\n")
-    except Exception:
+    except OSError:
         pass
 
 
@@ -446,7 +446,7 @@ def _read_file_safe(path: Path) -> str:
     try:
         if path.exists():
             return path.read_text(encoding="utf-8")
-    except Exception:
+    except (OSError, ValueError):
         pass
     return ""
 
@@ -478,5 +478,5 @@ def _append_antipattern(task_type: str, antipattern_text: str) -> None:
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         entry = f"\n---\n<!-- correction signal {ts} -->\n{antipattern_text.strip()}\n"
         _append_file(path, entry)
-    except Exception:
-        pass
+    except Exception as e:
+        _write_error(f"append antipattern failed: {e}")

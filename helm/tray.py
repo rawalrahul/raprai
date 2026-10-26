@@ -345,5 +345,5 @@ def stop_tray():
         try:
             _tray_icon.stop()
         except Exception:
-            pass
+            logger.debug("Couldn't stop the tray icon", exc_info=True)
         _tray_icon = None

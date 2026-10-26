@@ -84,7 +84,7 @@ def close_all():
         for conn in _all_connections:
             try:
                 conn.close()
-            except Exception:
+            except sqlite3.Error:
                 pass
         _all_connections.clear()
     _local.conn = None

@@ -127,7 +127,7 @@ def _drop_secrets(entry: dict) -> None:
         try:
             delete_token(key)
         except Exception:
-            pass
+            logger.warning("Couldn't delete the secret %s from the vault", key, exc_info=True)
         os.environ.pop(key, None)
 
 
@@ -156,7 +156,7 @@ def _taken_ids() -> set[str]:
             raw = json.load(f)
         if isinstance(raw, dict):
             taken |= set(raw.keys())
-    except Exception:
+    except (OSError, ValueError):
         pass
     return taken
 

@@ -110,7 +110,7 @@ def install_skill(
                 from helm.skills import scan_skills
                 scan_skills()
             except Exception:
-                pass
+                logger.warning("Rolled back the skill, but couldn't rescan skills", exc_info=True)
         raise InstallError(f"Skill installation failed: {e}") from e
 
 

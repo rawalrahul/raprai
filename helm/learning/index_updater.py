@@ -5,8 +5,11 @@ Called weekly or on-demand.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _INDEX_PATH = Path(__file__).parent / "LEARNING_INDEX.md"
 _ANALYZER_OUTPUT_DIR = Path(__file__).parent / "analyzer_output"
@@ -229,4 +232,4 @@ def update_learning_index() -> None:
 
     except Exception:
         # Silent failure — never propagate
-        pass
+        logger.debug("Couldn't update the learning index", exc_info=True)

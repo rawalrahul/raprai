@@ -240,7 +240,7 @@ async def run_scheduled_task(task: dict) -> None:
                 chat_id=_st.telegram_chat_id, text=announce, parse_mode="Markdown"
             )
         except Exception:
-            pass
+            logger.debug("Couldn't announce the scheduled job on Telegram", exc_info=True)
 
     # Run the prompt; keep the answer for your brief and the Needs-you list
     output = await process_message(task["prompt"], source="schedule", session_id=sess["id"])

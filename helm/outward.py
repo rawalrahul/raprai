@@ -83,7 +83,7 @@ def split_tool(name: str) -> tuple[str, str]:
         if found:
             return found[0], found[1]
     except Exception:
-        pass
+        logger.debug("Couldn't look up the MCP tool %s", name, exc_info=True)
     return "", name
 
 

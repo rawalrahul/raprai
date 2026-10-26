@@ -19,7 +19,7 @@ select = [
     "B007",       # unused loop variable
     "B023",       # closure captures a loop variable
     "B033",       # duplicate item in a set literal
-    "S110",       # `except …: pass` that hides an error (see below)
+    "S110",       # `except Exception: pass` that hides an error
 ]
 
 [lint.per-file-ignores]
@@ -28,64 +28,3 @@ select = [
 # Their blocking calls run in a worker thread: callers go through off_loop().
 "helm/cloud_backup/providers/*.py" = ["ASYNC210"]
 
-# Silently swallowed errors (S110): docs/code-health-plan.md, track D. These
-# files still have some. Each batch fixes its files and deletes their lines;
-# everything else, new files included, is already held to the rule.
-# D4: the rest (57 files)
-"helm/bakeoff.py" = ["S110"]
-"helm/brief.py" = ["S110"]
-"helm/builtin_tools.py" = ["S110"]
-"helm/computer_runners/pywinauto_tools.py" = ["S110"]
-"helm/council/runner.py" = ["S110"]
-"helm/db.py" = ["S110"]
-"helm/demos/analysis.py" = ["S110"]
-"helm/demos/storage.py" = ["S110"]
-"helm/desktop_kelvin.py" = ["S110"]
-"helm/file_tracker.py" = ["S110"]
-"helm/groupchat.py" = ["S110"]
-"helm/helmpack/installer.py" = ["S110"]
-"helm/helmpack/marketplace.py" = ["S110"]
-"helm/helmpack/package.py" = ["S110"]
-"helm/helmpack/plugin_installer.py" = ["S110"]
-"helm/helmpack/skill_installer.py" = ["S110"]
-"helm/history.py" = ["S110"]
-"helm/keep_awake.py" = ["S110"]
-"helm/kelvin_report.py" = ["S110"]
-"helm/kelvin_status.py" = ["S110"]
-"helm/learning/__init__.py" = ["S110"]
-"helm/learning/analyzer.py" = ["S110"]
-"helm/learning/cli.py" = ["S110"]
-"helm/learning/cross_ai.py" = ["S110"]
-"helm/learning/db.py" = ["S110"]
-"helm/learning/hygiene.py" = ["S110"]
-"helm/learning/index_updater.py" = ["S110"]
-"helm/learning/injector.py" = ["S110"]
-"helm/learning/metrics.py" = ["S110"]
-"helm/learning/router.py" = ["S110"]
-"helm/learning/skill_proposals.py" = ["S110"]
-"helm/learning/telemetry.py" = ["S110"]
-"helm/learning/user_context.py" = ["S110"]
-"helm/mcp/call_tool.py" = ["S110"]
-"helm/mcp/client.py" = ["S110"]
-"helm/mcp/composio_mcp.py" = ["S110"]
-"helm/mcp/config.py" = ["S110"]
-"helm/mcp/custom_mcp.py" = ["S110"]
-"helm/mcp/manager.py" = ["S110"]
-"helm/mcp/zapier_mcp.py" = ["S110"]
-"helm/mcp_server.py" = ["S110"]
-"helm/model_prefs.py" = ["S110"]
-"helm/outward.py" = ["S110"]
-"helm/packages/installer.py" = ["S110"]
-"helm/packages/marketplace.py" = ["S110"]
-"helm/packages/package.py" = ["S110"]
-"helm/packages/plugin_installer.py" = ["S110"]
-"helm/packages/skill_installer.py" = ["S110"]
-"helm/resilience.py" = ["S110"]
-"helm/scheduler.py" = ["S110"]
-"helm/skills.py" = ["S110"]
-"helm/terminal.py" = ["S110"]
-"helm/tray.py" = ["S110"]
-"helm/whatsapp_bridge.py" = ["S110"]
-"integrations/local_openai.py" = ["S110"]
-"integrations/nemoclaw.py" = ["S110"]
-"integrations/ollama.py" = ["S110"]

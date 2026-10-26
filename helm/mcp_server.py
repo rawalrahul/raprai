@@ -18,6 +18,7 @@ and only touch your project when you merge one.
 
 from __future__ import annotations
 
+import logging
 import json
 import os
 import shutil
@@ -29,6 +30,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 DIFF_LIMIT = 60_000        # characters of diff given to a reviewer
@@ -366,7 +369,7 @@ def _save(b) -> None:
         init_db()
         bakeoff_history.save(bakeoff.result(b))
     except Exception:
-        pass   # history is a nice-to-have; the bake-off itself worked
+        logger.debug("Couldn't save the bake-off to history", exc_info=True)
 
 
 def _get_bakeoff(args: dict, ctx: "Server"):

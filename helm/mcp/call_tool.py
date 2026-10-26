@@ -37,7 +37,7 @@ def _auth_headers() -> dict:
         try:
             from helm.web_routes.app import MCP_BEARER_TOKEN
             token = MCP_BEARER_TOKEN
-        except Exception:
+        except ImportError:
             pass
     if token:
         headers["Authorization"] = f"Bearer {token}"

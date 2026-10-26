@@ -61,7 +61,7 @@ def snapshot_dir(cwd: str) -> dict[str, tuple[int, float]]:
                 try:
                     st = entry.stat()
                     result[str(entry)] = (st.st_size, st.st_mtime)
-                except Exception:
+                except OSError:
                     pass
             elif entry.is_dir() and entry.name not in _SKIP_DIRS:
                 try:
@@ -70,11 +70,11 @@ def snapshot_dir(cwd: str) -> dict[str, tuple[int, float]]:
                             try:
                                 st = child.stat()
                                 result[str(child)] = (st.st_size, st.st_mtime)
-                            except Exception:
+                            except OSError:
                                 pass
-                except Exception:
+                except OSError:
                     pass
-    except Exception:
+    except OSError:
         pass
     return result
 
@@ -376,7 +376,7 @@ async def handle_diff(before: dict, after: dict, source: str, cwd: str,
             )
             db.commit()
         except Exception:
-            pass
+            logger.debug("Couldn't record the file in the database", exc_info=True)
 
         await push_message(
             "system",

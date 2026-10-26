@@ -41,7 +41,7 @@ def _log_error(msg: str) -> None:
     try:
         with _ERROR_LOG.open("a", encoding="utf-8") as fh:
             fh.write(f"[{time.strftime('%Y-%m-%dT%H:%M:%S')}] injector: {msg}\n")
-    except Exception:
+    except OSError:
         pass
 
 
@@ -208,8 +208,8 @@ def build_context(
             from helm.learning import is_learning_enabled
             if not is_learning_enabled():
                 return ""
-        except Exception:
-            pass
+        except Exception as e:
+            _log_error(f"learning switch check failed: {e}")
 
         # Guard: skip non-actionable task types
         if not task_type or task_type.strip() in _SKIP_TYPES:
@@ -282,8 +282,8 @@ def build_context(
                         char_budget = budget * 4
                         parts.append(cross_hints[:char_budget])
                         budget = 0
-            except Exception:
-                pass
+            except Exception as e:
+                _log_error(f"cross-AI hints failed: {e}")
 
         # --- 6: User environment context (screen/browser/OS) ---
         if budget > 0:
@@ -295,8 +295,8 @@ def build_context(
                     if tokens_needed <= budget:
                         parts.append(env_block)
                         budget -= tokens_needed
-            except Exception:
-                pass
+            except Exception as e:
+                _log_error(f"environment block failed: {e}")
 
         # If nothing was collected, return empty
         if not parts:

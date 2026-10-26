@@ -5,7 +5,10 @@ Creates the ENABLED sentinel file on first import so learning is active
 by default. Delete helm/learning/ENABLED to pause all learning (kill switch).
 """
 
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _LEARNING_DIR = Path(__file__).parent
 _ENABLED_PATH = _LEARNING_DIR / "ENABLED"
@@ -21,7 +24,7 @@ def enable_learning() -> None:
     try:
         _ENABLED_PATH.touch(exist_ok=True)
     except Exception:
-        pass
+        logger.warning("Couldn't turn learning on", exc_info=True)
 
 
 def disable_learning() -> None:
@@ -30,7 +33,7 @@ def disable_learning() -> None:
         if _ENABLED_PATH.exists():
             _ENABLED_PATH.unlink()
     except Exception:
-        pass
+        logger.warning("Couldn't turn learning off", exc_info=True)
 
 
 # Create on first import (first run bootstrap).

@@ -128,8 +128,8 @@ lists under D2, D3 and D4; each batch deletes its own lines from that list.
 | C3 | One runner per AI type | Done (#111) |
 | D2 | Swallowed errors: web routes | Done |
 | C4 | Prompt preparation out of `process_message` | Done |
-| D3 | Swallowed errors: running AIs | This PR |
-| D4 | Swallowed errors: the rest; S110 on everywhere | |
+| D3 | Swallowed errors: running AIs | Done |
+| D4 | Swallowed errors: the rest; S110 on everywhere | This PR |
 
 Quick wins and the security batch come first. Each refactor follows the tests
 it needs. Error batches are spread between refactors so no PR is huge.

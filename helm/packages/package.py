@@ -218,8 +218,8 @@ class HelmPackage:
                 total_size = sum(info.file_size for info in zf.infolist())
                 if total_size > 50 * 1024 * 1024:
                     errors.append(f"Package too large ({total_size / (1024*1024):.1f} MB, max 50 MB)")
-        except Exception:
-            pass
+        except (OSError, zipfile.BadZipFile) as e:
+            errors.append(f"Can't read the package to check its size: {e}")
 
         return errors
 

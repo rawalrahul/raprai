@@ -109,7 +109,7 @@ class KeepAwake:
             try:
                 self._setter(False)
             except Exception:
-                pass
+                logger.warning("Couldn't let the computer sleep again", exc_info=True)
             self.holding = False
 
     def start(self) -> None:

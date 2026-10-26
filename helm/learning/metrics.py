@@ -88,7 +88,7 @@ def _iter_logs(since: datetime):
             # If even the last day of this month is before since, skip
             if dir_dt + timedelta(days=31) < since:
                 continue
-        except Exception:
+        except ValueError:
             pass
         try:
             log_files = month_dir.glob("task_*.json")

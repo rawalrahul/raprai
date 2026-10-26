@@ -36,7 +36,7 @@ def _write_error(msg: str) -> None:
         log = _HERE / "telemetry_errors.log"
         with log.open("a", encoding="utf-8") as f:
             f.write(f"{datetime.now(timezone.utc).isoformat()} skill_proposals: {msg}\n")
-    except Exception:
+    except OSError:
         pass
 
 
@@ -105,7 +105,7 @@ def list_proposals(status: str = "pending") -> list[dict]:
                     until_dt = datetime.fromisoformat(snoozed_until)
                     if until_dt > now:
                         continue
-                except Exception:
+                except (TypeError, ValueError):
                     pass
             result.append(p)
         return result

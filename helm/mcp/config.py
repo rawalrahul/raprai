@@ -166,7 +166,7 @@ def save_config(config: dict, config_path: Optional[str] = None) -> None:
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             raw = json.load(f)
-    except Exception:
+    except (OSError, ValueError):
         pass
 
     # Update enabled flags

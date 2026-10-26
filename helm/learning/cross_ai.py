@@ -51,7 +51,7 @@ def _log_error(msg: str) -> None:
     try:
         with _ERROR_LOG.open("a", encoding="utf-8") as f:
             f.write(f"{datetime.now(timezone.utc).isoformat()} cross_ai: {msg}\n")
-    except Exception:
+    except OSError:
         pass
 
 
@@ -150,8 +150,8 @@ def _analyze(key: str, buf: list[dict], task_type: str, fingerprint: str) -> Non
                 age = time.time() - existing.get("created_at_ts", 0)
                 if age < 7 * 24 * 3600:
                     return
-            except Exception:
-                pass
+            except Exception as e:
+                _log_error(f"unreadable insight file, regenerating: {e}")
 
         # Generate insight
         hint = (

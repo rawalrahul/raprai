@@ -78,7 +78,7 @@ def _on_rm_error(func, path, exc_info):
     try:
         os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
         func(path)
-    except Exception:
+    except OSError:
         pass  # leave to outer retry/cleanup
 
 

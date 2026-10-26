@@ -11,6 +11,7 @@ logo, a status line in its menu, and a Windows notification when an approval
 is waiting. The startup banner for console launches also lives here.
 """
 
+import logging
 import os
 import sys
 import threading
@@ -18,6 +19,8 @@ import time
 from typing import Callable, Optional
 
 from helm.paths import PROJECT_ROOT
+
+logger = logging.getLogger(__name__)
 
 ASSET_DIR = PROJECT_ROOT / "frontend2" / "assets" / "kelvin"
 
@@ -60,7 +63,7 @@ class KelvinStatus:
         try:
             self._observe(data)
         except Exception:
-            pass
+            logger.debug("Kelvin status: couldn't read an event", exc_info=True)
 
     def _observe(self, data: dict) -> None:
         kind = data.get("type")
@@ -189,7 +192,7 @@ class KelvinStatus:
             try:
                 fn(mood, new_approval)
             except Exception:
-                pass
+                logger.debug("Kelvin status: a listener failed", exc_info=True)
 
 
 status = KelvinStatus()

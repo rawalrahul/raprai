@@ -46,7 +46,7 @@ def _log_error(msg: str) -> None:
     try:
         with _ERROR_LOG.open("a", encoding="utf-8") as f:
             f.write(f"{datetime.now(timezone.utc).isoformat()} hygiene: {msg}\n")
-    except Exception:
+    except OSError:
         pass
 
 
@@ -182,7 +182,7 @@ def _compact_old_logs() -> int:
                     try:
                         f.unlink()
                         compacted += 1
-                    except Exception:
+                    except OSError:
                         pass
                 continue
 
@@ -235,7 +235,7 @@ def _compact_old_logs() -> int:
                     try:
                         f.unlink()
                         compacted += 1
-                    except Exception:
+                    except OSError:
                         pass
             except Exception as exc:
                 _log_error(f"compact write {month_dir.name}: {exc}")
@@ -268,7 +268,7 @@ def _clean_orphan_locks() -> int:
                     lock_file.unlink()
                     removed += 1
                     _log_error(f"cleaned orphan lock: {lock_file.name} (age={age:.0f}s)")
-            except Exception:
+            except OSError:
                 pass
     except Exception as exc:
         _log_error(f"_clean_orphan_locks: {exc}")
@@ -294,7 +294,7 @@ def _check_disk_space() -> None:
                 f"disk usage WARNING: helm/learning/ = {total_mb:.1f} MB — "
                 "consider running compaction or reducing retention days"
             )
-    except Exception:
+    except OSError:
         pass
 
 

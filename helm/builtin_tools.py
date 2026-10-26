@@ -30,7 +30,7 @@ if sys.platform == "win32":
     try:
         import ctypes
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
-    except Exception:
+    except (AttributeError, OSError):
         # Older Windows, already set by parent process, or shcore unavailable
         pass
 

@@ -162,7 +162,7 @@ def get_history_messages(hid: str) -> list[dict]:
                 extra = json.loads(row["extra"])
                 msg.update(extra)
             except Exception:
-                pass
+                logger.debug("Ignoring a message's extra fields that aren't valid JSON", exc_info=True)
         # Remove None values to match legacy format
         msg = {k: v for k, v in msg.items() if v is not None}
         messages.append(msg)

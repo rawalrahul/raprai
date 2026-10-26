@@ -202,7 +202,7 @@ def _virtual_screen(root) -> tuple:
             import ctypes
             m = ctypes.windll.user32.GetSystemMetrics
             return m(76), m(77), m(78), m(79)  # SM_X/YVIRTUALSCREEN, SM_CX/CYVIRTUALSCREEN
-        except Exception:
+        except (AttributeError, OSError):
             pass
     return 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
 
@@ -348,7 +348,7 @@ class DesktopKelvin:
         try:
             self.size_var.set(size)
         except Exception:
-            pass
+            logger.debug("Couldn't update the size menu", exc_info=True)
 
     def current_mood(self, now: Optional[float] = None) -> str:
         import time
@@ -421,7 +421,7 @@ class DesktopKelvin:
         try:
             self.menu.entryconfigure(0, label=self.status.describe())
         except Exception:
-            pass
+            logger.debug("Couldn't update the menu status", exc_info=True)
         self.menu.tk_popup(e.x_root, e.y_root)
 
     def _open(self) -> None:

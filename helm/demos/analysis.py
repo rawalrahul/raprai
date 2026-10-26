@@ -15,7 +15,7 @@ try:
     import static_ffmpeg as _static_ffmpeg
     _static_ffmpeg.add_paths()
 except Exception:
-    pass
+    logger.debug("static_ffmpeg unavailable; using ffmpeg from PATH", exc_info=True)
 
 _PROMPT = """Watch this screen recording carefully. List every action the user takes as a numbered step.
 

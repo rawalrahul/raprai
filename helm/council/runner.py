@@ -19,7 +19,7 @@ def _extract_text(raw: str) -> str:
         obj = _json.loads(raw)
         if isinstance(obj, dict) and "result" in obj:
             return str(obj["result"])
-    except Exception:
+    except (TypeError, ValueError):
         pass
     return raw
 

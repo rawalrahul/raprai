@@ -106,7 +106,7 @@ def _write_error(msg: str) -> None:
         _ERROR_LOG.parent.mkdir(parents=True, exist_ok=True)
         with _ERROR_LOG.open("a", encoding="utf-8") as fh:
             fh.write(f"{_iso_now()} {msg}\n")
-    except Exception:  # noqa: BLE001
+    except OSError:
         pass
 
 
@@ -236,8 +236,8 @@ class TaskTelemetry:
                 }
                 with _last_by_session_lock:
                     _last_by_session[sid_hash] = snapshot
-            except Exception:
-                pass
+            except Exception as e:
+                _write_error(f"last-task snapshot failed: {e}")
 
             if not self.should_sample(record["task_type"], record["ai_used"]):
                 return
@@ -331,8 +331,8 @@ class TaskTelemetry:
                     if isinstance(tools, str):
                         tools = [tools]
                     _db_upsert(fp, tt, kws, tools)
-            except Exception:
-                pass
+            except Exception as e:
+                _write_error(f"similarity index update failed: {e}")
         except Exception as exc:  # noqa: BLE001
             _write_error(f"_persist() error task_id={record.get('task_id', '?')}: {exc}")
 

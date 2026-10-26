@@ -92,7 +92,7 @@ def checkin_time() -> Optional[tuple]:
         hh, mm = int(hh), int(mm)
         if 0 <= hh < 24 and 0 <= mm < 60:
             return hh, mm
-    except Exception:
+    except ValueError:
         pass
     return None
 
