@@ -179,7 +179,13 @@ async def login_page(request: Request, error: str = ""):
 
     html = html.replace("__WAIT__",     str(wait))
     html = html.replace("__DISABLED__", disabled)
-    html = html.replace("__ERROR__",    error.replace('"', "&quot;"))
+    # __ERROR__ sits in a JS string inside <script>, and anyone can put text in
+    # ?error= and send you the link. Escape it for JS, and escape < > & too so
+    # "</script>" can't end the script and start one of theirs.
+    import json
+    safe_error = (json.dumps(error)[1:-1]
+                  .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
+    html = html.replace("__ERROR__",    safe_error)
     return HTMLResponse(content=html)
 
 
