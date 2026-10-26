@@ -115,7 +115,7 @@
   function applyTheme(){
     const t = resolvedTheme();
     document.documentElement.dataset.theme = t;
-    // complete.js re-applies helmTheme on every reconnect; keep it in step.
+    // core.js re-applies helmTheme on every reconnect; keep it in step.
     try { localStorage.setItem('helmTheme', t); } catch(e) {}
     if(typeof window.renderHeaderIcons === 'function') try { window.renderHeaderIcons(); } catch(e) {}
   }

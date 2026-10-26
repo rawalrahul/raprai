@@ -110,5 +110,5 @@ def test_the_switch_is_a_saved_setting():
     from helm.web_routes.app import _SETTINGS_KEYS
     assert "CHAT_APPS_SYNC" in _SETTINGS_KEYS
     html = open(os.path.join(ROOT, "frontend2", "index.html"), encoding="utf-8").read()
-    js = open(os.path.join(ROOT, "frontend2", "js", "complete.js"), encoding="utf-8").read()
+    js = open(os.path.join(ROOT, "frontend2", "js", "settings.js"), encoding="utf-8").read()
     assert 'id="st-CHAT_APPS_SYNC"' in html and js.count("'CHAT_APPS_SYNC'") == 2

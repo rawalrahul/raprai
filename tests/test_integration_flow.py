@@ -62,7 +62,7 @@ def test_provider_settings_are_user_configurable():
     assert "LOCAL_AI_MODEL" in _SETTINGS_KEYS
 
     html = Path("frontend2/index.html").read_text(encoding="utf-8")
-    js = Path("frontend2/js/complete.js").read_text(encoding="utf-8")
+    js = Path("frontend2/js/settings.js").read_text(encoding="utf-8")
     assert "st-GROQ_API_KEY" in html
     assert "st-OPENROUTER_API_KEY" in html
     assert "st-LOCAL_AI_URL" in html

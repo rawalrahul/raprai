@@ -3,7 +3,7 @@
  *
  * Kelvin.mount(el, opts)  draws an animated Kelvin into el and returns { setState, destroy }.
  * KelvinUI                maps live WebSocket events to Kelvin's mood and drives every
- *                         Kelvin on the page. complete.js forwards events via KelvinUI.onWs().
+ *                         Kelvin on the page. core.js forwards events via KelvinUI.onWs().
  *
  * Pure SVG + spring physics, no dependencies. Kelvin's face only changes on real
  * agent events, so what users see is what their AI is actually doing.
