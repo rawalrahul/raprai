@@ -9,7 +9,6 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Optional
 
 _HERE = Path(__file__).parent
 _SEED_PATH = _HERE / "seed" / "default_routing.json"

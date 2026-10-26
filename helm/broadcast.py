@@ -13,7 +13,6 @@ from typing import Optional
 from fastapi import WebSocket
 
 import helm.state as _st
-from helm.config import logger
 from helm.history import save_message_to_log, save_last_state, ts
 from helm.kelvin_status import status as _kelvin_status
 from helm.session_mgr import focused_session, sessions_state_payload

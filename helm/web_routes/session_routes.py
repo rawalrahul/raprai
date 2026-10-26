@@ -218,17 +218,6 @@ async def list_integrations_endpoint():
     def _build():
         result = []
         for key, info in _st.integrations.items():
-            # NemoClaw lives in WSL — _find_cli won't find it on Windows PATH,
-            # so use the bridge's cached detection instead
-            if key == "nemoclaw":
-                try:
-                    from helm.ai_runner.nemoclaw_bridge import is_available
-                    cli_ok = is_available()
-                except Exception:
-                    cli_ok = False
-            else:
-                cli_ok = _find_cli(key)
-            env_vars_ok = all(os.environ.get(v, "").strip() for v in info.get("env_vars", []))
             ready = _integration_ready(key, info)
             result.append({
                 "key":        key,
@@ -314,7 +303,6 @@ async def debug_integration(name: str):
 
     def _run_debug():
         import shutil, subprocess
-        from .app import _find_cli_cache
         home = pathlib.Path.home()
         steps = {}
 
@@ -450,7 +438,7 @@ async def rescan_integrations():
                 # Detect by probing the first element of the integration's command
                 found = False
                 try:
-                    cmd = info["build_command"]("test", model=None)
+                    info["build_command"]("test", model=None)
                     found = _integration_ready(key, info)
                 except Exception:
                     pass
@@ -529,8 +517,7 @@ async def skills_proposal_count():
 @router.get("/integrations/ollama/status")
 async def ollama_status():
     """Check whether Ollama is installed, running, and has at least one model pulled."""
-    import shutil, subprocess
-    from helm.subprocess_utils import hidden_kwargs
+    import shutil
 
     cli_ok = shutil.which("ollama") is not None
 
@@ -539,18 +526,9 @@ async def ollama_status():
     model_ok = False
 
     if cli_ok:
-        try:
-            result = subprocess.run(
-                ["ollama", "list"],
-                capture_output=True, text=True, timeout=5, **hidden_kwargs(),
-            )
-            for line in result.stdout.splitlines()[1:]:   # skip header row
-                parts = line.split()
-                if parts:
-                    models.append(parts[0])
-            model_ok = current_model in models
-        except Exception:
-            pass
+        from helm.ai_runner.ollama import installed_models
+        models = await asyncio.to_thread(installed_models)
+        model_ok = current_model in models
 
     if not cli_ok:
         hint = "Install Ollama from https://ollama.com/download"

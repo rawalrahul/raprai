@@ -6,7 +6,6 @@ Covers: action_callback, browse_callback (callback routing for inline keyboards)
 
 import asyncio
 import pathlib
-from typing import Optional
 
 import helm.state as _st
 from helm.config import ALLOWED_USER_IDS, HISTORY_ID_RE
@@ -27,7 +26,7 @@ except ImportError:
 async def action_callback(update, context):
     """Handle all ms:* and action:* inline keyboard button presses."""
     from helm.session_mgr import focused_session, make_session, session_cwd, usage_summary_text
-    from helm.ai_runner import kill_session_proc, change_cwd
+    from helm.ai_runner import kill_session_proc
     from helm.file_tracker import emit_session_end_summary
     from helm.broadcast import push_message, push_state
     from helm.history import get_session_display_name
@@ -336,7 +335,7 @@ async def pipeline_callback(update, context):
     """Handle all pl:* inline keyboard button presses for pipelines."""
     from helm.pipeline.models import pipeline_progress
     from helm.pipeline.executor import (
-        broadcast_pipeline_update, execute_pipeline, retry_step,
+        broadcast_pipeline_update, execute_pipeline,
     )
     from .keyboards import pipeline_controls_keyboard
 
@@ -381,7 +380,7 @@ async def pipeline_callback(update, context):
                 step["status"] = "skipped"
         await broadcast_pipeline_update(pl)
         await query.edit_message_text(
-            f"⚫ Pipeline cancelled.",
+            "⚫ Pipeline cancelled.",
             reply_markup=pipeline_controls_keyboard(pipeline_id, "cancelled"),
         )
 
@@ -390,7 +389,7 @@ async def pipeline_callback(update, context):
             pl["status"] = "paused"
             await broadcast_pipeline_update(pl)
         await query.edit_message_text(
-            f"⏸ Pipeline paused.",
+            "⏸ Pipeline paused.",
             reply_markup=pipeline_controls_keyboard(pipeline_id, "paused"),
         )
 
@@ -407,7 +406,7 @@ async def pipeline_callback(update, context):
             asyncio.create_task(execute_pipeline(pipeline_id))
             await broadcast_pipeline_update(pl)
         await query.edit_message_text(
-            f"▶️ Pipeline resumed.",
+            "▶️ Pipeline resumed.",
             reply_markup=pipeline_controls_keyboard(pipeline_id, "running"),
         )
 
@@ -487,7 +486,6 @@ async def agent_callback(update, context):
         await query.edit_message_text("❌ Failed to start agent — it may have no nodes.")
         return
 
-    import asyncio as _asyncio
     try:
         await query.edit_message_text(
             f"✦ *{ag['name']}* is running (`{run['id'][:8]}`).\n"

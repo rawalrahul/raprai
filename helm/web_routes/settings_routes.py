@@ -16,7 +16,7 @@ import helm.state as _st
 from helm.config import logger
 from helm.paths import user_data_dir
 from .app import update_env, _SETTINGS_KEYS
-from .helpers import _fetch_claude_models, _fetch_ollama_models, _fetch_openai_models, _fetch_gemini_models
+from .helpers import _fetch_ollama_models
 
 
 router = APIRouter()

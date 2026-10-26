@@ -515,11 +515,10 @@ Respond with ONLY a valid JSON array, no markdown, no explanation."""
         return JSONResponse({"error": f"AI generation failed: {exc}"}, status_code=500)
 
     # Parse JSON from AI response — robust extraction
-    import json, re
     raw_nodes = None
     try:
         raw_nodes = _extract_json_array(result)
-    except Exception as exc:
+    except Exception:
         pass
     if raw_nodes is None:
         logger.error("Could not parse agent generation result:\n%s", result[:800])

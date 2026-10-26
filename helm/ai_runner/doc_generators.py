@@ -752,7 +752,7 @@ def _generate_docx_code(filename: str, title: str, sections: list) -> str:
         for b in s.get("bullets", []):
             section_code_parts.append(f"bullet({repr(b)})")
         if s.get("numbered_items"):
-            for i, item in enumerate(s["numbered_items"]):
+            for item in s["numbered_items"]:
                 section_code_parts.append(f"numbered({repr(item)})")
         if s.get("callout"):
             section_code_parts.append(f"callout({repr(s['callout'])})")

@@ -8,8 +8,6 @@ and builds a block that can be prepended to any AI system prompt.
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Optional
 
 from helm.paths import user_data_dir
 

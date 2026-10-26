@@ -12,7 +12,6 @@ Endpoints:
     POST /packages/catalog/refresh  — Force refresh catalog from remote
 """
 
-import asyncio
 import os
 import pathlib
 import platform
@@ -20,7 +19,6 @@ import shutil
 import subprocess
 import tempfile
 import threading
-import time
 import uuid
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form

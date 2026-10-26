@@ -80,7 +80,6 @@ def update_learning_index() -> None:
         from helm.learning import metrics
     except ImportError:
         try:
-            import importlib
             import sys
             sys.path.insert(0, str(Path(__file__).parent.parent.parent))
             from helm.learning import metrics  # type: ignore

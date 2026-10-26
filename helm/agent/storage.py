@@ -19,7 +19,6 @@ import helm.state as _st
 from helm.config import logger
 from helm.db import get_db
 
-from .models import node_runtime_snapshot
 
 # Module-level write lock — serialises all INSERT/UPDATE/DELETE calls so that
 # concurrent async coroutines cannot interleave writes on the same connection.

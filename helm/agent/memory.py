@@ -7,7 +7,6 @@ Layer 3: claude-mem MCP observation writing for per-user preference memory.
 """
 
 import asyncio
-import json
 import time
 from typing import Optional
 
@@ -229,7 +228,7 @@ async def write_run_observation(run: dict) -> None:
 
         # Attempt to write via claude-mem MCP if available
         try:
-            from mcp import ClientSession  # type: ignore
+            from mcp import ClientSession  # type: ignore  # noqa: F401 -- only checks mcp is installed
             # If MCP client is not available, skip silently
             logger.debug("memory Layer3: claude-mem observation queued: %s", obs[:120])
         except ImportError:

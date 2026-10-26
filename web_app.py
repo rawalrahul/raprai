@@ -7,7 +7,6 @@ Run with:  python web_app.py
 
 import asyncio
 import ctypes
-import os
 import shutil
 import subprocess
 import sys
@@ -30,7 +29,7 @@ if sys.platform == "win32":
         pass
 
 # Load environment variables first (helm/config.py does this via dotenv)
-from helm.config import BOT_TOKEN, WEB_HOST, WEB_PORT, logger
+from helm.config import WEB_HOST, WEB_PORT, logger
 from helm.integrations import load_integrations
 from helm.skills import scan_skills
 from helm.scheduler import load_scheduled_tasks, cron_runner
@@ -547,7 +546,7 @@ async def _main():
             logger.info("Keep-awake not available: %s", exc)
 
         try:
-            from helm.tray import hide_console, start_tray, stop_tray
+            from helm.tray import hide_console, start_tray
             hide_console()
             start_tray(actual_port, shutdown_callback=_tray_shutdown)
         except Exception as exc:
@@ -575,7 +574,7 @@ async def _main():
             ]:
                 if browser_path and os.path.isfile(browser_path):
                     try:
-                        subprocess.Popen([browser_path, f"--app={url}"], **hidden_kwargs())
+                        subprocess.Popen([browser_path, f"--app={url}"], **hidden_kwargs())  # noqa: ASYNC220 -- starts the browser, doesn't wait
                         opened = True
                         logger.info("Opened in app mode via %s", browser_path)
                         break

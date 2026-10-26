@@ -3,7 +3,6 @@
 import json
 import re
 
-from helm.config import logger
 from .models import build_transcript
 
 

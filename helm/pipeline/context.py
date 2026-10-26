@@ -4,9 +4,7 @@ helm/pipeline/context.py — Smart context passing between pipeline steps.
 Full output if short (<threshold), auto-summarized if long.
 """
 
-import asyncio
 import os
-from typing import Optional
 
 from helm.config import logger
 

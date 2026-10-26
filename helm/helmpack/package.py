@@ -6,13 +6,11 @@ import hashlib
 import json
 import pathlib
 import re
-import shutil
-import tempfile
 import zipfile
 from typing import Optional
 
 from helm.helmpack import (
-    FORMAT_VERSION, HelmPackManifest, ManifestError, PackageType, ValidationError,
+    HelmPackManifest, ManifestError, PackageType, ValidationError,
 )
 
 # ---------------------------------------------------------------------------

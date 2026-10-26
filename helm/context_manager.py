@@ -359,7 +359,6 @@ async def check_and_compact(sess: dict, source: str = "web") -> Optional[str]:
 
 async def _compact_ollama(sess: dict) -> Optional[str]:
     """Summarise and trim Ollama conversation messages."""
-    import asyncio
 
     msgs = sess.get("ollama_messages")
     if not msgs or len(msgs) < MIN_MESSAGES_FOR_SUMMARY:
@@ -516,10 +515,8 @@ def _build_summary_from_messages(messages: list[dict]) -> str:
 
 async def force_compact(sess: dict, source: str = "web") -> str:
     """Force-compact a session's context regardless of current usage level."""
-    from helm.broadcast import push_message
 
     ai = sess.get("ai") or "shell"
-    sid = sess.get("id", "")
 
     if ai != "ollama":
         # Claude, Gemini, Codex, NemoClaw handle context natively —

@@ -4,7 +4,6 @@ helm/pipeline/cost.py — Token cost estimation for pipeline steps.
 Estimates cost before execution based on prompt length, AI model, and expected output type.
 """
 
-import os
 
 # ---------------------------------------------------------------------------
 # Per-AI token pricing (USD per 1K tokens, approximate)

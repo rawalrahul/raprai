@@ -14,7 +14,6 @@ import asyncio
 import os
 import pathlib
 import time
-from typing import Optional
 
 import helm.state as _st
 from helm.config import logger

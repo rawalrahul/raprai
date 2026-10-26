@@ -246,7 +246,6 @@ def run_claude_stream(cmd: list, cwd: str, sess: dict,
 def _stream_cli(scmd, cwd, sess, stdin_text, extra_env, timeout, on_event, tag="cli"):
     """Run `scmd`, feed `stdin_text`, read stdout JSONL, call on_event(dict) per line.
     Raises StreamUnavailable on spawn/read failure or timeout."""
-    import os as _os
     from helm.paths import child_env
     env = child_env(scmd, {**(extra_env or {}), "RAPR_SESSION_ID": str(sess.get("id", ""))})
     try:

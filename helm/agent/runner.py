@@ -177,7 +177,7 @@ async def resume_interrupted_runs() -> None:
       - Run status               → "failed"
     A WS broadcast tells any connected UI about the finalised state.
     """
-    from .storage import load_recent_runs, save_run
+    from .storage import save_run
     from .executor import broadcast_run_update
     import time as _time
 
@@ -240,7 +240,6 @@ def register_agent_schedules() -> None:
     load_all_agents()
 
     # Fix up missing next_run values
-    now = time.time()
     for agent in _st.agents.values():
         sched = agent.get("trigger", {}).get("schedule", {})
         if sched.get("enabled") and sched.get("cron") and not sched.get("next_run"):

@@ -19,8 +19,7 @@ from helm.subprocess_utils import hidden_kwargs
 import helm.state as _st
 from helm.broadcast import broadcast, push_agent_error, push_message, push_state, push_thinking
 from helm.config import CLAUDE_TIMEOUT, INTEGRATION_TIMEOUT, logger
-from helm.history import save_cwd_to_log
-from helm.session_mgr import focused_session, record_usage_task
+from helm.session_mgr import record_usage_task
 from helm.skills import (
     inject_skill_prefix, detect_skill, auto_create_skill_template,
     generate_skill,
@@ -537,7 +536,6 @@ def run_ai_popen(cmd: list[str], cwd: str, name: str, sess: dict,
     infinite hang when an invalid --model causes the CLI to enter an interactive
     picker with no terminal attached.
     """
-    import os as _os
     if timeout_override is not None:
         _timeout: float | None = timeout_override if timeout_override > 0 else None
     else:
@@ -846,7 +844,7 @@ async def process_message(text: str, source: str = "web",
             elif available:
                 current_line = f"**Current model:** (default — `{available[0]}`)"
             else:
-                current_line = f"**Current model:** (AI's built-in default)"
+                current_line = "**Current model:** (AI's built-in default)"
 
             models_line = ""
             if available:
@@ -885,15 +883,8 @@ async def process_message(text: str, source: str = "web",
 
         # Warn if the requested model isn't installed locally
         try:
-            _list_result = subprocess.run(
-                ["ollama", "list"],
-                capture_output=True, text=True, timeout=5, **hidden_kwargs(),
-            )
-            _local = []
-            for _line in _list_result.stdout.strip().splitlines()[1:]:
-                _parts = _line.split()
-                if _parts:
-                    _local.append(_parts[0].strip())
+            from .ollama import installed_models
+            _local = await asyncio.to_thread(installed_models)
             if _local and arg not in _local:
                 _names = ", ".join(f"`{m}`" for m in _local)
                 await push_message(
@@ -951,7 +942,7 @@ async def process_message(text: str, source: str = "web",
             category = words[0].lower().rstrip(":")
             content = words[1]
 
-        mid = add_memory(
+        add_memory(
             content=content,
             category=category,
             source_ai=sess.get("ai", "unknown"),

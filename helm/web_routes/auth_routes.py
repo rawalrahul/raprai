@@ -4,7 +4,6 @@ helm/web_routes/auth_routes.py — Login, logout, PIN setup, auth status endpoin
 
 import os
 import re
-import pathlib
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 

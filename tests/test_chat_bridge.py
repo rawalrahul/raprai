@@ -7,7 +7,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import helm.chat_bridge as cb
 import helm.groupchat as gc
-import helm.state as _st
 
 
 def test_only_allowed_users_get_answers(monkeypatch):

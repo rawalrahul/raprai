@@ -391,7 +391,7 @@ _STOP_WORDS = {
     "very", "just", "even", "across", "multiple", "without", "every",
     "between", "through", "their", "they", "them", "use", "used", "using",
     "make", "makes", "making", "like", "new", "turn", "turns", "help",
-    "your", "our", "you", "your", "into", "over", "under", "after",
+    "your", "our", "you", "over", "under", "after",
     # Generic quality adjectives — too common to be useful keyword signals
     "beautiful", "professional", "comprehensive", "powerful",
     "advanced", "detailed", "styled", "modern", "great",

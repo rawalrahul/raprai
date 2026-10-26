@@ -12,7 +12,7 @@ from helm.config import logger
 from helm.session_mgr import focused_session, make_session, session_cwd, sessions_state_payload
 from helm.broadcast import push_message, push_state, push_thinking
 from helm.history import ts
-from helm.ai_runner import change_cwd, forward_to_telegram, process_message, tg_update_focus, kill_session_proc
+from helm.ai_runner import change_cwd, process_message, tg_update_focus, kill_session_proc
 from helm.scheduler import (
     make_sched_task, next_cron_run, run_scheduled_task,
     save_scheduled_tasks, sched_tasks_payload,
@@ -150,7 +150,7 @@ async def ws_endpoint(websocket: WebSocket):
                     _text: str = content,
                     _sid: str = _dispatch_sid,
                 ) -> None:
-                    response = await process_message(_text, source="web", session_id=_sid)
+                    await process_message(_text, source="web", session_id=_sid)
                     # Telegram notification is handled by tg_progress_notify()
                     # inside process_message — no need to forward again here.
 
@@ -236,7 +236,6 @@ async def call_kelvin_crew(sess: dict) -> bool:
 
 async def handle_web_command(command: str, ws: WebSocket):
     """Handle control commands sent from the web UI (multi-session aware)."""
-    from helm.terminal import TerminalSession
 
     # --- new_session:{ai}[|cwd[|model]] ---
     if command.startswith("new_session:"):
@@ -272,7 +271,6 @@ async def handle_web_command(command: str, ws: WebSocket):
 
     # --- set_model:{model_name} ---
     if command.startswith("set_model:"):
-        import subprocess as _sp
         model_val = command.split(":", 1)[1].strip()
         sess = focused_session()
         if sess:
@@ -291,15 +289,8 @@ async def handle_web_command(command: str, ws: WebSocket):
             # For Ollama: warn if the selected model isn't installed locally
             if model_val and sess.get("ai") == "ollama":
                 try:
-                    _r = _sp.run(
-                        ["ollama", "list"],
-                        capture_output=True, text=True, timeout=5,
-                    )
-                    _local = []
-                    for _ln in _r.stdout.strip().splitlines()[1:]:
-                        _p = _ln.split()
-                        if _p:
-                            _local.append(_p[0].strip())
+                    from helm.ai_runner.ollama import installed_models
+                    _local = await asyncio.to_thread(installed_models)
                     if _local and model_val not in _local:
                         _names = ", ".join(f"`{m}`" for m in _local)
                         await push_message(

@@ -2,15 +2,14 @@
 helm/web_routes/backup_routes.py — Cloud backup API endpoints.
 """
 
-import asyncio
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, HTMLResponse
 
 from helm.config import logger
+from helm.cloud_backup.providers import off_loop
 from helm.db import get_db
 
 router = APIRouter()
@@ -82,7 +81,7 @@ async def get_backup_config():
         # Check connection status
         provider = _get_provider(p)
         try:
-            config["connected"] = await provider.is_connected() if provider else False
+            config["connected"] = await off_loop(provider.is_connected) if provider else False
         except Exception:
             config["connected"] = False
 
@@ -271,8 +270,8 @@ async def backup_now(request: Request):
         folder = (cfg["remote_folder"] if cfg else "") or "/RAPR-Backups"
 
         try:
-            result = await provider.upload(
-                Path(backup["path"]), folder, backup["filename"]
+            result = await off_loop(
+                provider.upload, Path(backup["path"]), folder, backup["filename"]
             )
             if result.get("ok"):
                 db.execute(
@@ -352,7 +351,7 @@ async def restore_backup(job_id: int):
     dest = Path(tempfile.mkdtemp(prefix="raprai_restore_")) / "backup.zip"
 
     try:
-        dl = await provider.download(remote_id, dest)
+        dl = await off_loop(provider.download, remote_id, dest)
         if not dl.get("ok"):
             return JSONResponse({"ok": False, "error": f"Download failed: {dl.get('error')}"})
 
@@ -441,7 +440,7 @@ async def backup_oauth_callback(provider: str, request: Request):
     redirect_uri = f"{base}/backups/providers/{provider}/callback"
 
     try:
-        result = await p.handle_oauth_callback(code, redirect_uri)
+        result = await off_loop(p.handle_oauth_callback, code, redirect_uri)
         if result.get("ok"):
             html = f"""<!DOCTYPE html><html><head><title>Connected!</title>
 <style>body{{font-family:system-ui;background:#1a1a2e;color:#e0e0e0;display:flex;
@@ -468,5 +467,5 @@ async def backup_disconnect(provider: str):
     p = _get_provider(provider)
     if not p:
         return JSONResponse({"error": "Unknown provider"}, status_code=404)
-    result = await p.disconnect()
+    result = await off_loop(p.disconnect)
     return JSONResponse(result)

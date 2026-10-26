@@ -21,7 +21,7 @@ from typing import Optional
 from helm.config import logger
 from helm.helmpack import (
     PackageType, HelmPackManifest, HelmPackError,
-    InstallError, ConflictError,
+    InstallError,
 )
 from helm.helmpack.package import HelmPackage
 

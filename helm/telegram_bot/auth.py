@@ -4,7 +4,6 @@ helm/telegram_bot/auth.py — Authorization and message sending utilities.
 Covers: authorized_only decorator, tg_send_chunks helper.
 """
 
-import asyncio
 from functools import wraps
 
 import helm.state as _st

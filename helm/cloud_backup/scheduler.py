@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from helm.config import logger
+from helm.cloud_backup.providers import off_loop
 
 
 def calculate_next_backup(frequency: str, hour: int = 2, weekday: int = 0) -> Optional[datetime]:
@@ -164,8 +165,8 @@ class BackupScheduler:
             folder = config["remote_folder"] or "/RAPR-Backups"
 
             # Upload
-            result = await provider.upload(
-                Path(backup["path"]), folder, backup["filename"]
+            result = await off_loop(
+                provider.upload, Path(backup["path"]), folder, backup["filename"]
             )
 
             if result.get("ok"):

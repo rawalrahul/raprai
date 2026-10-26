@@ -16,10 +16,9 @@ Endpoints:
     POST   /memory/transfer/import       — import AI response as memories
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 from fastapi.responses import Response
 from pydantic import BaseModel
-from typing import Optional
 import re
 
 router = APIRouter(prefix="/memory", tags=["memory"])
@@ -269,7 +268,7 @@ async def export_prompt():
     in a structured format that our import endpoint can parse.
     """
     from helm.memory import list_memories
-    from helm.personalization import get_user_name, get_ai_name
+    from helm.personalization import get_user_name
 
     user_name = get_user_name()
     name_context = f" (the user's name is {user_name})" if user_name else ""
@@ -337,7 +336,6 @@ async def import_response(req: ImportRequest):
 
     added = 0
     skipped = 0
-    duplicates = 0
     errors = []
 
     for line in lines:
@@ -376,7 +374,7 @@ async def import_response(req: ImportRequest):
             category = cat_map.get(category, "fact")
 
         try:
-            mid = add_memory(
+            add_memory(
                 content=content,
                 category=category,
                 source_ai=req.source,

@@ -11,7 +11,6 @@ import shutil
 import subprocess
 import time
 import urllib.request
-from typing import Optional
 
 from helm.subprocess_utils import hidden_kwargs
 

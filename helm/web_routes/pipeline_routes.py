@@ -340,7 +340,6 @@ async def save_template(pipeline_id: str, request: Request):
 @router.post("/api/pipeline/from-template")
 async def pipeline_from_template(request: Request):
     """Create a new pipeline from a saved template."""
-    import os
     from helm.session_mgr import focused_session, session_cwd
 
     body = await request.json()
