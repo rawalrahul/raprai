@@ -25,7 +25,7 @@ if sys.platform == "win32":
         if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
             print("RAPR AI is already running. Close the existing instance before starting another.")
             sys.exit(0)
-    except Exception:
+    except (AttributeError, OSError):   # runs before logging is set up
         pass
 
 # Load environment variables first (helm/config.py does this via dotenv)
@@ -361,7 +361,7 @@ async def _main():
                 load_all_tokens()
                 token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
             except Exception:
-                pass
+                logger.warning("Couldn't load the Telegram token from the vault", exc_info=True)
         if not token or token == "vault-managed":
             logger.warning("Telegram hot-start: no valid token found")
             return
@@ -471,7 +471,7 @@ async def _main():
         from helm.paths import user_data_dir
         (user_data_dir() / "web_port").write_text(str(actual_port), encoding="utf-8")
     except Exception:
-        pass
+        logger.warning("Couldn't write web_port; the macOS launcher may open the wrong address", exc_info=True)
 
     # --- Build uvicorn server ---
     config = uvicorn.Config(
@@ -498,7 +498,7 @@ async def _main():
             from helm.history import save_last_state
             save_last_state()
         except Exception:
-            pass
+            logger.warning("Shutdown: couldn't save the session state", exc_info=True)
         # 2. Extract memories from active sessions
         try:
             from helm.memory import save_extracted_memories
@@ -506,9 +506,9 @@ async def _main():
                 try:
                     save_extracted_memories(sess)
                 except Exception:
-                    pass
+                    logger.warning("Shutdown: couldn't save a session's memories", exc_info=True)
         except Exception:
-            pass
+            logger.warning("Shutdown: couldn't save memories", exc_info=True)
         # 3. Kill running AI subprocesses so they don't get orphaned
         try:
             for sess in list(_st.sessions.values()):
@@ -516,16 +516,16 @@ async def _main():
                 if proc:
                     try:
                         proc.kill()
-                    except Exception:
+                    except OSError:
                         pass
         except Exception:
-            pass
+            logger.debug("Shutdown: couldn't stop the AI processes", exc_info=True)
         # 4. Close database connections
         try:
             from helm.db import close_all
             close_all()
         except Exception:
-            pass
+            logger.debug("Shutdown: couldn't close the database", exc_info=True)
         logger.info("Tray shutdown: cleanup complete, exiting.")
         os._exit(0)
 
@@ -533,7 +533,7 @@ async def _main():
         from helm.kelvin_status import startup_banner
         startup_banner(url)
     except Exception:
-        pass
+        logger.debug("Couldn't show the startup banner", exc_info=True)
 
     from helm.headless import is_headless
     if is_headless():
@@ -699,7 +699,7 @@ def main():
                 from helm.db import close_all
                 close_all()
             except Exception:
-                pass
+                logger.debug("Shutdown: couldn't close the database", exc_info=True)
 
 
 if __name__ == "__main__":

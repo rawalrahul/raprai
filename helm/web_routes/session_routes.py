@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 import helm.state as _st
+from helm.config import logger
 from helm.session_mgr import session_cwd
 from .app import _find_cli, update_env, windows_folder_picker
 
@@ -50,7 +51,7 @@ def _integration_ready(key: str, info: dict) -> bool:
             from helm.ai_runner.core import is_backend_available
             return bool(is_backend_available(key))
         except Exception:
-            pass
+            logger.debug("Couldn't check whether %s is available", key, exc_info=True)
 
     env_vars_ok = all(os.environ.get(v, "").strip() for v in info.get("env_vars", []))
     try:
@@ -380,8 +381,6 @@ async def rescan_integrations():
     }
 
     def _run_rescan():
-        import subprocess
-        from helm.subprocess_utils import hidden_kwargs
         _find_cli_cache.clear()
         items = []
 
@@ -408,16 +407,8 @@ async def rescan_integrations():
                 "startable": found and (key == "claude" or key in _st.integrations),
             }
             if key == "ollama" and found:
-                try:
-                    r = subprocess.run(
-                        ["ollama", "list"], capture_output=True, text=True, timeout=5, **hidden_kwargs(),
-                    )
-                    for line in r.stdout.splitlines()[1:]:
-                        parts = line.split()
-                        if parts:
-                            item["models"].append(parts[0])
-                except Exception:
-                    pass
+                from helm.ai_runner.ollama import installed_models
+                item["models"] = installed_models()
             items.append(item)
 
         # All other integrations loaded in state (file-based + custom)
@@ -433,7 +424,7 @@ async def rescan_integrations():
                     nc = detect_nemoclaw(auto_launch_docker=False)
                     found = nc.get("available", False)
                 except Exception:
-                    pass
+                    logger.debug("Couldn't detect NemoClaw", exc_info=True)
             else:
                 # Detect by probing the first element of the integration's command
                 found = False
@@ -441,7 +432,7 @@ async def rescan_integrations():
                     info["build_command"]("test", model=None)
                     found = _integration_ready(key, info)
                 except Exception:
-                    pass
+                    logger.debug("Couldn't check whether %s is installed", key, exc_info=True)
             items.append({
                 "key":    key,
                 "name":   info.get("name", key.title()),

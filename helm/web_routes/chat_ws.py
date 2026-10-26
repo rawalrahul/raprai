@@ -172,7 +172,7 @@ async def ws_endpoint(websocket: WebSocket):
                                 "source": "web", "timestamp": ts(),
                             }))
                         except Exception:
-                            pass
+                            logger.debug("Couldn't tell the browser a command failed", exc_info=True)
 
     except WebSocketDisconnect:
         pass
@@ -187,7 +187,7 @@ async def ws_endpoint(websocket: WebSocket):
                 from helm.kelvin_tips import schedule_window_closed_check
                 schedule_window_closed_check(lambda: bool(_st.ws_clients))
             except Exception:
-                pass
+                logger.debug("Couldn't schedule the window-closed tip", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +281,7 @@ async def handle_web_command(command: str, ws: WebSocket):
                     from helm.model_prefs import set_model_pref
                     set_model_pref(ai_key, model_val or None)
                 except Exception:
-                    pass
+                    logger.warning("Couldn't save the model choice for %s", ai_key, exc_info=True)
             await push_state()
             label = f"`{model_val}`" if model_val else "default"
             await push_message("system", f"✅ Model switched to {label}", source="web",
@@ -302,7 +302,7 @@ async def handle_web_command(command: str, ws: WebSocket):
                             source="web", session_id=sess["id"],
                         )
                 except Exception:
-                    pass
+                    logger.debug("Couldn't check Ollama's installed models", exc_info=True)
         return
 
     # --- focus:{sid} ---

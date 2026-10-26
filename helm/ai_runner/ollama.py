@@ -51,7 +51,7 @@ def installed_models() -> list[str]:
     try:
         r = subprocess.run(["ollama", "list"], capture_output=True, text=True,
                            timeout=5, **hidden_kwargs())
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, ValueError):   # ValueError: odd output bytes
         return []
     return [line.split()[0] for line in r.stdout.strip().splitlines()[1:] if line.split()]
 

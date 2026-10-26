@@ -149,7 +149,7 @@ def _tts_offline(text: str) -> bytes:
         try:
             engine.stop()
         except Exception:
-            pass
+            logger.debug('pyttsx3: stopping the engine failed', exc_info=True)
         with open(out_path, "rb") as f:
             return f.read()
     finally:

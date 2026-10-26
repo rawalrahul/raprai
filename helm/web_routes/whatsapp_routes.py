@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import helm.whatsapp_bridge as wa
+from helm.config import logger
 
 router = APIRouter()
 
@@ -40,5 +41,8 @@ async def whatsapp_settings(req: WhatsAppSettings):
         from helm.telegram_bot.commands import _update_env
         _update_env("WHATSAPP_ALLOWED_NUMBERS", nums)
     except Exception:
-        pass
+        # Applied, but a restart would bring back the old list: say so.
+        logger.error("WhatsApp: couldn't save the allowed numbers to .env", exc_info=True)
+        return JSONResponse({"error": "Couldn't save the allowed numbers, so they last only "
+                                      "until RAPR restarts. Check the log."}, status_code=500)
     return JSONResponse(wa.public_state())

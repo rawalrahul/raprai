@@ -362,7 +362,7 @@ async def save_token(plugin_id: str, request: Request):
             import asyncio
             asyncio.ensure_future(mgr.reload_servers())
     except Exception:
-        pass
+        logger.warning("Couldn't reload the MCP servers after connecting a plugin", exc_info=True)
 
     return JSONResponse({"ok": True, "plugin_id": plugin_id, "connected": True})
 

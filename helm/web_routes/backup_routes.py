@@ -170,7 +170,7 @@ async def get_backup_credentials(provider: str):
                 cid = cid or p.app_key
                 csec = csec or p.app_secret
         except Exception:
-            pass
+            logger.debug("Backup: couldn't read the provider's app credentials", exc_info=True)
 
     return JSONResponse({
         "configured": bool(cid and csec),
@@ -299,12 +299,9 @@ async def backup_now(request: Request):
             results.append({"provider": p_name, "ok": False, "error": str(e)})
 
     # Cleanup temp backup file
-    try:
-        backup_dir = str(Path(backup["path"]).parent)
-        import shutil
-        shutil.rmtree(backup_dir, ignore_errors=True)
-    except Exception:
-        pass
+    backup_dir = str(Path(backup["path"]).parent)
+    import shutil
+    shutil.rmtree(backup_dir, ignore_errors=True)
 
     return JSONResponse({"ok": True, "results": results})
 

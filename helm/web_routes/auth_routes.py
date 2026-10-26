@@ -42,19 +42,11 @@ async def setup_status():
     vals = dotenv_values(env_path) if env_path.exists() else {}
 
     def _check_clis():
-        import subprocess
-        from helm.subprocess_utils import hidden_kwargs
         codex_ok = _find_cli("codex")
         ollama_ok = False
         if _find_cli("ollama"):
-            try:
-                result = subprocess.run(
-                    ["ollama", "list"], capture_output=True, text=True, timeout=5, **hidden_kwargs(),
-                )
-                lines = [l for l in result.stdout.splitlines()[1:] if l.strip()]
-                ollama_ok = len(lines) > 0
-            except Exception:
-                pass
+            from helm.ai_runner.ollama import installed_models
+            ollama_ok = bool(installed_models())
         return {
             "gemini_ready":  _find_cli("gemini"),
             "antigravity_ready": _agy_installed(),

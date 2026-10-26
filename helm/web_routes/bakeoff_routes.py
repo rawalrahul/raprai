@@ -62,7 +62,7 @@ def _stop_running(b: bakeoff.BakeOff) -> None:
         if proc is not None and proc.poll() is None:
             try:
                 proc.kill()
-            except Exception:
+            except OSError:
                 pass
 
 

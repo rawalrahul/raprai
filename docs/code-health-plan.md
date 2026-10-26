@@ -125,8 +125,8 @@ lists under D2, D3 and D4; each batch deletes its own lines from that list.
 | B1 | Browser smoke test in CI | Done (#108) |
 | E1 | Ship the fonts | Done (#110) |
 | B2 | Split `complete.js` | Done (#109) |
-| C3 | One runner per AI type | This PR |
-| D2 | Swallowed errors: web routes | |
+| C3 | One runner per AI type | Done (#111) |
+| D2 | Swallowed errors: web routes | This PR |
 | C4 | Prompt preparation out of `process_message` | |
 | D3 | Swallowed errors: running AIs | |
 | D4 | Swallowed errors: the rest; S110 on everywhere | |

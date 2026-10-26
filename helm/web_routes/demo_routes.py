@@ -16,7 +16,7 @@ try:
     import static_ffmpeg as _static_ffmpeg
     _static_ffmpeg.add_paths()
 except Exception:
-    pass
+    logger.debug("static_ffmpeg isn't available; using ffmpeg from PATH", exc_info=True)
 
 router = APIRouter(prefix="/api/demos", tags=["demos"])
 
@@ -133,7 +133,7 @@ def _get_duration(video_path: Path) -> float | None:
             data = json.loads(result.stdout)
             return float(data["format"]["duration"])
     except Exception:
-        pass
+        logger.debug("Couldn't read the video's duration", exc_info=True)
     return None
 
 
