@@ -52,3 +52,26 @@ jobs:
         run: |
           python -m pip install ruff==0.17.2
           ruff check --output-format=github .
+
+  # The web UI in a real browser (tests/test_web_ui.py; skipped in the job above).
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-server.txt
+
+      - name: Install
+        run: |
+          python -m pip install -r requirements-server.txt pytest playwright==1.63.0
+          python -m playwright install --with-deps chromium
+
+      - name: Browser tests
+        env:
+          RAPR_HEADLESS: "1"
+        run: python -m pytest tests/test_web_ui.py -q
