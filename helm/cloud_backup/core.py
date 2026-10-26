@@ -221,7 +221,4 @@ def cleanup_temp_backups():
     """Remove any leftover temp backup directories."""
     import glob
     for d in glob.glob(os.path.join(tempfile.gettempdir(), "raprai_backup_*")):
-        try:
-            shutil.rmtree(d, ignore_errors=True)
-        except Exception:
-            pass
+        shutil.rmtree(d, ignore_errors=True)

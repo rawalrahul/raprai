@@ -50,7 +50,7 @@ class DropboxBackupProvider(BackupProvider):
                 self.app_key = self.app_key or load_token("BACKUP_DROPBOX_APP_KEY")
                 self.app_secret = self.app_secret or load_token("BACKUP_DROPBOX_APP_SECRET")
             except Exception:
-                pass
+                logger.warning("Backup: couldn't load the Dropbox app key and secret from the vault", exc_info=True)
         # Fall back to (empty) defaults
         self.app_key = self.app_key or self._DEFAULT_APP_KEY
         self.app_secret = self.app_secret or self._DEFAULT_APP_SECRET
@@ -160,8 +160,8 @@ class DropboxBackupProvider(BackupProvider):
             try:
                 body = json.loads(e.read().decode("utf-8"))
                 error_msg = body.get("error_summary", error_msg)
-            except Exception:
-                pass
+            except (ValueError, OSError, AttributeError):
+                pass  # not a JSON error body; keep the HTTP status
             logger.error("cloud_backup[dropbox]: upload failed: %s", error_msg)
             return {"ok": False, "remote_id": "", "error": error_msg}
 
@@ -230,8 +230,8 @@ class DropboxBackupProvider(BackupProvider):
             try:
                 body = json.loads(e.read().decode("utf-8"))
                 error_msg = body.get("error_summary", error_msg)
-            except Exception:
-                pass
+            except (ValueError, OSError, AttributeError):
+                pass  # not a JSON error body; keep the HTTP status
             logger.warning("cloud_backup[dropbox]: list failed: %s", error_msg)
             return []
 
@@ -280,8 +280,8 @@ class DropboxBackupProvider(BackupProvider):
             try:
                 body = json.loads(e.read().decode("utf-8"))
                 error_msg = body.get("error_summary", error_msg)
-            except Exception:
-                pass
+            except (ValueError, OSError, AttributeError):
+                pass  # not a JSON error body; keep the HTTP status
             logger.error("cloud_backup[dropbox]: download failed: %s", error_msg)
             return {"ok": False, "path": "", "error": error_msg}
 
@@ -326,8 +326,8 @@ class DropboxBackupProvider(BackupProvider):
             try:
                 body = json.loads(e.read().decode("utf-8"))
                 error_msg = body.get("error_summary", error_msg)
-            except Exception:
-                pass
+            except (ValueError, OSError, AttributeError):
+                pass  # not a JSON error body; keep the HTTP status
             logger.error("cloud_backup[dropbox]: delete failed: %s", error_msg)
             return {"ok": False, "error": error_msg}
 
@@ -423,8 +423,8 @@ class DropboxBackupProvider(BackupProvider):
             try:
                 body = json.loads(e.read().decode("utf-8"))
                 error_msg = body.get("error_description", error_msg)
-            except Exception:
-                pass
+            except (ValueError, OSError, AttributeError):
+                pass  # not a JSON error body; keep the HTTP status
             logger.error("cloud_backup[dropbox]: OAuth exchange failed: %s", error_msg)
             return {"ok": False, "error": error_msg}
 
@@ -487,8 +487,8 @@ class DropboxBackupProvider(BackupProvider):
             try:
                 body = json.loads(e.read().decode("utf-8"))
                 error_msg = body.get("error_description", error_msg)
-            except Exception:
-                pass
+            except (ValueError, OSError, AttributeError):
+                pass  # not a JSON error body; keep the HTTP status
             logger.error("cloud_backup[dropbox]: token refresh failed: %s", error_msg)
             raise
 

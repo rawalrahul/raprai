@@ -47,7 +47,7 @@ def _ensure_oauth_table():
         """)
         db.commit()
     except Exception:
-        pass
+        logger.warning("OAuth: couldn't create the pending-sign-in table", exc_info=True)
 
 
 def _persist_flow(state: str, flow_data: dict):
@@ -62,7 +62,8 @@ def _persist_flow(state: str, flow_data: dict):
         )
         db.commit()
     except Exception:
-        pass
+        # Still held in memory, so the sign-in works unless RAPR restarts first.
+        logger.warning("OAuth: couldn't save a pending sign-in", exc_info=True)
 
 
 def _pop_flow(state: str) -> dict | None:
@@ -80,7 +81,7 @@ def _pop_flow(state: str) -> dict | None:
         if row and not flow:
             flow = json.loads(row["flow_data"])
     except Exception:
-        pass
+        logger.warning("OAuth: couldn't read a pending sign-in", exc_info=True)
     return flow
 
 
@@ -99,7 +100,7 @@ def _cleanup_stale_flows():
         db.execute("DELETE FROM oauth_pending_flows WHERE created_at < ?", (cutoff,))
         db.commit()
     except Exception:
-        pass
+        logger.warning("OAuth: couldn't clear expired sign-ins", exc_info=True)
 
 
 OAUTH_PROXY_URL = os.environ.get(

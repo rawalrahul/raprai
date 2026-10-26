@@ -226,9 +226,11 @@ def migrate_env_tokens(token_env_keys: list[str], scrub_env: bool = True) -> int
                         from helm.web_routes.app import update_env
                         update_env(key, "vault-managed")
                     except Exception:
-                        pass
+                        logger.warning("Vault: %s is encrypted, but its plain-text copy is "
+                                       "still in .env", key, exc_info=True)
             except Exception:
-                pass
+                # The key keeps working from .env; it just isn't encrypted yet.
+                logger.warning("Vault: couldn't move %s into the vault", key, exc_info=True)
     return count
 
 

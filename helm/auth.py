@@ -18,6 +18,8 @@ from typing import Optional
 
 from fastapi import Request
 
+from helm.config import logger
+
 try:
     import bcrypt as _bcrypt
     _HAS_BCRYPT = True
@@ -101,7 +103,8 @@ def _auto_upgrade_hash(pin: str) -> None:
         os.environ["PIN_SALT"] = new_salt
         os.environ["PIN_HASH"] = new_hash
     except Exception:
-        pass  # non-critical — old hash still works
+        # The old hash still works; we try again at the next login.
+        logger.warning("Couldn't upgrade the PIN hash", exc_info=True)
 
 
 def verify_pin(pin: str) -> bool:
@@ -155,13 +158,18 @@ def _ensure_lockout_table():
         db.execute("CREATE INDEX IF NOT EXISTS idx_lockout_ip ON lockout_attempts(ip)")
         db.commit()
     except Exception:
-        pass
+        logger.warning("Couldn't create the PIN lockout table", exc_info=True)
 
 
 def _prune(ip: str) -> list:
-    """Return only the recent failure timestamps for *ip* (within lockout window)."""
+    """Return only the recent failure timestamps for *ip* (within lockout window).
+
+    Counts this process's own record as well as the database's, so a failed
+    database write can't turn the lockout off.
+    """
     now = time.time()
     cutoff = now - LOCKOUT_SECONDS
+    in_memory = [t for t in _failed.get(ip, []) if t > cutoff]
 
     # Update in-memory cache from DB
     try:
@@ -175,10 +183,10 @@ def _prune(ip: str) -> list:
             "SELECT failed_at FROM lockout_attempts WHERE ip = ? AND failed_at >= ?",
             (ip, cutoff),
         ).fetchall()
-        recent = [r["failed_at"] for r in rows]
+        recent = sorted({r["failed_at"] for r in rows} | set(in_memory))
     except Exception:
-        # Fallback to in-memory if DB unavailable
-        recent = [t for t in _failed.get(ip, []) if t > cutoff]
+        logger.warning("Couldn't read PIN lockout attempts; using this process's", exc_info=True)
+        recent = in_memory
 
     _failed[ip] = recent
     return recent
@@ -202,7 +210,8 @@ def record_failure(ip: str) -> None:
         )
         db.commit()
     except Exception:
-        pass
+        # Still counted in memory (see _prune), just not across a restart.
+        logger.warning("Couldn't save a failed PIN attempt", exc_info=True)
 
 
 def clear_failures(ip: str) -> None:
@@ -214,7 +223,7 @@ def clear_failures(ip: str) -> None:
         db.execute("DELETE FROM lockout_attempts WHERE ip = ?", (ip,))
         db.commit()
     except Exception:
-        pass
+        logger.warning("Couldn't clear failed PIN attempts", exc_info=True)
 
 
 def seconds_until_unlock(ip: str) -> int:
@@ -245,26 +254,27 @@ def load_lockout_from_db():
         for row in rows:
             _failed.setdefault(row["ip"], []).append(row["failed_at"])
     except Exception:
-        pass
+        logger.warning("Couldn't load PIN lockout attempts", exc_info=True)
 
 # ---------------------------------------------------------------------------
 # Session tokens (SQLite-backed for persistence across restarts)
 # ---------------------------------------------------------------------------
 
 def issue_token() -> str:
-    """Generate a new session token and persist it to the database."""
+    """Generate a new session token and persist it to the database.
+
+    Raises if it can't be saved: tokens are only ever checked against the
+    database, so an unsaved one would log you in and straight back out.
+    """
     from helm.db import get_db
     token  = secrets.token_urlsafe(32)
     expiry = time.time() + SESSION_DAYS * 86_400
-    try:
-        db = get_db()
-        db.execute(
-            "INSERT INTO auth_sessions (token, expires_at) VALUES (?, ?)",
-            (token, expiry),
-        )
-        db.commit()
-    except Exception:
-        pass  # Token still works in-memory for this process
+    db = get_db()
+    db.execute(
+        "INSERT INTO auth_sessions (token, expires_at) VALUES (?, ?)",
+        (token, expiry),
+    )
+    db.commit()
     return token
 
 
@@ -290,13 +300,11 @@ def is_valid_token(token: Optional[str]) -> bool:
 
 
 def revoke_token(token: str) -> None:
+    """Delete a session. Raises if it can't: the session would stay valid."""
     from helm.db import get_db
-    try:
-        db = get_db()
-        db.execute("DELETE FROM auth_sessions WHERE token = ?", (token,))
-        db.commit()
-    except Exception:
-        pass
+    db = get_db()
+    db.execute("DELETE FROM auth_sessions WHERE token = ?", (token,))
+    db.commit()
 
 # ---------------------------------------------------------------------------
 # FastAPI helpers

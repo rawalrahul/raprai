@@ -51,7 +51,7 @@ class GDriveBackupProvider(BackupProvider):
                 self.client_id = self.client_id or load_token("BACKUP_GDRIVE_CLIENT_ID")
                 self.client_secret = self.client_secret or load_token("BACKUP_GDRIVE_CLIENT_SECRET")
             except Exception:
-                pass
+                logger.warning("Backup: couldn't load the Google Drive client ID and secret from the vault", exc_info=True)
         # Fall back to (empty) defaults
         self.client_id = self.client_id or self._DEFAULT_CLIENT_ID
         self.client_secret = self.client_secret or self._DEFAULT_CLIENT_SECRET
@@ -237,8 +237,8 @@ class GDriveBackupProvider(BackupProvider):
             err = f"HTTP {e.code}: {e.reason}"
             try:
                 err = json.loads(e.read().decode()).get("error", {}).get("message", err)
-            except Exception:
-                pass
+            except (ValueError, OSError, AttributeError):
+                pass  # not a JSON error body; keep the HTTP status
             logger.error("cloud_backup[gdrive]: upload failed: %s", err)
             return {"ok": False, "remote_id": "", "error": err}
         except Exception as e:

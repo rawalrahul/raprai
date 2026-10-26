@@ -95,14 +95,16 @@ Batches, the most important first:
 - **D2, web routes (~56):** `helm/web_routes/`, `web_app.py`.
 - **D3, running AIs (~63):** `helm/ai_runner/`, `helm/telegram_bot/`, `helm/agent/`.
 - **D4, the rest (~104):** `helm/learning/`, `helm/mcp/` and the remaining modules.
-  Then S110 is on for the whole codebase.
+
+Since D1, S110 is on for the whole codebase except the files `ruff.toml` still
+lists under D2, D3 and D4; each batch deletes its own lines from that list.
 
 ## Order and status
 
 | Step | What | Status |
 |---|---|---|
-| A1 | Unused frontend files; UI files off the rate limit | This PR |
-| D1 | Swallowed errors: security and data | Next |
+| A1 | Unused frontend files; UI files off the rate limit | Done (#104) |
+| D1 | Swallowed errors: security and data | This PR |
 | C1 | Tests for `process_message` and `_run_single_ai` | |
 | C2 | Slash commands out of `process_message` | |
 | B1 | Browser smoke test in CI | |
