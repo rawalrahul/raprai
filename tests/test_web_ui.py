@@ -31,7 +31,9 @@ def rapr_url(tmp_path_factory):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    env = {**os.environ, "RAPR_HEADLESS": "1", "RAPR_DATA_DIR": str(data),
+    # No PIN: some tests set PIN_* in os.environ, and a PIN would send the page to /login.
+    env = {**{k: v for k, v in os.environ.items() if not k.startswith("PIN_")},
+           "RAPR_HEADLESS": "1", "RAPR_DATA_DIR": str(data),
            "WEB_HOST": "127.0.0.1", "WEB_PORT": str(port),
            "OUTPUT_IDLE_TIMEOUT": "0.5"}            # a shell reply is done after 0.5s of quiet
     log = open(data / "server.log", "w")

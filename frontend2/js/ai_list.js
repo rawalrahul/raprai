@@ -1,8 +1,8 @@
 /**
  * One list of AIs for every screen (group chats, crews, bake-off, voices).
  *
- * liveSessions(): the sessions the app shows right now (complete.js keeps them in
- *   `_sessions`; the older State store is used only if that's missing).
+ * liveSessions(): the sessions the app shows right now (core.js keeps them in
+ *   `_sessions`).
  * availableAis(): every AI you can use: Claude plus each installed integration
  *   that's ready, plus any AI that already has an open session. Each entry says
  *   which open session it would use, if any.
@@ -10,7 +10,6 @@
 
 function liveSessions() {
   if (typeof _sessions !== 'undefined' && Array.isArray(_sessions) && _sessions.length) return _sessions;
-  if (typeof State !== 'undefined' && Array.isArray(State.sessions) && State.sessions.length) return State.sessions;
   return [];
 }
 

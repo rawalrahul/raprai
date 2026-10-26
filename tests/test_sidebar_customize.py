@@ -37,5 +37,5 @@ def test_customize_loads_before_paint_and_sidebar_after_the_app():
     html = _html()
     head = html.split("</head>")[0]
     assert "/js/customize.js" in head
-    assert html.index("/js/sidebar.js") > html.index("/js/complete.js")
+    assert html.index("/js/sidebar.js") > html.index("/js/layout.js")         # the main script's last part
     assert html.index("/js/sidebar.js") > html.index("/js/packages.js")

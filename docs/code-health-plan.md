@@ -120,9 +120,9 @@ lists under D2, D3 and D4; each batch deletes its own lines from that list.
 | D1 | Swallowed errors: security and data | Done (#105) |
 | C1 | Tests for `process_message` and `_run_single_ai` | Done (#106) |
 | C2 | Slash commands out of `process_message` | Done (#107) |
-| B1 | Browser smoke test in CI | This PR |
+| B1 | Browser smoke test in CI | Done (#108) |
 | E1 | Ship the fonts | |
-| B2 | Split `complete.js` | |
+| B2 | Split `complete.js` | This PR |
 | C3 | One runner per AI type | |
 | D2 | Swallowed errors: web routes | |
 | C4 | Prompt preparation out of `process_message` | |
