@@ -119,8 +119,8 @@ lists under D2, D3 and D4; each batch deletes its own lines from that list.
 | A1 | Unused frontend files; UI files off the rate limit | Done (#104) |
 | D1 | Swallowed errors: security and data | Done (#105) |
 | C1 | Tests for `process_message` and `_run_single_ai` | Done (#106) |
-| C2 | Slash commands out of `process_message` | This PR |
-| B1 | Browser smoke test in CI | |
+| C2 | Slash commands out of `process_message` | Done (#107) |
+| B1 | Browser smoke test in CI | This PR |
 | E1 | Ship the fonts | |
 | B2 | Split `complete.js` | |
 | C3 | One runner per AI type | |
