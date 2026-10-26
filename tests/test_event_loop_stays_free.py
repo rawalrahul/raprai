@@ -41,7 +41,7 @@ def test_backup_provider_calls_run_off_the_loop():
 
     class SlowProvider:
         async def upload(self, path, folder, name):
-            time.sleep(0.5)          # what the providers' urllib calls do
+            time.sleep(0.5)  # noqa: ASYNC251 -- blocks, like the providers' urllib calls
             return {"ok": True, "remote_id": f"{folder}/{name}"}
 
     result, ticks = asyncio.run(_ticks_while(off_loop(SlowProvider().upload, "p", "/f", "b.zip")))
