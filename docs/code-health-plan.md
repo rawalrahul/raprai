@@ -78,6 +78,19 @@ without breaking those functions up would only move the mess.
   correction detection move to `ai_runner/prompt.py`, one function per step.
   What's left in `process_message` reads as the list of steps.
 
+### Found while writing C1's tests (behaviour pinned as it is; not changed yet)
+
+- **Claude's own cost is ignored for usage stats.** Claude Code reports what a
+  reply cost; RAPR's usage stats (and so the budget page) price the tokens
+  with its own table instead. The reported cost only reaches the learning
+  system.
+- **An AI that exits with an error but prints text "succeeds".** Only a silent
+  non-zero exit, or text that looks like a CLI problem, counts as a failure;
+  anything else is shown as the reply and isn't retried.
+- **Some older tests share a database by accident.** They reuse a connection
+  an earlier test left open. The new harness puts it back so they keep
+  working; each should get its own database.
+
 ## Track D: swallowed errors
 
 Each `except Exception: pass` becomes one of:
@@ -104,8 +117,8 @@ lists under D2, D3 and D4; each batch deletes its own lines from that list.
 | Step | What | Status |
 |---|---|---|
 | A1 | Unused frontend files; UI files off the rate limit | Done (#104) |
-| D1 | Swallowed errors: security and data | This PR |
-| C1 | Tests for `process_message` and `_run_single_ai` | |
+| D1 | Swallowed errors: security and data | Done (#105) |
+| C1 | Tests for `process_message` and `_run_single_ai` | This PR |
 | C2 | Slash commands out of `process_message` | |
 | B1 | Browser smoke test in CI | |
 | E1 | Ship the fonts | |
