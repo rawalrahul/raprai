@@ -28,8 +28,30 @@ router = APIRouter()
 # WebSocket endpoint
 # ---------------------------------------------------------------------------
 
+def _from_other_site(websocket: WebSocket) -> bool:
+    """True if a web page on another site opened this connection.
+
+    Browsers don't apply CORS to WebSockets, so without a PIN any site you
+    visit could connect to ws://localhost:<port>/ws and chat with your AIs.
+    Browsers always send Origin; other clients (scripts, Kelvin) usually don't.
+    """
+    from urllib.parse import urlsplit
+    origin = websocket.headers.get("origin", "")
+    if not origin:
+        return False
+    host = websocket.headers.get("host", "")
+    return urlsplit(origin).netloc.lower() != host.lower()
+
+
 @router.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket):
+    # With a PIN the login cookie keeps other sites out (it isn't sent with
+    # their requests); without one, only the RAPR page itself may connect.
+    if not _auth.pin_is_set() and _from_other_site(websocket):
+        logger.warning("WS rejected: opened from another site (%s)",
+                       websocket.headers.get("origin", ""))
+        await websocket.close(code=4403, reason="other_origin")
+        return
     # Reject unauthenticated WebSocket connections when a PIN is configured
     if _auth.pin_is_set():
         token = websocket.cookies.get(_auth.COOKIE_NAME)
