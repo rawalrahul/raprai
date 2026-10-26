@@ -217,7 +217,7 @@ async def resume_interrupted_runs() -> None:
             try:
                 await broadcast_run_update(run)
             except Exception:
-                pass
+                logger.debug("Couldn't broadcast the interrupted run", exc_info=True)
             await save_run(run)
             _st.agent_runs.pop(run["id"], None)
             count += 1

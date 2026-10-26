@@ -9,6 +9,8 @@ _pending_inputs: dict[tuple[str, str | None], asyncio.Future] = {}
 _pending_input_sessions: dict[str, tuple[str, str | None]] = {}
 from collections import deque as _deque
 
+from helm.config import logger
+
 _NOTIFIED_MAX = 1000
 _telegram_notified_queue: _deque[str] = _deque()
 _telegram_notified_set: set[str] = set()
@@ -122,7 +124,7 @@ async def execute_input_node(node: dict, run: dict, context: str) -> str:
                 session_id=session_id,
             )
         except Exception:
-            pass
+            logger.warning("Agent input: couldn't post the question to the chat", exc_info=True)
     await _notify_telegram_input_needed(run, node, question, session_id)
     user_input = await wait_for_input(run["id"], timeout=timeout, node_id=node["id"])
     return user_input
@@ -159,7 +161,7 @@ async def _notify_telegram_input_needed(
             from helm.telegram_bot import session_controls_keyboard
             reply_markup = session_controls_keyboard()
         except Exception:
-            pass
+            logger.debug("Agent input: couldn't build the Telegram keyboard", exc_info=True)
 
         await _st.telegram_app.bot.send_message(
             chat_id=_st.telegram_chat_id,
@@ -177,9 +179,9 @@ async def _notify_telegram_input_needed(
                 session_id=session_id,
             )
         except Exception:
-            pass
+            logger.warning("Agent input: couldn't post the question to the chat", exc_info=True)
     except Exception:
-        pass
+        logger.warning("Agent input: couldn't tell Telegram a workflow is waiting for input", exc_info=True)
 
 
 async def extract_file_text_from_telegram(

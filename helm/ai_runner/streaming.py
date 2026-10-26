@@ -140,7 +140,7 @@ def _safe(emit: Callable[[dict], None], ev: dict) -> None:
     try:
         emit(ev)
     except Exception:
-        pass
+        logger.debug("Activity event handler failed", exc_info=True)
 
 
 def run_claude_stream(cmd: list, cwd: str, sess: dict,
@@ -186,7 +186,7 @@ def run_claude_stream(cmd: list, cwd: str, sess: dict,
             killed["v"] = True
             try:
                 proc.kill()
-            except Exception:
+            except OSError:
                 pass
 
     if timeout:
@@ -233,13 +233,13 @@ def run_claude_stream(cmd: list, cwd: str, sess: dict,
     except Exception as exc:
         try:
             proc.kill()
-        except Exception:
+        except OSError:
             pass
         raise StreamUnavailable(f"stream read failed: {exc}")
     finally:
         try:
             proc.wait(timeout=5)
-        except Exception:
+        except subprocess.TimeoutExpired:
             pass
         sess["proc"] = None
 
@@ -290,7 +290,7 @@ def _stream_cli(scmd, cwd, sess, stdin_text, extra_env, timeout, on_event, tag="
             killed["v"] = True
             try:
                 proc.kill()
-            except Exception:
+            except OSError:
                 pass
 
     if timeout:
@@ -304,7 +304,7 @@ def _stream_cli(scmd, cwd, sess, stdin_text, extra_env, timeout, on_event, tag="
             try:
                 proc.stdin.write(stdin_text)
                 proc.stdin.close()
-            except Exception:
+            except (OSError, ValueError):
                 pass
         for line in proc.stdout:
             _lines += 1
@@ -322,17 +322,17 @@ def _stream_cli(scmd, cwd, sess, stdin_text, extra_env, timeout, on_event, tag="
                 try:
                     on_event(ev)
                 except Exception:
-                    pass
+                    logger.debug("Stream event handler failed", exc_info=True)
     except Exception as exc:
         try:
             proc.kill()
-        except Exception:
+        except OSError:
             pass
         raise StreamUnavailable(f"stream read failed: {exc}")
     finally:
         try:
             proc.wait(timeout=5)
-        except Exception:
+        except subprocess.TimeoutExpired:
             pass
         sess["proc"] = None
 

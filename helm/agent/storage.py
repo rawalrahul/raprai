@@ -179,7 +179,7 @@ def load_recent_runs(agent_id: str, limit: int = 20) -> list[dict]:
             try:
                 runs.append(json.loads(row["result_json"]))
             except Exception:
-                pass
+                logger.warning("Skipping a saved agent run that isn't valid JSON", exc_info=True)
         return runs
     except Exception as exc:
         logger.warning("Could not load runs for agent %s: %s", agent_id, exc)

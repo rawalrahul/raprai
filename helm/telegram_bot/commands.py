@@ -9,6 +9,7 @@ Covers: tg_start, tg_menu, tg_launch, tg_claude, tg_codex, tg_gemini, tg_stop_ai
 import asyncio
 import json
 import os
+import shutil
 import time
 from datetime import datetime
 from typing import Optional
@@ -656,7 +657,7 @@ async def perform_resume(message, date_str: str = "") -> None:
                     if not last_ai:
                         last_ai = first.get("ai") or None
         except Exception:
-            pass
+            logger.debug("Couldn't read the last session for /resume", exc_info=True)
 
     # --- Build context string from last 10 exchanges ---
     turns = messages[-10:]
@@ -936,7 +937,7 @@ async def tg_text(update, context):
                     reply_markup=session_controls_keyboard(),
                 )
             except Exception:
-                pass
+                logger.debug("Couldn't send the error to Telegram", exc_info=True)
 
     asyncio.create_task(_tg_fire())
 
@@ -1016,11 +1017,7 @@ async def tg_voice(update, context):
         )
 
         # Clean up temp files
-        try:
-            os.remove(ogg_path)
-            os.rmdir(tmp_dir)
-        except Exception:
-            pass
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
         if not transcript or not transcript.strip():
             await update.message.reply_text("⚠️ Could not transcribe audio — no speech detected.",
@@ -1082,7 +1079,7 @@ async def tg_voice(update, context):
                         reply_markup=session_controls_keyboard(),
                     )
                 except Exception:
-                    pass
+                    logger.debug("Couldn't send the error to Telegram", exc_info=True)
 
         asyncio.create_task(_tg_voice_fire())
 
@@ -1205,7 +1202,7 @@ async def tg_file(update, context):
                         reply_markup=session_controls_keyboard(),
                     )
                 except Exception:
-                    pass
+                    logger.debug("Couldn't send the error to Telegram", exc_info=True)
 
         asyncio.create_task(_tg_file_fire())
     else:

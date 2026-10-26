@@ -31,23 +31,6 @@ select = [
 # Silently swallowed errors (S110): docs/code-health-plan.md, track D. These
 # files still have some. Each batch fixes its files and deletes their lines;
 # everything else, new files included, is already held to the rule.
-# D3: running AIs (16 files)
-"helm/agent/executor.py" = ["S110"]
-"helm/agent/memory.py" = ["S110"]
-"helm/agent/nodes/http.py" = ["S110"]
-"helm/agent/nodes/input_node.py" = ["S110"]
-"helm/agent/nodes/manager.py" = ["S110"]
-"helm/agent/nodes/shell.py" = ["S110"]
-"helm/agent/runner.py" = ["S110"]
-"helm/agent/storage.py" = ["S110"]
-"helm/ai_runner/core.py" = ["S110"]
-"helm/ai_runner/helpers.py" = ["S110"]
-"helm/ai_runner/nemoclaw_bridge.py" = ["S110"]
-"helm/ai_runner/ollama.py" = ["S110"]
-"helm/ai_runner/streaming.py" = ["S110"]
-"helm/telegram_bot/callbacks.py" = ["S110"]
-"helm/telegram_bot/commands.py" = ["S110"]
-"helm/telegram_bot/groups.py" = ["S110"]
 # D4: the rest (57 files)
 "helm/bakeoff.py" = ["S110"]
 "helm/brief.py" = ["S110"]

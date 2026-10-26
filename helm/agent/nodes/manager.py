@@ -296,7 +296,7 @@ async def execute_manager_node(node: dict, run: dict, context: str) -> str:
         from helm.broadcast import push_message
         await push_message("system", question[:4000], source="agent", session_id=manager_session["id"])
     except Exception:
-        pass
+        logger.warning("Agent manager: couldn't post its question to the chat", exc_info=True)
 
     run["status"] = "waiting_input"
 
@@ -336,7 +336,7 @@ async def execute_manager_node(node: dict, run: dict, context: str) -> str:
                 session_id=run.get("manager_session_id"),
             )
         except Exception:
-            pass
+            logger.debug("Agent manager: couldn't post its note to the chat", exc_info=True)
         return "APPROVED"
     if fix:
         # Update live agent definition

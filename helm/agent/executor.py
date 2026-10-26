@@ -702,7 +702,7 @@ async def _execute_node(run: dict, node: dict, semaphore: asyncio.Semaphore):
                 from helm.agent.memory import after_node_complete
                 await after_node_complete(run, node)
             except Exception:
-                pass
+                logger.debug("Agent memory: couldn't index the node output", exc_info=True)
 
             elapsed = f"{node['elapsed_seconds']:.1f}s"
             logger.info(
@@ -1009,7 +1009,7 @@ async def execute_agent_run(run_id: str) -> None:
         watchdog_task.cancel()
         try:
             await asyncio.wait_for(asyncio.gather(watchdog_task, return_exceptions=True), timeout=1)
-        except Exception:
+        except asyncio.TimeoutError:
             pass
 
         if run["status"] in ("running", "waiting_input"):
@@ -1044,7 +1044,7 @@ async def execute_agent_run(run_id: str) -> None:
             from helm.agent.memory import write_run_observation
             await write_run_observation(run)
         except Exception:
-            pass
+            logger.debug("Agent memory: couldn't save the run observation", exc_info=True)
 
         progress = {s: 0 for s in ("completed", "failed", "skipped")}
         for n in run["nodes"]:

@@ -141,7 +141,7 @@ def _detect_correction(text: str, sess: dict, ai: str, task_type: str) -> None:
                 weight=weight,
             )
         except Exception:
-            pass
+            logger.debug("Learning: couldn't record the correction in routing stats", exc_info=True)
 
         # Mine antipattern from correction content when negative
         if is_negative and len(text) > 10:
@@ -165,15 +165,14 @@ def _detect_correction(text: str, sess: dict, ai: str, task_type: str) -> None:
                 )
                 _append_antipattern(task_type, antipattern)
             except Exception:
-                pass
+                logger.debug("Learning: couldn't save the correction as an antipattern", exc_info=True)
 
-        from helm.config import logger
         logger.info(
             "Correction detected: type=%s ai=%s task_type=%s weight=%.1f text=%r",
             feedback_type, ai, task_type, weight, text[:80],
         )
     except Exception:
-        pass
+        logger.debug("Learning: correction detection failed", exc_info=True)
 
 # Match run_ai_popen's error wrapper: "(error: ...)"
 _POPEN_ERROR_PATTERN = re.compile(r"^\(error:")
@@ -374,7 +373,7 @@ def _find_available_ais(exclude: str) -> list[str]:
             if is_backend_available(ai_key):
                 available.append(ai_key)
         except Exception:
-            pass
+            logger.debug("Couldn't check whether %s is available", ai_key, exc_info=True)
 
     return available
 
@@ -502,7 +501,7 @@ if not _is_bundled():
     try:
         _ensure_doc_packages()
     except Exception:
-        pass
+        logger.warning("Couldn't pre-install the document packages", exc_info=True)
 
 
 # A CLI saying the chosen model can't be used (wrong plan, retired, unknown).
@@ -592,7 +591,7 @@ def kill_session_proc(sess: dict) -> None:
     if proc is not None:
         try:
             proc.kill()
-        except Exception:
+        except OSError:
             pass
         sess["proc"] = None
         # Tell streaming wrappers this was a deliberate stop — they must not

@@ -58,7 +58,7 @@ async def forward_to_telegram(text: str, reply_markup=None):
                 from helm.telegram_bot import session_controls_keyboard
                 reply_markup = session_controls_keyboard()
             except Exception:
-                pass
+                logger.debug("Couldn't build the Telegram keyboard", exc_info=True)
         async with _tg_send_lock:
             try:
                 await _st.telegram_app.bot.send_message(
@@ -149,7 +149,7 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
                           else f"🖥️ You (web): {prompt_text}"),
                 )
             except Exception:
-                pass
+                logger.debug("Couldn't echo your message to Telegram", exc_info=True)
 
         # Format elapsed time
         if elapsed < 60:
@@ -206,7 +206,7 @@ async def tg_progress_notify(sess: dict, output: str, elapsed: float, source: st
                     reply_markup=_kb,
                 )
             except Exception:
-                pass
+                logger.debug("Couldn't send the empty-reply note to Telegram", exc_info=True)
 
 
 _tg_progress_notify = tg_progress_notify  # legacy alias
