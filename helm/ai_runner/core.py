@@ -1874,6 +1874,16 @@ async def _dispatch_with_recovery(ai: str, sess: dict, text: str, safe_text: str
         )
         return output, ai
 
+    # A look for your brief runs once, on the AI you picked: another AI has other
+    # apps, and its answer (e.g. a PR about rate limits) can read like a CLI error.
+    # helm/brief.py reports a run that didn't work as a problem instead.
+    if sess.get("read_only"):
+        output = await _run_single_ai(
+            ai, sess, text, safe_text, cwd, terminal, source, sid,
+            snapshot_dir, handle_diff,
+        )
+        return output, ai
+
     # ── Retry loop with the primary AI ──────────────────────────────────
     last_output = ""
     max_retries = _max_retries()

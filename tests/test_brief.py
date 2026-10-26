@@ -298,3 +298,28 @@ def test_mcp_clients_can_read_the_latest_brief(data):
     out = mcp.tool_latest_brief({}, None)
     assert "1. 🟡 Reply to Dana (Gmail)" in out and "/do <number>" in out
     assert mcp.TOOLS["latest_brief"][0]["annotations"]["readOnlyHint"] is True
+
+
+def test_a_brief_look_runs_once_on_the_ai_you_picked(monkeypatch):
+    """Codex's answer about a rate-limit PR reads like a CLI error; it must not be
+    retried or handed to Claude, which has other apps."""
+    import helm.ai_runner.core as core
+    calls = []
+
+    async def fake_run(ai, *args, **kwargs):
+        calls.append(ai)
+        return '{"items": [{"title": "PR #212 adds rate-limit middleware"}]}'
+
+    async def nothing(*a, **k):
+        return None
+    monkeypatch.setattr(core, "_run_single_ai", fake_run)
+    monkeypatch.setattr(core, "_find_available_ais", lambda ai: ["claude"])
+    monkeypatch.setattr(core.asyncio, "sleep", nothing)
+    monkeypatch.setattr(core, "push_message", nothing)
+    monkeypatch.setattr(core, "push_agent_error", nothing)
+    monkeypatch.setitem(_st.integrations, "codex", {"name": "Codex"})
+    assert core._is_failure('{"items": [{"title": "PR #212 adds rate-limit middleware"}]}')   # why it matters
+    sess = {"id": "s1", "ai": "codex", "read_only": True}
+    out, used = asyncio.run(core._dispatch_with_recovery(
+        "codex", sess, "look", "look", ".", None, "brief", "s1", None, None))
+    assert used == "codex" and calls == ["codex"] and "rate-limit" in out
