@@ -1267,3 +1267,33 @@ async def _run_ollama_agent(sess: dict, text: str, source: str, sid: str) -> str
                      _total_prompt_tokens + _total_eval_tokens)
 
     return final_output
+
+
+async def run_ollama(ai: str, sess: dict, text: str, safe_text: str,
+                     source: str, sid: str) -> str:
+    """Run one message through the local Ollama agent and show its answer."""
+    from helm.broadcast import push_thinking
+    from helm.skills import auto_create_skill_template
+    from .core import _is_coherent_task, _is_failure, _self_heal_with_skill
+
+    await push_thinking(True, ai, session_id=sid)
+    skill_matched = detect_skill(text)
+    output = await _run_ollama_agent(sess, safe_text, source, sid)
+    await push_thinking(False, session_id=sid)
+    if not _is_failure(output):
+        await push_message("assistant", output, ai=ai, source=source, session_id=sid)
+        if not skill_matched and _is_coherent_task(text):
+            asyncio.create_task(
+                asyncio.to_thread(auto_create_skill_template, text, "ollama", output)
+            )
+    else:
+        # Clear conversation history after a failed turn so the next
+        # request starts fresh — stale error context confuses the model.
+        sess.pop("ollama_messages", None)
+        # Self-healing: AI failed and no skill existed → ask Claude to create one
+        if not skill_matched:
+            healed = await _self_heal_with_skill(ai, sess, text, safe_text,
+                                                 source, sid, output)
+            if healed:
+                return healed
+    return output
