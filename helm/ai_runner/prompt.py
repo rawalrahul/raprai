@@ -7,6 +7,34 @@ from helm.plugins import inject_plugin_context
 from helm.skills import inject_skill_prefix
 
 
+_SAFETY_PREAMBLE = (
+    "\n[SAFETY RULE — FILE DELETION]\n"
+    "You MUST NEVER delete, remove, or overwrite any file or directory without "
+    "explicitly asking the user for permission first and receiving confirmation. "
+    "This applies to ALL destructive operations: rm, del, rmdir, shutil.rmtree, "
+    "os.remove, os.unlink, pathlib.Path.unlink, rimraf, Remove-Item, etc. "
+    "Always list the exact files/folders you intend to delete and wait for the "
+    "user to say 'yes' before proceeding. If in doubt, DO NOT delete.\n\n"
+)
+
+
+def base_prompt(text: str, ai: str, clf: dict, background: bool = False) -> str:
+    """The safety rule, then *text*; learned playbooks and antipatterns go first,
+    except for background looks (your brief)."""
+    prompt = _SAFETY_PREAMBLE + text
+    if background:
+        return prompt
+    try:
+        from helm.learning.injector import build_context
+        learned = build_context(task_type=clf.get("task_type", "unknown"),
+                                fingerprint=clf.get("task_fingerprint"), ai=ai)
+        if learned:
+            prompt = learned + prompt
+    except Exception:
+        logger.debug("Couldn't add learned context to the prompt", exc_info=True)
+    return prompt
+
+
 def enrich_prompt(safe_text: str, text: str, ai: str, sess: dict) -> str:
     """Add the matching skill guide (not for read-only looks), plugin context,
     shared memory and your personalization to *safe_text*."""

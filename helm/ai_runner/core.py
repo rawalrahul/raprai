@@ -27,6 +27,8 @@ from helm.plugins import inject_plugin_context
 from helm.context_manager import update_token_count, check_and_compact
 
 from .helpers import tg_progress_notify
+from .prompt import _SAFETY_PREAMBLE, base_prompt  # noqa: F401  (tests import the preamble from here)
+from helm.learning.hooks import task_started, task_finished
 from . import slash_commands
 
 
@@ -439,16 +441,6 @@ def _extract_tokens_from_cli_output(output: str) -> dict | None:
 # ---------------------------------------------------------------------------
 # File deletion safety guard
 # ---------------------------------------------------------------------------
-_SAFETY_PREAMBLE = (
-    "\n[SAFETY RULE — FILE DELETION]\n"
-    "You MUST NEVER delete, remove, or overwrite any file or directory without "
-    "explicitly asking the user for permission first and receiving confirmation. "
-    "This applies to ALL destructive operations: rm, del, rmdir, shutil.rmtree, "
-    "os.remove, os.unlink, pathlib.Path.unlink, rimraf, Remove-Item, etc. "
-    "Always list the exact files/folders you intend to delete and wait for the "
-    "user to say 'yes' before proceeding. If in doubt, DO NOT delete.\n\n"
-)
-
 _DESTRUCTIVE_PATTERNS = re.compile(
     r'\b(?:'
     r'rm\s+-[rf]|rm\s+|rmdir\s+|del\s+/|Remove-Item|'
@@ -700,23 +692,7 @@ async def process_message(text: str, source: str = "web",
     cwd      = sess["cwd"]
     terminal = sess["terminal"]
 
-    # Learning telemetry — classify task + open record (fire-and-forget, never raises)
-    _task_id: str | None = None
-    _clf: dict = {"task_type": "unknown", "task_fingerprint": None}
-    try:
-        from helm.learning.classifier import classify_and_fingerprint
-        from helm.learning.telemetry import get_telemetry
-        _clf = classify_and_fingerprint(text)
-        _telem = get_telemetry()
-        _task_id = _telem.start(
-            session_id=sid or "",
-            ai=ai,
-            model=sess.get("model"),
-            prompt=text,
-            source=source,
-        )
-    except Exception:
-        pass
+    _task_id, _clf = task_started(text, ai, sess, sid, source)
 
     await push_message("user", text, ai=None, source=source, session_id=sid)
 
@@ -728,21 +704,7 @@ async def process_message(text: str, source: str = "web",
     if not _background:
         _detect_correction(text, sess, ai, _clf.get("task_type", "unknown"))
 
-    # Inject file-deletion safety preamble into every AI prompt
-    safe_text = _SAFETY_PREAMBLE + text
-
-    # Prepend learned context (playbooks + antipatterns) — never raises, never blocks
-    try:
-        from helm.learning.injector import build_context as _build_ctx
-        _learned_ctx = _build_ctx(
-            task_type=_clf.get("task_type", "unknown"),
-            fingerprint=_clf.get("task_fingerprint"),
-            ai=ai,
-        )
-        if _learned_ctx and not _background:
-            safe_text = _learned_ctx + safe_text
-    except Exception:
-        pass
+    safe_text = base_prompt(text, ai, _clf, background=_background)
 
     output = ""  # safe default — overwritten in every branch below
     actual_ai = ai  # tracks which AI actually produced the output (may change on fallback)
@@ -771,64 +733,9 @@ async def process_message(text: str, source: str = "web",
         record_usage_task(actual_ai, elapsed, prompt=text, output=output,
                           input_tokens=_tok_in, output_tokens=_tok_out)
 
-        # Learning telemetry — finish record + update routing stats (never raises)
-        try:
-            if _task_id is not None:
-                from helm.learning.telemetry import get_telemetry as _get_telem
-                from helm.learning.router import update_stats as _update_stats
-                _telem_fin = _get_telem()
-                _cost = float(sess.pop("_last_cost_usd", 0.0) or 0.0) if sess else 0.0
-                _success = not _is_infra_failure(output) if output else False
-                _telem_fin.finish(
-                    task_id=_task_id,
-                    duration=elapsed,
-                    input_tokens=_tok_in or 0,
-                    output_tokens=_tok_out or 0,
-                    output_text=(output or "")[:500],
-                    cost_usd=_cost,
-                    errors=None,
-                )
-                _update_stats(
-                    task_type=_clf.get("task_type", "unknown"),
-                    ai=actual_ai,
-                    duration_seconds=elapsed,
-                    success=_success,
-                    cost_usd=_cost,
-                )
-        except Exception:
-            pass
-
-        # Background looks (your brief) teach the learning system nothing (see above).
-        if not _background:
-            # Enqueue task record for async analysis (playbook generation, antipattern extraction)
-            try:
-                from helm.learning.analyzer import enqueue as _enqueue_analysis
-                from helm.learning.analyzer import drain_queue as _drain_analysis
-                _analysis_record = {
-                    "task_id": _task_id or "",
-                    "task_type": _clf.get("task_type", "unknown"),
-                    "task_fingerprint": _clf.get("task_fingerprint"),
-                    "task_summary": (text or "")[:200],
-                    "ai_used": actual_ai,
-                    "ai_model_version": sess.get("model") if sess else None,
-                    "duration_seconds": elapsed,
-                    "success": (not _is_infra_failure(output)) if output else False,
-                    "success_confidence": 0.7 if (output and not _is_infra_failure(output)) else 0.3,
-                    "errors_hit": [],
-                    "session_id": sid or "",
-                }
-                _enqueue_analysis(_analysis_record)
-                asyncio.create_task(_drain_analysis())
-            except Exception:
-                pass
-
-            # Feed cross-AI comparison buffer
-            try:
-                from helm.learning.cross_ai import record_task as _record_cross_ai
-                _record_cross_ai(_analysis_record)
-            except Exception:
-                pass
-
+        task_finished(_task_id, _clf, text=text, ai=actual_ai, sess=sess, sid=sid, output=output,
+                      success=bool(output) and not _is_infra_failure(output), elapsed=elapsed,
+                      tok_in=_tok_in, tok_out=_tok_out)
 
         # Audit: log any destructive file commands in the AI output
         if output:
