@@ -220,7 +220,15 @@ async def login_post(request: Request):
 
     # Correct PIN — issue token and set cookie
     _auth.clear_failures(ip)
-    token    = _auth.issue_token()
+    try:
+        token = _auth.issue_token()
+    except Exception:
+        logger.error("Login: couldn't save the session", exc_info=True)
+        return RedirectResponse(
+            url="/login?error=Your+PIN+is+right,+but+RAPR+couldn't+save+your+session.+"
+                "Check+the+log,+then+try+again.",
+            status_code=303,
+        )
     response = RedirectResponse(url="/", status_code=303)
     response.set_cookie(
         key      = _auth.COOKIE_NAME,
@@ -236,9 +244,15 @@ async def login_post(request: Request):
 async def logout(request: Request):
     """Revoke the current session and redirect to login."""
     token = _auth.get_token(request)
+    url = "/login"
     if token:
-        _auth.revoke_token(token)
-    response = RedirectResponse(url="/login", status_code=303)
+        try:
+            _auth.revoke_token(token)
+        except Exception:
+            logger.error("Logout: couldn't end the session", exc_info=True)
+            url = ("/login?error=Logged+out+of+this+browser,+but+RAPR+couldn't+end+the+session.+"
+                   "Check+the+log.")
+    response = RedirectResponse(url=url, status_code=303)
     response.delete_cookie(_auth.COOKIE_NAME)
     return response
 

@@ -46,7 +46,7 @@ class OneDriveBackupProvider(BackupProvider):
                 self.client_id = self.client_id or load_token("BACKUP_ONEDRIVE_CLIENT_ID")
                 self.client_secret = self.client_secret or load_token("BACKUP_ONEDRIVE_CLIENT_SECRET")
             except Exception:
-                pass
+                logger.warning("Backup: couldn't load the OneDrive client ID and secret from the vault", exc_info=True)
         # Fall back to (empty) defaults
         self.client_id = self.client_id or self._DEFAULT_CLIENT_ID
         self.client_secret = self.client_secret or self._DEFAULT_CLIENT_SECRET

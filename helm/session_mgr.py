@@ -118,7 +118,7 @@ async def close_session(sess: dict, ended_as: str = "deleted", source: str = "we
     try:
         sess["terminal"].stop()
     except Exception:
-        pass
+        logger.debug("Couldn't stop the terminal of session %s", sess.get("id"), exc_info=True)
     await emit_session_end_summary(sess, ended_as=ended_as, source=source)
     sid = sess["id"]
     # Preserve the CWD so the next session starts on the same path, and so
@@ -187,7 +187,7 @@ def usage_reset_if_needed() -> None:
             get_db().execute("DELETE FROM usage_stats")
             get_db().commit()
         except Exception:
-            pass
+            logger.warning("Couldn't clear saved usage stats for the new period", exc_info=True)
 
 
 _usage_reset_if_needed = usage_reset_if_needed  # legacy alias
@@ -316,7 +316,8 @@ def record_usage_task(ai_key: Optional[str], elapsed_seconds: float,
             from helm.pipeline.cost import calculate_cost
             st["cost_usd"] += calculate_cost(key, tok_in, tok_out)
         except Exception:
-            pass  # Non-critical
+            # Daily budget caps add up these costs; say so when one is missing.
+            logger.warning("Couldn't work out the cost of a %s reply", key, exc_info=True)
 
     if key in ("codex", "claude", "gemini"):
         exact = _parse_cli_usage_from_text(output or "", key)
@@ -361,7 +362,8 @@ def _flush_usage_to_db(ai_key: str, st: dict) -> None:
         )
         db.commit()
     except Exception:
-        pass  # Non-critical — in-memory stats still work
+        # In-memory stats still work; they just won't survive a restart.
+        logger.warning("Couldn't save usage stats", exc_info=True)
 
 
 def load_usage_from_db() -> None:
@@ -389,7 +391,7 @@ def load_usage_from_db() -> None:
                 }
                 _st.usage_period_start = period_start
     except Exception:
-        pass  # Non-critical
+        logger.warning("Couldn't load saved usage stats", exc_info=True)
 
 
 def fmt_reset_eta() -> str:

@@ -192,6 +192,20 @@ def v5_add_cloud_backup_tables(conn: sqlite3.Connection):
     conn.commit()
 
 
+def _add_column(conn: sqlite3.Connection, table: str, column_def: str) -> None:
+    """ALTER TABLE … ADD COLUMN, doing nothing if the column already exists.
+
+    Only "duplicate column name" is ignored: anything else (a locked or full
+    database) fails the migration, so it's retried at the next start instead
+    of being recorded as done without its column.
+    """
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e):
+            raise
+
+
 def v6_add_summaries_and_decay(conn: sqlite3.Connection):
     """
     Version 6: Conversation summaries persistence + memory decay score.
@@ -215,24 +229,14 @@ def v6_add_summaries_and_decay(conn: sqlite3.Connection):
     """)
 
     # Add decay_score column to memories (default 1.0 = fully fresh)
-    try:
-        conn.execute(
-            "ALTER TABLE memories ADD COLUMN decay_score REAL NOT NULL DEFAULT 1.0"
-        )
-    except Exception:
-        pass  # Column already exists
+    _add_column(conn, "memories", "decay_score REAL NOT NULL DEFAULT 1.0")
 
     conn.commit()
 
 
 def v7_add_cost_usd(conn: sqlite3.Connection):
     """Add cost_usd column to usage_stats for dollar-based budget tracking."""
-    try:
-        conn.execute(
-            "ALTER TABLE usage_stats ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0.0"
-        )
-    except Exception:
-        pass  # Column already exists
+    _add_column(conn, "usage_stats", "cost_usd REAL NOT NULL DEFAULT 0.0")
     conn.commit()
 
 
@@ -246,12 +250,7 @@ def v8_encrypt_memory_content(conn: sqlite3.Connection):
     so keyword search still works without decrypting every row.
     """
     # 1. Add search_text column (idempotent)
-    try:
-        conn.execute(
-            "ALTER TABLE memories ADD COLUMN search_text TEXT NOT NULL DEFAULT ''"
-        )
-    except Exception:
-        pass  # Column already exists
+    _add_column(conn, "memories", "search_text TEXT NOT NULL DEFAULT ''")
 
     # 2. Batch-encrypt existing memory content
     try:
@@ -309,10 +308,7 @@ def v9_add_packages_keywords(conn: sqlite3.Connection):
         ("keywords", "TEXT DEFAULT '[]'"),
         ("updated_at", "REAL DEFAULT 0"),
     ]:
-        try:
-            conn.execute(f"ALTER TABLE packages ADD COLUMN {col} {defn}")
-        except Exception:
-            pass  # Column already exists
+        _add_column(conn, "packages", f"{col} {defn}")
     conn.commit()
 
 
