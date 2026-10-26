@@ -40,7 +40,9 @@ async function _waPost(path, body) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   });
-  return r.json();
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
 }
 
 async function waRefresh() {
@@ -64,7 +66,10 @@ async function waSaveAllowed() {
     waRender(await _waPost('settings', { allowed_numbers: v }));
     const msg = document.getElementById('wa-msg');
     if (msg) { msg.textContent = 'Saved'; setTimeout(() => { if (msg.textContent === 'Saved') msg.textContent = ''; }, 2000); }
-  } catch (_) {}
+  } catch (e) {
+    const msg = document.getElementById('wa-msg');
+    if (msg) msg.textContent = 'Not saved: ' + e.message;
+  }
 }
 
 // Refresh whenever the Settings modal opens.

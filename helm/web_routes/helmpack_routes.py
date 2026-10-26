@@ -183,10 +183,7 @@ async def install_from_upload(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         # Clean up temp file
-        try:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-        except Exception:
-            pass
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 @router.post("/uninstall")

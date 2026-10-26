@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from helm.cloud import deploy as dep
+from helm.config import logger
 from helm.cloud import plan
 from helm.cloud.ssh import ParamikoRunner, Runner
 
@@ -50,7 +51,7 @@ def _remember(b: ServerBody, url: str = "") -> None:
     try:
         path.write_text(json.dumps(data), encoding="utf-8")
     except Exception:
-        pass
+        logger.warning("Couldn't save the cloud server's address", exc_info=True)
 
 
 def _saved() -> dict:

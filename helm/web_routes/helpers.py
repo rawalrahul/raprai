@@ -12,6 +12,7 @@ import subprocess
 import time
 import urllib.request
 
+from helm.config import logger
 from helm.subprocess_utils import hidden_kwargs
 
 
@@ -91,7 +92,7 @@ def _scan_npm_package(package_names: list[str], pattern, min_len: int = 8,
                     except Exception:
                         continue
             except Exception:
-                pass
+                logger.debug("Couldn't scan a CLI's files for model names", exc_info=True)
             if found:
                 return sorted(found, reverse=True)
     return []
@@ -162,7 +163,7 @@ def _fetch_claude_model_ids() -> list[str]:
                 if ids:
                     return ids
         except Exception:
-            pass
+            logger.debug("Claude models: the CLI's list failed", exc_info=True)
 
     # ── Method 1.5: OAuth token from ~/.claude/.credentials.json ─────────────
     creds_path = pathlib.Path.home() / ".claude" / ".credentials.json"
@@ -187,7 +188,7 @@ def _fetch_claude_model_ids() -> list[str]:
                     if ids:
                         return ids
         except Exception:
-            pass
+            logger.debug('Claude models: the API list (signed in) failed', exc_info=True)
 
     # ── Method 2: Anthropic REST API (needs ANTHROPIC_API_KEY) ───────────────
     key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -204,7 +205,7 @@ def _fetch_claude_model_ids() -> list[str]:
                 if ids:
                     return ids
         except Exception:
-            pass
+            logger.debug('Claude models: the API list (API key) failed', exc_info=True)
 
     # ── Method 3: scan Claude Code npm package for hardcoded model IDs ───────
     # Works with OAuth-only auth — no API key needed.  The Claude Code CLI
@@ -278,27 +279,15 @@ def _fetch_claude_model_ids() -> list[str]:
                         if found_ver:
                             return sorted(found_ver, reverse=True)
         except Exception:
-            pass
+            logger.debug("Claude models: reading the CLI's version failed", exc_info=True)
 
     return []
 
 
 def _fetch_ollama_models() -> list[str]:
     """Return locally installed Ollama models via `ollama list`."""
-    try:
-        r = subprocess.run(
-            ["ollama", "list"],
-            capture_output=True, text=True, timeout=5, **hidden_kwargs(),
-        )
-        models = []
-        for line in r.stdout.splitlines()[1:]:  # skip header
-            parts = line.split()
-            if parts:
-                models.append(parts[0])
-        return models
-    except Exception:
-        pass
-    return []
+    from helm.ai_runner.ollama import installed_models
+    return installed_models()
 
 
 def _codex_auth() -> tuple[str, str]:
@@ -317,7 +306,7 @@ def _codex_auth() -> tuple[str, str]:
         claims = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
         plan = str((claims.get("https://api.openai.com/auth") or {}).get("chatgpt_plan_type") or "")
     except Exception:
-        pass
+        logger.debug("Codex: couldn't read the plan from the sign-in token", exc_info=True)
     return "chatgpt", plan.lower()
 
 
@@ -389,7 +378,7 @@ def _fetch_openai_models() -> list[str]:
                             if ids:
                                 return ids
         except Exception:
-            pass
+            logger.debug('OpenAI models: the list (signed in) failed', exc_info=True)
 
     # ── Method 1: OPENAI_API_KEY env ─────────────────────────────────────────
     key = os.environ.get("OPENAI_API_KEY", "")
@@ -405,7 +394,7 @@ def _fetch_openai_models() -> list[str]:
                 if ids:
                     return ids
         except Exception:
-            pass
+            logger.debug('OpenAI models: the list (API key) failed', exc_info=True)
 
     # ── Method 2: scan @codexconfig npm package for hardcoded model names ────
     _codex_model_pat = re.compile(
@@ -452,7 +441,7 @@ def _fetch_gemini_model_ids() -> list[str]:
                     if ids:
                         return ids
         except Exception:
-            pass
+            logger.debug('Gemini models: the list (signed in) failed', exc_info=True)
 
     # ── Method 1: Google Generative AI REST API ────────────────────────────
     key = os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")
@@ -468,7 +457,7 @@ def _fetch_gemini_model_ids() -> list[str]:
                 if ids and ids != [""]:
                     return ids
         except Exception:
-            pass
+            logger.debug('Gemini models: the list (API key) failed', exc_info=True)
 
     # ── Method 2: scan google/generative-ai npm package ───────────────────────
     _gemini_model_pat = re.compile(
@@ -540,7 +529,7 @@ def _fetch_antigravity_models() -> list[str]:
                     if ids:
                         return ids
         except Exception:
-            pass
+            logger.debug('Antigravity models: the list failed', exc_info=True)
     # Fall back to shared Gemini API logic (API key + Gemini OAuth). Not the Gemini
     # CLI's aliases: those are what the gemini command accepts, not agy.
     return _fetch_gemini_model_ids()

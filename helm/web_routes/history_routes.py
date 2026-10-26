@@ -96,7 +96,7 @@ async def history_search(q: str = ""):
 
         except Exception:
             # FTS5 not available — fall back to LIKE search
-            pass
+            logger.debug('Full-text search failed; using a plain search', exc_info=True)
 
         # Fallback: LIKE search
         lq = f"%{q}%"

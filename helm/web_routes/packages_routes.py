@@ -196,7 +196,8 @@ def _run_install_background(task_id: str, package_id: str, url: str | None, forc
                             task["steps"].append({"label": label, "status": "skipped", "detail": "Already installed"})
                             continue
                     except Exception:
-                        pass  # Check failed — proceed with install
+                        # Check failed — proceed with install
+                        logger.debug("Couldn't check whether it's already installed; installing", exc_info=True)
 
                 # Run the install command
                 task["current_step"] = label
@@ -413,7 +414,7 @@ async def list_installed():
                     except Exception:
                         pkg["connected"] = bool(os.environ.get(token_env, ""))
     except Exception:
-        pass
+        logger.debug("Couldn't check which packages are connected", exc_info=True)
 
     return {"ok": True, "packages": packages, "count": len(packages)}
 
@@ -559,10 +560,7 @@ async def install_from_upload(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         # Clean up temp file
-        try:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-        except Exception:
-            pass
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 @router.post("/toggle")

@@ -164,7 +164,7 @@ async def list_mcp_servers():
                     }
                     token_env = cat_setup.get("token_env", "")
             except Exception:
-                pass
+                logger.debug("Couldn't read an MCP server's setup info from the catalog", exc_info=True)
 
         if setup:
             srv["setup"] = setup

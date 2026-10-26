@@ -31,27 +31,6 @@ select = [
 # Silently swallowed errors (S110): docs/code-health-plan.md, track D. These
 # files still have some. Each batch fixes its files and deletes their lines;
 # everything else, new files included, is already held to the rule.
-# D2: web routes (20 files)
-"helm/web_routes/agent_routes.py" = ["S110"]
-"helm/web_routes/app.py" = ["S110"]
-"helm/web_routes/auth_routes.py" = ["S110"]
-"helm/web_routes/backup_routes.py" = ["S110"]
-"helm/web_routes/bakeoff_routes.py" = ["S110"]
-"helm/web_routes/chat_ws.py" = ["S110"]
-"helm/web_routes/cloud_routes.py" = ["S110"]
-"helm/web_routes/demo_routes.py" = ["S110"]
-"helm/web_routes/file_routes.py" = ["S110"]
-"helm/web_routes/helmpack_routes.py" = ["S110"]
-"helm/web_routes/helpers.py" = ["S110"]
-"helm/web_routes/history_routes.py" = ["S110"]
-"helm/web_routes/mcp_routes.py" = ["S110"]
-"helm/web_routes/packages_routes.py" = ["S110"]
-"helm/web_routes/plugins_routes.py" = ["S110"]
-"helm/web_routes/session_routes.py" = ["S110"]
-"helm/web_routes/settings_routes.py" = ["S110"]
-"helm/web_routes/voice_routes.py" = ["S110"]
-"helm/web_routes/whatsapp_routes.py" = ["S110"]
-"web_app.py" = ["S110"]
 # D3: running AIs (16 files)
 "helm/agent/executor.py" = ["S110"]
 "helm/agent/memory.py" = ["S110"]

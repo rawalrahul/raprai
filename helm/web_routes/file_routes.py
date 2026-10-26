@@ -106,7 +106,7 @@ async def diagnostics_export():
                 with open(handler.baseFilename, "r") as f:
                     lines = f.readlines()
                     diag["recent_logs"] = [l.rstrip() for l in lines[-100:]]
-            except Exception:
+            except (OSError, ValueError):   # ValueError: a log line not in the default encoding
                 pass
 
     # Deep-sanitise: make sure no secrets leak in any field or log line

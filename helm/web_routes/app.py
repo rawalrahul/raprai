@@ -328,7 +328,7 @@ if _MCP_TOKEN_IS_NEW and (user_data_dir() / ".env").exists():
     try:
         update_env("MCP_BEARER_TOKEN", MCP_BEARER_TOKEN)
     except Exception:
-        pass
+        logger.warning("Couldn't save the MCP bearer token to .env; the Chrome extension needs it again after a restart", exc_info=True)
 
 
 def reload_env():
@@ -356,7 +356,7 @@ def reload_env():
         from helm.token_vault import load_all_tokens
         load_all_tokens()
     except Exception:
-        pass
+        logger.warning("reload_env: couldn't re-apply the vault's keys", exc_info=True)
 
     # Safety net: if any key is STILL "vault-managed" after load_all_tokens
     # (e.g. vault DB error), restore the pre-reload decrypted value so the

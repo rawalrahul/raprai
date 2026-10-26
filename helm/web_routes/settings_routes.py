@@ -50,12 +50,9 @@ _KNOWN_GROQ_MODELS = [
 
 def _clear_backend_availability_cache(*keys: str) -> None:
     """Clear cached provider availability after settings/API keys change."""
-    try:
-        from helm.ai_runner.core import _availability_cache
-        for key in keys:
-            _availability_cache.pop(key, None)
-    except Exception:
-        pass
+    from helm.ai_runner.core import _availability_cache
+    for key in keys:
+        _availability_cache.pop(key, None)
 
 
 def _split_integration_command(command: str) -> list[str]:

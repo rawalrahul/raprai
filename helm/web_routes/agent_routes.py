@@ -96,7 +96,7 @@ async def list_agent_templates():
                 "template": t,
             })
         except Exception:
-            pass
+            logger.warning("Agent templates: skipped one that couldn't be read", exc_info=True)
     return JSONResponse({"templates": templates})
 
 
@@ -232,7 +232,7 @@ async def run_agent(agent_id: str, request: Request):
     body = {}
     try:
         body = await request.json()
-    except Exception:
+    except ValueError:
         pass
 
     # Use focused session_id for WS streaming
@@ -384,7 +384,7 @@ async def resume_agent_run(run_id: str, request: Request):
     body = {}
     try:
         body = await request.json()
-    except Exception:
+    except ValueError:
         pass
 
     user_input = (body.get("input") or "").strip()
@@ -519,7 +519,7 @@ Respond with ONLY a valid JSON array, no markdown, no explanation."""
     try:
         raw_nodes = _extract_json_array(result)
     except Exception:
-        pass
+        logger.debug("Couldn't find a JSON node list in the AI's reply", exc_info=True)
     if raw_nodes is None:
         logger.error("Could not parse agent generation result:\n%s", result[:800])
         return JSONResponse({"error": "Could not parse AI response — try again or simplify description"}, status_code=500)
@@ -657,7 +657,7 @@ Respond with ONLY valid JSON, no markdown, no code fences:
         if m:
             try:
                 obj = _json.loads(m.group(0))
-            except Exception:
+            except ValueError:
                 pass
     if not obj or not isinstance(obj.get("nodes"), list):
         logger.error("Builder chat: could not parse AI response: %s", result[:400])
