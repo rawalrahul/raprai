@@ -7,7 +7,6 @@ here as a page error, a missing handler or a chat that stops working.
 Runs in CI's "ui" job. Skipped where Playwright isn't installed.
 """
 import os
-import re
 import socket
 import subprocess
 import sys
@@ -19,9 +18,6 @@ import pytest
 sync_api = pytest.importorskip("playwright.sync_api")
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-# shortcut: the UI asks Google Fonts for its fonts and RAPR's CSP blocks that
-# (plan step E1); drop this once the fonts ship with RAPR.
-KNOWN_NOISE = re.compile(r"fonts\.googleapis\.com")
 
 
 @pytest.fixture(scope="module")
@@ -81,13 +77,18 @@ def page(browser, rapr_url):
     page.close()
 
 
-def _problems(page):
-    return [p for p in page.problems if not KNOWN_NOISE.search(p)]
-
-
 def test_the_page_loads_without_errors(page):
     page.wait_for_timeout(1000)                     # late scripts and the first state message
-    assert _problems(page) == []
+    assert page.problems == []
+
+
+def test_the_fonts_ship_with_rapr(page):
+    """Inter and JetBrains Mono load from RAPR itself, not Google Fonts."""
+    loaded = page.evaluate("""async () => [
+        (await document.fonts.load('16px Inter')).length,
+        (await document.fonts.load('16px "JetBrains Mono"')).length]""")
+    assert loaded == [1, 1]
+    assert page.problems == []
 
 
 def test_every_button_calls_a_function_that_exists(page):
@@ -110,4 +111,4 @@ def test_a_message_goes_to_the_session_and_its_reply_shows(page):
     page.fill("#inp", "echo PONYTAIL-$((40+2))")
     page.press("#inp", "Enter")
     page.wait_for_selector("text=PONYTAIL-42", timeout=20000)
-    assert _problems(page) == []
+    assert page.problems == []
