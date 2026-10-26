@@ -39,7 +39,7 @@ try:
     _fh.setLevel(logging.DEBUG)
     _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(funcName)s: %(message)s"))
     _nc_log.addHandler(_fh)
-except Exception:
+except OSError:
     pass
 
 # Cache availability so we don't shell out to WSL on every message

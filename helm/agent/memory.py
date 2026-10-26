@@ -7,6 +7,7 @@ Layer 3: claude-mem MCP observation writing for per-user preference memory.
 """
 
 import asyncio
+import sqlite3
 import time
 from typing import Optional
 
@@ -53,7 +54,7 @@ def _ensure_schema() -> None:
                 USING fts5(agent_id UNINDEXED, node_id UNINDEXED, run_id UNINDEXED, title, output,
                            content='agent_node_outputs', content_rowid='id')
             """)
-        except Exception:
+        except sqlite3.OperationalError:
             pass  # FTS5 unavailable — Layer 1 falls back to LIKE search
         # Layer 2: persistent summaries
         db.execute("""

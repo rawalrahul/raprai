@@ -6,6 +6,8 @@ import re
 import subprocess
 import sys
 
+from helm.config import logger
+
 
 async def execute_shell_node(node: dict, context: str, cwd: str = ".") -> str:
     """Run node['task'] as a shell command and return stdout/stderr."""
@@ -42,7 +44,7 @@ async def execute_shell_node(node: dict, context: str, cwd: str = ".") -> str:
             _kill_proc_tree(proc)
             try:
                 await asyncio.wait_for(proc.communicate(), timeout=2)
-            except Exception:
+            except (asyncio.TimeoutError, OSError):
                 pass
             return f"Error: command timed out after {timeout}s\nCommand: {command}"
 
@@ -60,7 +62,7 @@ async def execute_shell_node(node: dict, context: str, cwd: str = ".") -> str:
             _kill_proc_tree(proc)
             try:
                 await asyncio.wait_for(proc.communicate(), timeout=2)
-            except Exception:
+            except (asyncio.TimeoutError, OSError):
                 pass
         raise
     except Exception as exc:
@@ -118,7 +120,7 @@ def _kill_windows_tree(proc: "subprocess.Popen") -> None:
     except Exception:
         try:
             proc.kill()
-        except Exception:
+        except OSError:
             pass
     try:
         proc.wait(timeout=1)
@@ -139,7 +141,7 @@ def _kill_proc_tree(proc) -> None:
                 timeout=3,
             )
             return
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             pass
     try:
         import os as _os
@@ -147,10 +149,10 @@ def _kill_proc_tree(proc) -> None:
         _os.killpg(_os.getpgid(proc.pid), _signal.SIGKILL)
         return
     except Exception:
-        pass
+        logger.debug("Couldn't kill the process group; killing the process", exc_info=True)
     try:
         proc.kill()
-    except Exception:
+    except OSError:
         pass
 
 

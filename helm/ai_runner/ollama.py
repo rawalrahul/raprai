@@ -856,7 +856,7 @@ def _ollama_system_prompt(cwd: str, skill_content: str = "", user_prompt: str = 
                     "qwen2.5vl) cannot call tools.\n"
                 )
     except Exception:
-        pass
+        logger.debug("Couldn't add the desktop-control note to the prompt", exc_info=True)
 
     if skill_content:
         base += (
@@ -901,7 +901,7 @@ def _ollama_system_prompt(cwd: str, skill_content: str = "", user_prompt: str = 
         if mem_block:
             base += f"\n{mem_block}"
     except Exception:
-        pass
+        logger.debug("Couldn't add shared memory to the prompt", exc_info=True)
 
     # Inject user personalization and custom instructions
     try:
@@ -910,7 +910,7 @@ def _ollama_system_prompt(cwd: str, skill_content: str = "", user_prompt: str = 
         if pblock:
             base += f"\n{pblock}"
     except Exception:
-        pass
+        logger.debug("Couldn't add personalization to the prompt", exc_info=True)
 
     return base
 
@@ -954,7 +954,7 @@ def _screenshot_to_markitdown(tool_result: str) -> str | None:
         )
         if result.returncode == 0 and result.stdout.strip():
             return f"[Screenshot OCR via markitdown]\n{result.stdout.strip()[:3000]}"
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         pass
     return None
 

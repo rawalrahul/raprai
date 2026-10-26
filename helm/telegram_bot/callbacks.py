@@ -8,7 +8,7 @@ import asyncio
 import pathlib
 
 import helm.state as _st
-from helm.config import ALLOWED_USER_IDS, HISTORY_ID_RE
+from helm.config import ALLOWED_USER_IDS, HISTORY_ID_RE, logger
 
 from .keyboards import (
     sessions_keyboard, session_controls_keyboard, new_session_keyboard,
@@ -264,7 +264,7 @@ async def action_callback(update, context):
                         from helm.model_prefs import set_model_pref
                         set_model_pref(fs["ai"], model_name or None)
                     except Exception:
-                        pass
+                        logger.warning("Couldn't save the model choice; it resets on restart", exc_info=True)
                 await push_state()
                 label = f"`{model_name}`" if model_name else "default"
                 await query.edit_message_text(
@@ -493,7 +493,7 @@ async def agent_callback(update, context):
             parse_mode="Markdown",
         )
     except Exception:
-        pass
+        logger.debug("Couldn't edit the Telegram message", exc_info=True)
 
 
 async def approval_callback(update, context):

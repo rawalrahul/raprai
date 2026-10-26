@@ -127,8 +127,8 @@ lists under D2, D3 and D4; each batch deletes its own lines from that list.
 | B2 | Split `complete.js` | Done (#109) |
 | C3 | One runner per AI type | Done (#111) |
 | D2 | Swallowed errors: web routes | Done |
-| C4 | Prompt preparation out of `process_message` | This PR |
-| D3 | Swallowed errors: running AIs | |
+| C4 | Prompt preparation out of `process_message` | Done |
+| D3 | Swallowed errors: running AIs | This PR |
 | D4 | Swallowed errors: the rest; S110 on everywhere | |
 
 Quick wins and the security batch come first. Each refactor follows the tests

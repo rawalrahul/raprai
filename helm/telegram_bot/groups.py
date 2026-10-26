@@ -116,7 +116,7 @@ async def handle_group_text(update, text: str) -> bool:
     try:
         await update.message.chat.send_action("typing")
     except Exception:
-        pass
+        logger.debug("Couldn't show the typing indicator", exc_info=True)
     return True
 
 

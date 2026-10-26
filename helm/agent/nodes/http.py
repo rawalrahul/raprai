@@ -33,7 +33,7 @@ async def execute_http_node(node: dict, context: str) -> str:
                 try:
                     parsed = json.loads(text)
                     text = json.dumps(parsed, indent=2, ensure_ascii=False)
-                except Exception:
+                except ValueError:
                     pass
                 return f"HTTP {resp.status}\n\n{text}"
     except Exception as exc:
