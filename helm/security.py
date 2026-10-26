@@ -193,7 +193,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 # Paths exempt from rate limiting (static assets, health checks, websocket)
 # /mcp/gate: Claude Code's hook asks once per tool call (localhost + bearer token only).
-_RATE_LIMIT_EXEMPT = ("/static", "/health", "/ws", "/mcp/gate")
+# The web UI's own files: one page load fetches about 40 of them, and counting
+# them made a few quick reloads fail the UI's API calls with 429.
+_RATE_LIMIT_EXEMPT = ("/static", "/health", "/ws", "/mcp/gate",
+                      "/js/", "/css/", "/assets/", "/sw.js", "/manifest.json")
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):

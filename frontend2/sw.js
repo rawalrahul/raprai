@@ -1,28 +1,47 @@
 // RAPR AI Service Worker — enables PWA install + offline shell
-const CACHE_NAME = 'rapr-ai-v5';
+const CACHE_NAME = 'rapr-ai-v6';
 
 // Cache the app shell (CSS, JS) on install
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
+      // What index.html loads (tests/test_frontend_files.py keeps this in step).
       return cache.addAll([
         '/',
         '/css/design-system.css',
         '/css/original.css',
         '/css/premium.css',
-        '/js/app.js',
-        '/js/api.js',
-        '/js/ws.js',
-        '/js/state.js',
-        '/js/config.js',
+        '/css/overhaul.css',
+        '/css/impeccable.css',
+        '/css/kelvin.css',
+        '/css/groupchat.css',
+        '/css/header.css',
+        '/css/sidebar.css',
+        '/css/needs.css',
+        '/css/composer.css',
+        '/css/picker.css',
+        '/js/customize.js',
+        '/js/kelvin.js',
+        '/js/complete.js',
+        '/js/ai_list.js',
         '/js/packages.js',
         '/js/memory.js',
-        '/js/commands.js',
-        '/js/toast.js',
-        '/js/backup.js',
-        '/js/complete.js',
         '/js/custom_ai.js',
+        '/js/backup.js',
         '/js/agents.js',
+        '/js/council.js',
+        '/js/groupchat.js',
+        '/js/whatsapp.js',
+        '/js/voices.js',
+        '/js/finish.js',
+        '/js/talk.js',
+        '/js/share.js',
+        '/js/cloud.js',
+        '/js/safety.js',
+        '/js/needs.js',
+        '/js/demos.js',
+        '/js/sidebar.js',
+        '/js/updates.js',
         '/static/rapr-logo.png',
         '/static/logo-watermark-dark.png',
         '/static/logo-watermark-light.png',
