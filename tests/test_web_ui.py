@@ -141,3 +141,17 @@ def test_kelvin_draws_and_switches_to_still(page):
     page.evaluate("KelvinUI.setMode('animated')")
     assert page.evaluate("window.__still") == [True, False]
     assert page.problems == []
+
+
+def test_the_packages_panel_lists_and_switches_tabs(page):
+    """The panel's code is spread over packages.js and the packages_*.js files."""
+    page.evaluate("togglePackagesPanel()")
+    page.wait_for_selector("button.rp-tab:has-text('Browse')", state="visible", timeout=5000)
+    page.evaluate("loadPackagesSection()")
+    page.wait_for_function("() => !document.querySelector('#rp-list .rp-loading')", timeout=10000)
+    page.click("button.rp-tab:has-text('Browse')")
+    page.wait_for_function("() => _rpTab === 'browse'", timeout=5000)
+    page.wait_for_timeout(1000)
+    page.click("button.rp-tab:has-text('Installed')")
+    page.wait_for_timeout(1000)
+    assert page.problems == []
