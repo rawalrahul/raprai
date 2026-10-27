@@ -32,6 +32,78 @@ def _resolve_env_dict(env: dict) -> dict:
             for k, v in env.items()}
 
 
+def _bundled_path() -> str:
+    """The servers RAPR ships with (replaced by every update)."""
+    from helm.paths import PROJECT_ROOT
+    return str(PROJECT_ROOT / "mcp_servers.json")
+
+
+def user_config_path() -> str:
+    """Your servers and on/off switches. In the data folder, because an update
+    replaces the app folder (and the bundled app unpacks it fresh each start)."""
+    from helm.paths import user_data_dir
+    return str(user_data_dir() / "mcp_servers.json")
+
+
+def _read_json(path: str) -> dict:
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except json.JSONDecodeError as exc:
+        logger.error("MCP config: invalid JSON in %s: %s", path, exc)
+        return {}
+    except OSError as exc:
+        logger.error("MCP config: failed to read %s: %s", path, exc)
+        return {}
+    if not isinstance(raw, dict):
+        logger.error("MCP config: expected a JSON object in %s", path)
+        return {}
+    return raw
+
+
+def read_user_raw() -> dict:
+    return _read_json(user_config_path())
+
+
+def write_user_raw(raw: dict) -> None:
+    path = user_config_path()
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(raw, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    os.replace(tmp, path)
+
+
+def read_raw() -> dict:
+    """The shipped servers with yours on top, field by field (yours win)."""
+    raw = _read_json(_bundled_path())
+    for sid, entry in read_user_raw().items():
+        raw[sid] = {**raw.get(sid, {}), **entry} if isinstance(entry, dict) else entry
+    return raw
+
+
+def remove_server(server_id: str) -> bool:
+    """Remove a server you installed. Ones installed before your servers moved to
+    the data folder are still in the app folder's file, so look there too."""
+    removed = False
+    user = read_user_raw()
+    if user.pop(server_id, None) is not None:
+        write_user_raw(user)
+        removed = True
+    legacy = _read_json(_bundled_path())
+    if legacy.pop(server_id, None) is not None:
+        try:
+            with open(_bundled_path(), "w", encoding="utf-8") as f:
+                json.dump(legacy, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+            removed = True
+        except OSError as exc:
+            logger.warning("MCP config: couldn't remove %s from %s: %s", server_id, _bundled_path(), exc)
+    return removed
+
+
 def load_config(config_path: Optional[str] = None) -> dict:
     """Load and parse mcp_servers.json.
 
@@ -39,25 +111,7 @@ def load_config(config_path: Optional[str] = None) -> dict:
 
     If config file doesn't exist, returns empty dict (no servers).
     """
-    if not config_path:
-        # Default location: project root (same level as .env)
-        from helm.paths import PROJECT_ROOT
-        config_path = str(PROJECT_ROOT / "mcp_servers.json")
-
-    raw: dict = {}
-    if not os.path.isfile(config_path):
-        logger.info("MCP config not found at %s — no built-in MCP servers", config_path)
-    else:
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                raw = json.load(f)
-        except json.JSONDecodeError as exc:
-            logger.error("MCP config: invalid JSON in %s: %s", config_path, exc)
-        except Exception as exc:
-            logger.error("MCP config: failed to read %s: %s", config_path, exc)
-        if not isinstance(raw, dict):
-            logger.error("MCP config: expected JSON object at top level")
-            raw = {}
+    raw = _read_json(config_path) if config_path else read_raw()
 
     servers = {}
     for server_id, cfg in raw.items():
@@ -152,32 +206,25 @@ def load_config(config_path: Optional[str] = None) -> dict:
 
 
 def save_config(config: dict, config_path: Optional[str] = None) -> None:
-    """Write MCP server configuration back to mcp_servers.json.
+    """Save the on/off switches from a load_config() result.
 
-    Accepts the same format returned by load_config() — converts back to
-    the user-friendly JSON format with command strings.
+    By default they go in your file in the data folder (see user_config_path).
     """
-    if not config_path:
-        from helm.paths import PROJECT_ROOT
-        config_path = str(PROJECT_ROOT / "mcp_servers.json")
-
-    # Read existing raw config to preserve original env var references
-    raw = {}
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-    except (OSError, ValueError):
-        pass
-
-    # Update enabled flags
-    for server_id, cfg in config.items():
-        if server_id in raw:
-            raw[server_id]["enabled"] = cfg.get("enabled", False)
-
-    try:
+    if config_path:
+        raw = _read_json(config_path)
+        for server_id, cfg in config.items():
+            if server_id in raw:
+                raw[server_id]["enabled"] = cfg.get("enabled", False)
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(raw, f, indent=2, ensure_ascii=False)
             f.write("\n")
-        logger.info("MCP config: saved to %s", config_path)
-    except Exception as exc:
-        logger.error("MCP config: failed to save %s: %s", config_path, exc)
+        return
+
+    # Only the switches go in your file; the shipped entries stay as shipped.
+    known = read_raw()
+    user = read_user_raw()
+    for server_id, cfg in config.items():
+        if server_id in known:
+            user.setdefault(server_id, {})["enabled"] = cfg.get("enabled", False)
+    write_user_raw(user)
+    logger.info("MCP config: saved to %s", user_config_path())

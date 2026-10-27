@@ -150,14 +150,8 @@ def _unique_id(base: str, taken: set[str]) -> str:
 def _taken_ids() -> set[str]:
     """Ids already used by built-in (mcp_servers.json) or custom servers."""
     taken = set(_load().keys()) | _RESERVED_IDS
-    try:
-        from helm.paths import PROJECT_ROOT
-        with open(PROJECT_ROOT / "mcp_servers.json", "r", encoding="utf-8") as f:
-            raw = json.load(f)
-        if isinstance(raw, dict):
-            taken |= set(raw.keys())
-    except (OSError, ValueError):
-        pass
+    from helm.mcp.config import read_raw
+    taken |= set(read_raw().keys())
     return taken
 
 
