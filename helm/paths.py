@@ -90,10 +90,6 @@ def packages_staging_dir() -> pathlib.Path:
     return d
 
 
-# Backward compatibility aliases
-helmpack_cache_dir = packages_cache_dir
-helmpack_staging_dir = packages_staging_dir
-
 
 def child_env(cmd, extra_env=None):
     """Environment for an AI subprocess, or None to inherit RAPR's unchanged.
