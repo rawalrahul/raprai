@@ -14,7 +14,7 @@ from .keyboards import (
     sessions_keyboard, session_controls_keyboard, new_session_keyboard,
 )
 from .browse import show_browse
-from .commands import perform_resume
+from .history import perform_resume
 
 try:
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
