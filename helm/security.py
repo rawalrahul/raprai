@@ -74,7 +74,8 @@ class RateLimiter:
             "/setup/save":    (10, 60),     # 10 setup saves per minute
             "/mcp/call":      (120, 60),    # 120 MCP calls per minute (AI uses these)
             "/plugins":       (30, 60),     # 30 plugin operations per minute
-            "_default":       (120, 60),    # 120 req/min for everything else
+            # 120 req/min for everything else (RAPR_RATE_LIMIT: the browser tests load the page often)
+            "_default":       (int(os.environ.get("RAPR_RATE_LIMIT", "120")), 60),
         }
 
     def _get_limit(self, path: str) -> tuple[int, int]:

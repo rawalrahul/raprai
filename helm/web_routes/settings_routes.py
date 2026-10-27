@@ -7,6 +7,7 @@ import json
 import os
 import pathlib
 import shlex
+import time
 import urllib.error
 import urllib.request
 from fastapi import APIRouter, Request
@@ -109,6 +110,19 @@ def _custom_openai_models(entry: dict) -> list[str]:
 # ---------------------------------------------------------------------------
 # Settings panel
 # ---------------------------------------------------------------------------
+
+@router.get("/api/telegram/status")
+async def telegram_status():
+    """Settings → Telegram: is the bot connected, and if not, why."""
+    st = dict(_st.telegram_status)
+    tg = _st.telegram_app
+    polling = bool(tg and tg.updater and tg.updater.running)
+    # A polling error is reported, but its recovery isn't: PTB just carries on. While
+    # errors last they are re-reported at least every 30 s, so a quiet 90 s means it's back.
+    if st["status"] in ("connecting", "conflict") and polling and time.time() - st["at"] > 90:
+        st = {"status": "connected", "error": ""}
+    return JSONResponse({"status": st["status"], "error": st["error"]})
+
 
 @router.get("/settings")
 async def get_settings():
