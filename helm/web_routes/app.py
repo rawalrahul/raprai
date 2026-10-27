@@ -66,10 +66,11 @@ _PUBLIC_PREFIXES = ("/login", "/static", "/health", "/manifest.json", "/sw.js", 
 # take it over.
 _FIRST_RUN_PREFIXES = ("/setup", "/prefs")
 
-# Plugin connect/OAuth routes are opened in popup windows which may not share
-# the session cookie. These are localhost-only and protected by OAuth state tokens.
+# The OAuth provider (or RAPR's OAuth proxy) redirects here. It only finishes a
+# flow that /plugins/<id>/oauth/start began, and that needs a login: anyone who
+# could start a flow could swap in their own account's token.
 _PLUGIN_PUBLIC_PREFIXES = (
-    "/plugins/oauth/callback",    # OAuth callback from proxy
+    "/plugins/oauth/callback",
 )
 
 # MCP endpoints are NOT fully public — they require localhost origin
@@ -109,15 +110,7 @@ class _AuthMiddleware(BaseHTTPMiddleware):
             from fastapi.responses import JSONResponse
             return JSONResponse({"error": "log in first"}, status_code=401)
 
-        # Plugin connect/OAuth routes — opened in popup windows that may
-        # not share the session cookie. These are safe to expose because
-        # they're localhost-only and the OAuth flow uses state tokens.
         if any(path == p or path.startswith(p) for p in _PLUGIN_PUBLIC_PREFIXES):
-            return await call_next(request)
-        # /plugins/<id>/connect and /plugins/<id>/oauth/* — popup OAuth flow
-        if path.startswith("/plugins/") and (
-            "/connect" in path or "/oauth/" in path
-        ):
             return await call_next(request)
 
         # MCP endpoints: allow if (a) normal session cookie is valid, OR
