@@ -37,7 +37,7 @@ def test_continue_resumes_the_named_session(monkeypatch):
 
 def test_only_allowed_users_can_press_it(monkeypatch):
     import helm.telegram_bot.auth as tg_auth
-    monkeypatch.setattr(tg_auth, "ALLOWED_USER_IDS", {1})
+    monkeypatch.setattr(tg_auth._cfg, "ALLOWED_USER_IDS", {1})
     pressed, replies = [], []
 
     async def answer(text=""):

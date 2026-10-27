@@ -8,7 +8,7 @@ Buttons: ▶ hands an item to its AI in a new session (the reply comes back
 here), ✕ drops it, ✅/❌ answer an approval without leaving the brief.
 """
 
-from helm.config import ALLOWED_USER_IDS
+import helm.config as _cfg   # read ALLOWED_USER_IDS live: startup replaces it after the vault loads
 
 from .auth import authorized_only
 
@@ -36,7 +36,7 @@ async def brief_callback(update, context):
     from helm.ai_runner import forward_to_telegram, process_message
 
     query = update.callback_query
-    if not ALLOWED_USER_IDS or query.from_user.id not in ALLOWED_USER_IDS:
+    if not _cfg.ALLOWED_USER_IDS or query.from_user.id not in _cfg.ALLOWED_USER_IDS:
         await query.answer("Not authorized.", show_alert=True)
         return
     parts = query.data.split(":", 2)

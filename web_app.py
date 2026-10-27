@@ -40,34 +40,28 @@ from helm.web_routes import app
 import helm.state as _st
 
 
-def _telegram_polling_error_handler(label: str, tg):
-    """Return a sync PTB polling error callback that suppresses conflict spam."""
+def _telegram_polling_error_handler(label: str):
+    """Return a sync PTB polling error callback that logs a getUpdates conflict once.
+
+    A conflict is not fatal: PTB keeps retrying (backing off to 30 s), so polling
+    resumes once the other poller is gone. After an update or restart that other
+    poller is usually the old RAPR's last request, which Telegram keeps open for a
+    few seconds. Stopping here left the bot silent until the next restart.
+    """
     from telegram.error import Conflict
 
-    stopping = False
+    warned = False
 
     def _on_error(exc):
-        nonlocal stopping
+        nonlocal warned
         if isinstance(exc, Conflict):
-            if not stopping:
-                stopping = True
+            if not warned:
+                warned = True
                 logger.warning(
-                    "%s Telegram polling disabled: another process is already using getUpdates "
-                    "for this bot token.",
+                    "%s Telegram: another process is using getUpdates for this bot token. "
+                    "Retrying until it stops (normal for a few seconds after a restart).",
                     label,
                 )
-
-                async def _stop_polling():
-                    try:
-                        if tg.updater and tg.updater.running:
-                            await tg.updater.stop()
-                    except Exception as stop_exc:
-                        logger.warning("Telegram polling stop after conflict failed: %s", stop_exc)
-
-                try:
-                    asyncio.create_task(_stop_polling())
-                except RuntimeError:
-                    pass
             return
         logger.exception("Exception happened while polling for Telegram updates.", exc_info=exc)
 
@@ -448,7 +442,7 @@ async def _main():
             await tg.start()
             await tg.updater.start_polling(
                 allowed_updates=_Upd.ALL_TYPES,
-                error_callback=_telegram_polling_error_handler("Hot-start", tg),
+                error_callback=_telegram_polling_error_handler("Hot-start"),
             )
             logger.info("Telegram bot hot-started successfully after setup!")
         except Exception as exc:
@@ -645,7 +639,7 @@ async def _main():
                 await _st.telegram_app.start()
                 await _st.telegram_app.updater.start_polling(
                     allowed_updates=Update.ALL_TYPES,
-                    error_callback=_telegram_polling_error_handler("Startup", _st.telegram_app),
+                    error_callback=_telegram_polling_error_handler("Startup"),
                 )
                 logger.info("Telegram bot started. Polling for updates...")
                 if _st.telegram_chat_id:

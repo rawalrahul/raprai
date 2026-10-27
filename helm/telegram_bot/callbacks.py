@@ -8,7 +8,8 @@ import asyncio
 import pathlib
 
 import helm.state as _st
-from helm.config import ALLOWED_USER_IDS, HISTORY_ID_RE, logger
+import helm.config as _cfg   # read ALLOWED_USER_IDS live: startup replaces it after the vault loads
+from helm.config import HISTORY_ID_RE, logger
 
 from .keyboards import (
     sessions_keyboard, session_controls_keyboard, new_session_keyboard,
@@ -34,7 +35,7 @@ async def action_callback(update, context):
 
     query = update.callback_query
     user_id = query.from_user.id
-    if not ALLOWED_USER_IDS or user_id not in ALLOWED_USER_IDS:
+    if not _cfg.ALLOWED_USER_IDS or user_id not in _cfg.ALLOWED_USER_IDS:
         await query.answer("Not authorized.", show_alert=True)
         return
     await query.answer()
@@ -341,7 +342,7 @@ async def pipeline_callback(update, context):
 
     query = update.callback_query
     user_id = query.from_user.id
-    if not ALLOWED_USER_IDS or user_id not in ALLOWED_USER_IDS:
+    if not _cfg.ALLOWED_USER_IDS or user_id not in _cfg.ALLOWED_USER_IDS:
         await query.answer("Not authorized.", show_alert=True)
         return
     await query.answer()
@@ -455,7 +456,7 @@ async def agent_callback(update, context):
 
     query = update.callback_query
     user_id = query.from_user.id
-    if not ALLOWED_USER_IDS or user_id not in ALLOWED_USER_IDS:
+    if not _cfg.ALLOWED_USER_IDS or user_id not in _cfg.ALLOWED_USER_IDS:
         await query.answer("Not authorized.", show_alert=True)
         return
     await query.answer()
@@ -502,7 +503,7 @@ async def approval_callback(update, context):
 
     query = update.callback_query
     user_id = query.from_user.id
-    if not ALLOWED_USER_IDS or user_id not in ALLOWED_USER_IDS:
+    if not _cfg.ALLOWED_USER_IDS or user_id not in _cfg.ALLOWED_USER_IDS:
         await query.answer("Not authorized.", show_alert=True)
         return
     await query.answer()
