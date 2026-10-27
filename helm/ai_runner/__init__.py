@@ -31,13 +31,11 @@ from .claude import (
 # Ollama REST API agent and tools
 from .ollama import (
     ollama_model_supports_tools,
-    _OLLAMA_TOOLS,
     _OLLAMA_URL,
-    _execute_ollama_tool,
-    _parse_content_tool_calls,
     _ollama_system_prompt,
     _run_ollama_agent,
 )
+from .ollama_tools import _OLLAMA_TOOLS, _execute_ollama_tool, _parse_content_tool_calls
 
 # Document code generators
 from .doc_generators import (
