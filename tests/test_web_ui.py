@@ -155,3 +155,38 @@ def test_the_packages_panel_lists_and_switches_tabs(page):
     page.click("button.rp-tab:has-text('Installed')")
     page.wait_for_timeout(1000)
     assert page.problems == []
+
+
+
+def test_page_reloads_itself_when_its_files_failed_to_load(browser, rapr_url):
+    """RAPR still starting (e.g. after an update) can leave the page loaded without its
+    CSS and JS: a bare page stuck on "Loading…". It must reload until they arrive."""
+    ctx = browser.new_context(service_workers="block")
+    page = ctx.new_page()
+    failed = set()
+
+    def fail_first_time(route):                   # the first load misses a CSS and a JS file
+        name = route.request.url.split("?")[0].rsplit("/", 1)[-1]
+        if name in failed:
+            route.continue_()
+        else:
+            failed.add(name)
+            route.abort()
+
+    page.route("**/css/design-system.css*", fail_first_time)
+    page.route("**/js/core.js*", fail_first_time)
+    try:
+        page.goto(rapr_url, wait_until="load")
+        ready = "() => getComputedStyle(document.documentElement).getPropertyValue('--font-sans') !== ''" \
+                " && typeof connect === 'function'"
+        for _ in range(30):                       # the page's CSP blocks wait_for_function's eval
+            try:
+                if page.evaluate(ready):
+                    break
+            except sync_api.Error:                # evaluated mid-reload
+                pass
+            page.wait_for_timeout(500)
+        else:
+            pytest.fail("the page never reloaded with its CSS and JS")
+    finally:
+        ctx.close()

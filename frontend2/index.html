@@ -1970,5 +1970,19 @@ if ('serviceWorker' in navigator) {
   });
 }
 </script>
+<script>
+// If RAPR was still starting (or restarting after an update) when this page loaded, its
+// styles or scripts can fail while the page itself arrived: a bare page stuck on
+// "Loading…". Reload a few times, a couple of seconds apart, until they're all here.
+window.addEventListener('load', function(){
+  var styled = getComputedStyle(document.documentElement).getPropertyValue('--font-sans') !== '';
+  var key = 'raprAssetRetries', n = 0;
+  try { n = +sessionStorage.getItem(key) || 0; } catch(e) {}
+  if(styled && typeof connect === 'function'){ try { sessionStorage.removeItem(key); } catch(e) {} return; }
+  if(n >= 5) return;
+  try { sessionStorage.setItem(key, String(n + 1)); } catch(e) {}
+  setTimeout(function(){ location.reload(); }, 2000);
+});
+</script>
 </body>
 </html>
