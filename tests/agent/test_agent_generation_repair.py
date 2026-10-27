@@ -8,8 +8,8 @@ from helm.web_routes.agent_routes import (
     _agent_requires_initial_input,
     _ensure_manager_node,
     _extract_agent_input_file_text,
-    _repair_generated_agent_graph,
 )
+from helm.web_routes.agent_generate_routes import _repair_generated_agent_graph
 from helm.agent.runner import _prepare_initial_input_node
 from helm.agent.repair import repair_agent_graph
 
