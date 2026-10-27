@@ -84,6 +84,7 @@ def test_tg_kelvin_replies_to_the_owner(monkeypatch):
 
     update = SimpleNamespace(effective_user=SimpleNamespace(id=42), effective_chat=SimpleNamespace(id=42),
                              message=SimpleNamespace(reply_text=reply_text))
+    update.effective_message = update.message
     asyncio.run(tg_kelvin(update, None))
     assert replies and replies[0].startswith("🐧 Kelvin is on.")
 
@@ -99,5 +100,6 @@ def test_tg_kelvin_refuses_strangers(monkeypatch):
 
     update = SimpleNamespace(effective_user=SimpleNamespace(id=7), effective_chat=SimpleNamespace(id=7),
                              message=SimpleNamespace(reply_text=reply_text))
+    update.effective_message = update.message
     asyncio.run(tg_kelvin(update, None))
     assert replies == ["⛔ Unauthorized."]

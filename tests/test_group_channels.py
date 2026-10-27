@@ -215,7 +215,8 @@ class _Msg:
 
 
 def _update(text=""):
-    return SimpleNamespace(message=_Msg(text), effective_user=SimpleNamespace(id=7),
+    msg = _Msg(text)
+    return SimpleNamespace(message=msg, effective_message=msg, effective_user=SimpleNamespace(id=7),
                            effective_chat=SimpleNamespace(id=42))
 
 

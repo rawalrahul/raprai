@@ -15,12 +15,15 @@ def authorized_only(func):
     @wraps(func)
     async def wrapper(update, context):
         user_id = update.effective_user.id
+        # effective_message: a button press has no update.message.
+        msg = update.effective_message
         if not ALLOWED_USER_IDS:
-            await update.message.reply_text(
-                "⛔ Bot is locked — no authorised users are configured.\n\n"
-                "Add your Telegram user ID to ALLOWED_USER_IDS in your .env file, "
-                "then restart RAPR AI."
-            )
+            if msg:
+                await msg.reply_text(
+                    "⛔ Bot is locked — no authorised users are configured.\n\n"
+                    "Add your Telegram user ID to ALLOWED_USER_IDS in your .env file, "
+                    "then restart RAPR AI."
+                )
             logger.error(
                 "SECURITY: Blocked user %d — ALLOWED_USER_IDS is empty. "
                 "Set ALLOWED_USER_IDS in .env and restart.",
@@ -28,7 +31,8 @@ def authorized_only(func):
             )
             return
         if user_id not in ALLOWED_USER_IDS:
-            await update.message.reply_text("⛔ Unauthorized.")
+            if msg:
+                await msg.reply_text("⛔ Unauthorized.")
             logger.warning("Rejected unauthorised user %d", user_id)
             return
         # Store chat_id so web-initiated responses can be forwarded
