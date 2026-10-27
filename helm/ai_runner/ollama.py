@@ -577,7 +577,8 @@ async def _execute_ollama_tool(name: str, args: dict, cwd: str) -> str:
             return "\n".join(lines) or "(empty directory)"
 
         elif name == "save_skill":
-            from helm.skills import create_skill, get_user_skills_dir
+            from helm.skill_creation import create_skill
+            from helm.skills import get_user_skills_dir
             skill_name  = args.get("name", "").strip()
             description = args.get("description", "").strip()
             content     = args.get("content", "").strip()
@@ -1273,7 +1274,7 @@ async def run_ollama(ai: str, sess: dict, text: str, safe_text: str,
                      source: str, sid: str) -> str:
     """Run one message through the local Ollama agent and show its answer."""
     from helm.broadcast import push_thinking
-    from helm.skills import auto_create_skill_template
+    from helm.skill_creation import auto_create_skill_template
     from .core import _is_coherent_task, _is_failure, _self_heal_with_skill
 
     await push_thinking(True, ai, session_id=sid)
