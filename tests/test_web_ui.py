@@ -112,3 +112,16 @@ def test_a_message_goes_to_the_session_and_its_reply_shows(page):
     page.press("#inp", "Enter")
     page.wait_for_selector("text=PONYTAIL-42", timeout=20000)
     assert page.problems == []
+
+
+def test_the_agent_builder_opens_and_adds_a_step(page):
+    """The builder's code is spread over agents.js and the agent_*.js files it loads."""
+    page.evaluate("openAgentBuilder(null)")
+    page.wait_for_selector("#agent-builder-wrapper.open", timeout=5000)
+    workers = "_builderNodes.filter(n => (n.type || 'ai') !== 'manager').length"
+    before = page.evaluate(workers)
+    page.evaluate("agentAddNode()")                 # the first step also adds the manager step
+    assert page.evaluate(workers) == before + 1
+    page.wait_for_selector(".agent-mic-btn", state="attached", timeout=5000)
+    page.evaluate("closeAgentBuilder()")
+    assert page.problems == []
