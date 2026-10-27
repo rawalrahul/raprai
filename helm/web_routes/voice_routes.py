@@ -43,7 +43,10 @@ async def transcribe_audio(file: UploadFile = File(...)):
 
     audio_path = os.path.join(tmp_dir, f"recording.{ext}")
     try:
-        data = await file.read()
+        from helm.security import read_upload
+        data = await read_upload(file)
+        if data is None:
+            return JSONResponse({"error": "Recording too large."}, status_code=413)
         with open(audio_path, "wb") as f:
             f.write(data)
 

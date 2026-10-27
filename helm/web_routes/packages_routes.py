@@ -537,14 +537,16 @@ async def install_from_upload(
 
     # Save to temp file
     tmp_dir = tempfile.mkdtemp(prefix="packages_upload_")
-    tmp_path = pathlib.Path(tmp_dir) / file.filename
+    # The browser chooses the name: keep only its last part, so "../x" can't
+    # write outside the temp folder.
+    tmp_path = pathlib.Path(tmp_dir) / (os.path.basename(file.filename or "") or "upload.raprpkg")
 
     try:
+        from helm.security import read_upload
+        content = await read_upload(file)
+        if content is None:
+            raise HTTPException(status_code=400, detail="File too large (max 50MB)")
         with open(str(tmp_path), "wb") as f:
-            content = await file.read()
-            # Size check (50MB)
-            if len(content) > 50 * 1024 * 1024:
-                raise HTTPException(status_code=400, detail="File too large (max 50MB)")
             f.write(content)
 
         result = _install(tmp_path, force=force)

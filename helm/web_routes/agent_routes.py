@@ -394,22 +394,22 @@ async def resume_agent_run(run_id: str, request: Request):
 async def upload_agent_input_file(file: UploadFile = File(...)):
     """Upload a file for an agent input node and return extractable text."""
     from helm.config import _DEFAULT_CWD
-    from helm.security import MAX_UPLOAD_SIZE, validate_upload
+    from helm.security import MAX_UPLOAD_SIZE, read_upload, validate_upload
 
     filename = file.filename or f"agent_input_{int(time.time())}"
     try:
-        data = await file.read()
+        data = await read_upload(file)
     except Exception as exc:
         return JSONResponse({"error": f"Failed to read upload: {exc}"}, status_code=400)
-
-    error = validate_upload(filename, len(data))
-    if error:
-        return JSONResponse({"error": error}, status_code=400)
-    if len(data) > MAX_UPLOAD_SIZE:
+    if data is None:
         return JSONResponse(
             {"error": f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024*1024)} MB."},
             status_code=413,
         )
+
+    error = validate_upload(filename, len(data))
+    if error:
+        return JSONResponse({"error": error}, status_code=400)
 
     from helm.session_mgr import focused_session
     fs = focused_session()
