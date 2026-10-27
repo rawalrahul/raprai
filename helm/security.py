@@ -319,6 +319,13 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 # Maximum upload size: 50 MB
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024
 
+
+async def read_upload(file, limit: int = MAX_UPLOAD_SIZE) -> Optional[bytes]:
+    """Read an uploaded file, or None if it's bigger than *limit*. Reads at most
+    one byte past the limit, so an oversized upload isn't held in memory whole."""
+    data = await file.read(limit + 1)
+    return None if len(data) > limit else data
+
 # Allowed file extensions for upload
 ALLOWED_UPLOAD_EXTENSIONS = {
     # Documents

@@ -131,26 +131,25 @@ async def diagnostics_export():
 async def upload_file(file: UploadFile = File(...)):
     """Save an uploaded file to the active session's CWD."""
     from helm.config import _DEFAULT_CWD
-    from helm.security import validate_upload, MAX_UPLOAD_SIZE
+    from helm.security import validate_upload, MAX_UPLOAD_SIZE, read_upload
 
     filename = file.filename or f"upload_{int(_time.time())}"
 
     # Read data with size limit enforcement
     try:
-        data = await file.read()
+        data = await read_upload(file)
     except Exception as exc:
         return JSONResponse({"error": f"Failed to read upload: {exc}"}, status_code=400)
+    if data is None:
+        return JSONResponse(
+            {"error": f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024*1024)} MB."},
+            status_code=413,
+        )
 
     # Validate file type and size
     error = validate_upload(filename, len(data))
     if error:
         return JSONResponse({"error": error}, status_code=400)
-
-    if len(data) > MAX_UPLOAD_SIZE:
-        return JSONResponse(
-            {"error": f"File too large. Maximum size is {MAX_UPLOAD_SIZE // (1024*1024)} MB."},
-            status_code=413,
-        )
 
     sid = _st.focused_id
     sess = _st.sessions.get(sid) if sid else None
