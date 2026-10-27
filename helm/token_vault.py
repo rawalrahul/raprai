@@ -91,25 +91,29 @@ def _ensure_table():
 # ---------------------------------------------------------------------------
 
 def store_token(env_key: str, plaintext: str) -> None:
-    """Encrypt and store a token. Also sets os.environ for runtime use."""
+    """Encrypt and store a token. Also sets os.environ for runtime use.
+
+    Raises when it can't: callers then replace the .env value with the
+    "vault-managed" placeholder, so a silent failure lost the token at the next
+    restart. Never stores plain text while encryption is installed but its key
+    can't be loaded.
+    """
     if not plaintext:
         return
-    os.environ[env_key] = plaintext  # runtime availability
-
     f = _fernet()
+    if f is None and _HAS_FERNET:
+        raise RuntimeError(f"token_vault: the encryption key couldn't be loaded, so {env_key} wasn't saved")
     cipher = f.encrypt(plaintext.encode("utf-8")).decode("ascii") if f else plaintext
 
-    try:
-        from helm.db import get_db
-        _ensure_table()
-        db = get_db()
-        db.execute(
-            "INSERT OR REPLACE INTO token_vault (env_key, cipher, updated) VALUES (?, ?, ?)",
-            (env_key, cipher, time.time()),
-        )
-        db.commit()
-    except Exception as exc:
-        logger.warning("token_vault: store failed for %s: %s", env_key, exc)
+    from helm.db import get_db
+    _ensure_table()
+    db = get_db()
+    db.execute(
+        "INSERT OR REPLACE INTO token_vault (env_key, cipher, updated) VALUES (?, ?, ?)",
+        (env_key, cipher, time.time()),
+    )
+    db.commit()
+    os.environ[env_key] = plaintext  # runtime availability
 
 
 def load_token(env_key: str) -> str:
@@ -143,8 +147,10 @@ def load_token(env_key: str) -> str:
     # 2. Fallback: check .env / os.environ (legacy migration)
     val = os.environ.get(env_key, "")
     if val:
-        # Auto-migrate to vault
-        store_token(env_key, val)
+        try:
+            store_token(env_key, val)   # auto-migrate; the value keeps working either way
+        except Exception:
+            logger.warning("token_vault: couldn't move %s into the vault yet", env_key, exc_info=True)
     return val
 
 
