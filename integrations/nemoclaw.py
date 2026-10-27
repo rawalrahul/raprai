@@ -14,7 +14,6 @@ Setup:
 Free to use — only requires a free NVIDIA API key from build.nvidia.com.
 """
 
-import logging
 import os
 import sys
 
@@ -27,23 +26,12 @@ COLOR = "#76b900"   # NVIDIA green
 
 # ── Logging (to file for debugging) ──────────────────────────────────────────
 
-_nc_log = logging.getLogger("nemoclaw_integration")
-_nc_log.setLevel(logging.DEBUG)
-
-# File handler — logs to nemoclaw_debug.log next to the app
 try:
-    from helm.paths import user_data_dir
-    _log_path = user_data_dir() / "nemoclaw_debug.log"
-except Exception:
-    _log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "nemoclaw_debug.log")
-
-try:
-    _fh = logging.FileHandler(str(_log_path), encoding="utf-8")
-    _fh.setLevel(logging.DEBUG)
-    _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-    _nc_log.addHandler(_fh)
-except OSError:
-    pass
+    from helm.nemoclaw_log import nemoclaw_logger
+    _nc_log = nemoclaw_logger("integration")
+except ImportError:   # run without RAPR on the path: no log file
+    import logging
+    _nc_log = logging.getLogger("nemoclaw.integration")
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

@@ -14,7 +14,6 @@ The goal: user launches RAPR AI → everything else happens automatically.
 """
 
 import glob
-import logging
 import os
 import subprocess
 import sys
@@ -25,22 +24,8 @@ from helm.config import logger
 from helm.subprocess_utils import hidden_kwargs
 
 # ── File-based debug logger ──────────────────────────────────────────────────
-_nc_log = logging.getLogger("nemoclaw_bridge")
-_nc_log.setLevel(logging.DEBUG)
-
-try:
-    from helm.paths import user_data_dir
-    _log_path = user_data_dir() / "nemoclaw_debug.log"
-except Exception:
-    _log_path = "nemoclaw_debug.log"
-
-try:
-    _fh = logging.FileHandler(str(_log_path), encoding="utf-8")
-    _fh.setLevel(logging.DEBUG)
-    _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(funcName)s: %(message)s"))
-    _nc_log.addHandler(_fh)
-except OSError:
-    pass
+from helm.nemoclaw_log import nemoclaw_logger
+_nc_log = nemoclaw_logger("bridge")
 
 # Cache availability so we don't shell out to WSL on every message
 _nemoclaw_available: Optional[bool] = None
