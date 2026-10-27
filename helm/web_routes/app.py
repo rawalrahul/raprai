@@ -55,8 +55,10 @@ app.mount("/static", _PublicAssets(directory=str(PROJECT_ROOT)), name="static")
 # Auth middleware — redirects unauthenticated requests to /login
 # ---------------------------------------------------------------------------
 
-# Paths that are always public (no PIN required)
-_PUBLIC_PREFIXES = ("/login", "/static", "/health", "/manifest.json", "/sw.js", "/update/check")
+# Paths that are always public (no PIN required). An agent webhook is called
+# from outside RAPR; the secret token in its URL is what lets it in.
+_PUBLIC_PREFIXES = ("/login", "/static", "/health", "/manifest.json", "/sw.js", "/update/check",
+                    "/api/agents/webhook")
 
 # First-run paths (the setup wizard, its preferences, and the optional
 # raprai.com linking). Open while no PIN is set, so the wizard works before you
