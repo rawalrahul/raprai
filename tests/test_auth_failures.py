@@ -133,3 +133,12 @@ def test_migration_ignores_only_an_existing_column():
     _add_column(conn, "t", "b TEXT")       # already there: fine
     with pytest.raises(sqlite3.OperationalError):
         _add_column(conn, "missing_table", "b TEXT")
+
+
+def test_quick_attempts_each_count_even_when_the_clock_doesnt_move(fresh_db, monkeypatch):
+    """Windows' clock moves in ~15 ms steps: a burst of guesses got one timestamp
+    and counted as a single attempt, so it was never locked out."""
+    monkeypatch.setattr(auth.time, "time", lambda: 1_800_000_000.0)
+    for _ in range(auth.MAX_ATTEMPTS):
+        auth.record_failure("203.0.113.9")
+    assert auth.is_locked_out("203.0.113.9")

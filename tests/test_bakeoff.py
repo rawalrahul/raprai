@@ -49,7 +49,7 @@ def test_creates_one_copy_per_ai(repo, tmp_path):
 
 
 def test_each_attempt_is_compared(repo, tmp_path):
-    b = bo.create(str(repo), "fix add", ["claude", "codex"], test_command="python -c 'import app; assert app.add(1,2)==3'",
+    b = bo.create(str(repo), "fix add", ["claude", "codex"], test_command='python -c "import app; assert app.add(1,2)==3"',
                   root=str(tmp_path / "work"))
     fixed = "def add(a, b):\n    return a + b\n"
     plan = {"claude": ("app.py", fixed), "codex": ("notes.txt", "I looked at it")}
@@ -148,3 +148,25 @@ def test_discard_stops_ais_still_running(tmp_path):
     br._stop_running(b)
     assert proc.wait(timeout=10) is not None
     assert a.path not in br._procs
+
+
+def test_merge_keeps_windows_line_endings(tmp_path):
+    """A project whose files end lines with \\r\\n (most Windows projects): reading the
+    diff as text turned them into \\n, so the patch no longer applied."""
+    r = tmp_path / "crlf"
+    r.mkdir()
+    git(r, "init", "-q")
+    git(r, "config", "user.email", "t@example.com")
+    git(r, "config", "user.name", "t")
+    git(r, "config", "core.autocrlf", "false")
+    (r / "app.py").write_bytes(b"def add(a, b):\r\n    return a - b\r\n")
+    git(r, "add", "-A")
+    git(r, "commit", "-q", "-m", "init")
+    b = bo.create(str(r), "fix add", ["claude", "codex"], root=str(tmp_path / "work"))
+
+    async def runner(ai, prompt, cwd):
+        Path(cwd, "app.py").write_bytes(b"def add(a, b):\r\n    return a + b\r\n")
+        return "done"
+    asyncio.run(bo.run(b, runner))
+    assert bo.merge(b, 0) == 1
+    assert (r / "app.py").read_bytes() == b"def add(a, b):\r\n    return a + b\r\n"
