@@ -125,3 +125,19 @@ def test_the_agent_builder_opens_and_adds_a_step(page):
     page.wait_for_selector(".agent-mic-btn", state="attached", timeout=5000)
     page.evaluate("closeAgentBuilder()")
     assert page.problems == []
+
+
+def test_kelvin_draws_and_switches_to_still(page):
+    """Kelvin's drawing is in kelvin.js and his moods in kelvin_ui.js; the still
+    switch has to reach the drawing code."""
+    assert page.locator("#kelvin-header svg").count() == 1
+    page.evaluate("""() => {
+        window.__still = [];
+        const real = Kelvin.setStill;
+        Kelvin.setStill = v => { window.__still.push(v); real(v); };
+    }""")
+    page.evaluate("KelvinUI.setMode('still')")
+    assert page.evaluate("document.documentElement.dataset.kelvin") == "still"
+    page.evaluate("KelvinUI.setMode('animated')")
+    assert page.evaluate("window.__still") == [True, False]
+    assert page.problems == []
