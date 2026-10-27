@@ -37,7 +37,8 @@ class Attempt:
     branch: Optional[str] = None
     seconds: float = 0.0
     output: str = ""
-    diff: str = ""
+    diff: str = ""                      # for people: undecodable bytes shown as �
+    patch: bytes = field(default=b"", repr=False)   # the exact diff, what merge applies
     files_changed: int = 0
     tests_passed: Optional[bool] = None
     error: Optional[str] = None
@@ -142,7 +143,13 @@ async def run(bo: BakeOff, runner: Runner, prompt_prefix: str = "") -> BakeOff:
 def _collect(bo: BakeOff, a: Attempt, before: dict) -> None:
     if bo.is_git:
         _git(a.path, "add", "-A")
-        a.diff = _git(a.path, "diff", "--cached", "HEAD")
+        # Bytes, not text: text mode turns \r\n into \n, and the patch then no longer
+        # applies to files with Windows line endings.
+        out = subprocess.run(["git", "diff", "--cached", "HEAD"], cwd=a.path, capture_output=True, timeout=120)
+        if out.returncode != 0:
+            raise RuntimeError(f"git diff: {out.stderr.decode(errors='replace').strip()[:300]}")
+        a.patch = out.stdout
+        a.diff = out.stdout.decode("utf-8", "replace")
         names = _git(a.path, "diff", "--cached", "--name-only", "HEAD").split()
         a.files_changed = len(names)
         for line in a.diff.splitlines():
@@ -167,12 +174,12 @@ def merge(bo: BakeOff, index: int) -> int:
         raise ValueError("wait for the attempts to finish before merging")
     a = bo.attempts[index]
     if bo.is_git:
-        patch = a.diff
-        if patch.strip():
-            r = subprocess.run(["git", "apply", "--index", "-"], cwd=bo.repo, input=patch,
-                               capture_output=True, text=True, timeout=120)
+        if a.patch.strip():
+            r = subprocess.run(["git", "apply", "--index", "-"], cwd=bo.repo,
+                               input=a.patch, capture_output=True, timeout=120)
             if r.returncode != 0:
-                raise RuntimeError(f"could not apply {a.ai}'s changes: {r.stderr.strip()[:300]}")
+                raise RuntimeError(f"could not apply {a.ai}'s changes: "
+                                   f"{r.stderr.decode(errors='replace').strip()[:300]}")
     else:
         for line in a.diff.splitlines():
             rel = line.removeprefix("changed: ")

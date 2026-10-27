@@ -1,7 +1,6 @@
 """ACP agents as sessions: registry, a full turn through the agent, and naming."""
 import asyncio
 import os
-import shlex
 import sys
 
 import pytest
@@ -12,7 +11,8 @@ import helm.acp_agents as agents
 import helm.acp_session as acp_session
 import helm.state as _st
 
-MOCK = f"{sys.executable} {os.path.join(os.path.dirname(__file__), 'mock_acp_agent.py')}"
+MOCK_PATH = os.path.join(os.path.dirname(__file__), 'mock_acp_agent.py')
+MOCK = f"{sys.executable} {MOCK_PATH}"
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def data(tmp_path, monkeypatch):
 def test_validation_and_save(data):
     agents.save([{"id": "mock", "name": "Mock", "command": MOCK}])
     a = agents.get("mock")
-    assert a["command"] == shlex.split(MOCK)
+    assert a["command"] == [sys.executable, MOCK_PATH]
     for bad in ({"id": "Bad Id", "name": "x", "command": "y"}, {"id": "a", "name": "", "command": "y"},
                 {"id": "a", "name": "x", "command": ""}):
         with pytest.raises(ValueError):
@@ -64,3 +64,10 @@ def test_session_is_named_after_its_agent(data, monkeypatch):
     sess = sm.make_session("acp:mock", cwd=str(data))
     assert sess["name"].startswith("Mock agent #") and sess["emoji"] == "🧪"
     assert sess["ai"] == "acp:mock"
+
+
+def test_windows_paths_keep_their_backslashes(monkeypatch):
+    monkeypatch.setattr(agents.sys, "platform", "win32")
+    a = agents.validate({"id": "x", "name": "X",
+                         "command": r'"C:\Program Files\Agent\agent.exe" --acp C:\work'})
+    assert a["command"] == [r"C:\Program Files\Agent\agent.exe", "--acp", r"C:\work"]

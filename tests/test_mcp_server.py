@@ -112,7 +112,7 @@ def test_bakeoff_round_trip(repo, fake_agents, monkeypatch, tmp_path):
     monkeypatch.setattr(mcp, "_save", lambda b: saved.append(b.status))
     s = mcp.Server(out=None, cwd=str(repo))
     text, err = call(s, "start_bakeoff", task="fix add", agents=["editor", "reader"],
-                     test_command="python -c 'import app; assert app.add(1,2)==3'")
+                     test_command='python -c "import app; assert app.add(1,2)==3"')
     assert not err
     bid = next(iter(s.bakeoffs))
     text, err = call(s, "bakeoff_status", id=bid, wait_seconds=30)

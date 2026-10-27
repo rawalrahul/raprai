@@ -45,7 +45,7 @@ def repo(tmp_path):
 
 
 def finished(repo, tmp_path, task="fix the add bug in app.py"):
-    b = bo.create(str(repo), task, ["claude", "codex"], test_command="python -c 'import app; assert app.add(1,2)==3'",
+    b = bo.create(str(repo), task, ["claude", "codex"], test_command='python -c "import app; assert app.add(1,2)==3"',
                   root=str(tmp_path / "work"))
 
     async def runner(ai, prompt, cwd):

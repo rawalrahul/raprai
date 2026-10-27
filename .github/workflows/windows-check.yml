@@ -2,7 +2,8 @@ name: Windows check
 
 # Installs RAPR on a real Windows machine with scripts/install-windows.ps1 (the
 # one-line PowerShell install), checks the shortcuts and the "rapr" command,
-# starts RAPR, checks it answers, and stops it. Free for public repositories.
+# starts RAPR, checks it answers and its page loads, stops it, updates it, and runs
+# the tests on Windows. Runs for any change to RAPR's code. Free for public repositories.
 
 on:
   workflow_dispatch:
@@ -11,14 +12,22 @@ on:
     paths:
       - scripts/install-windows.ps1
       - .github/workflows/windows-check.yml
-      - helm/mcp_server.py
+      - web_app.py
       - rapr_mcp.py
+      - requirements.txt
+      - helm/**
+      - frontend2/**
+      - tests/**
   pull_request:
     paths:
       - scripts/install-windows.ps1
       - .github/workflows/windows-check.yml
-      - helm/mcp_server.py
+      - web_app.py
       - rapr_mcp.py
+      - requirements.txt
+      - helm/**
+      - frontend2/**
+      - tests/**
 
 concurrency:
   group: windows-check-${{ github.ref }}
@@ -87,6 +96,12 @@ jobs:
           $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/"
           if ($r.Content -notmatch 'Setup</title>') { throw 'expected the setup page on first run' }
           'first run shows the setup page'
+          # The main page's styles and scripts are served (a bare, unstyled page otherwise).
+          foreach ($f in @('/css/design-system.css', '/js/core.js', '/js/telegram.js', '/sw.js')) {
+            $a = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port$f"
+            if ($a.StatusCode -ne 200 -or $a.Content.Length -lt 100) { throw "$f wasn't served" }
+          }
+          'page files are served'
 
           $s = & $rapr status | Out-String
           $s
@@ -145,6 +160,17 @@ jobs:
           if ($LASTEXITCODE) { throw "second install exited with $LASTEXITCODE" }
           if (-not (Test-Path "$h\app\.rapr-install.json")) { throw 'the install record should survive an update' }
           'download install pinned and recorded the commit, and updated in place'
+
+      - name: Tests on Windows
+        shell: powershell
+        env:
+          RAPR_HEADLESS: "1"
+        run: |
+          $py = Join-Path $env:LOCALAPPDATA 'rapr-ai\venv\Scripts\python.exe'
+          & $py -m pip install --quiet pytest
+          if ($LASTEXITCODE) { throw 'pip install pytest failed' }
+          & $py -m pytest tests -q -p no:cacheprovider
+          if ($LASTEXITCODE) { throw "tests failed on Windows (exit $LASTEXITCODE)" }
 
       - name: Log on failure
         if: failure()

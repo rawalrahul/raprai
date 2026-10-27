@@ -32,7 +32,7 @@ def write(out: Path, name: str, pin: str) -> None:
     env.write_text(plan.server_env(opts), encoding="utf-8")
     os.chmod(env, 0o600)
     (out / "docker-compose.yml").write_text(plan.compose_file(opts), encoding="utf-8")
-    if os.geteuid() == 0:
+    if hasattr(os, "geteuid") and os.geteuid() == 0:   # no geteuid (or root) on Windows
         os.chown(env, plan.CONTAINER_UID, plan.CONTAINER_UID)
 
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import re
 import shlex
+import sys
 
 from helm.config import logger
 
@@ -41,7 +42,9 @@ def validate(agent: dict) -> dict:
     command = agent.get("command", "")
     if isinstance(command, str):
         try:
-            command = shlex.split(command)
+            # Windows: POSIX rules read the backslashes in C:\...\agent.exe as escapes.
+            win = sys.platform == "win32"
+            command = [p.strip('"') if win else p for p in shlex.split(command, posix=not win)]
         except ValueError as exc:
             raise ValueError(f"{name or aid}: command can't be read ({exc})")
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", aid):

@@ -219,8 +219,14 @@ def is_locked_out(ip: str) -> bool:
 
 
 def record_failure(ip: str) -> None:
+    # Each attempt needs its own time: _prune merges this process's list with the
+    # database's by time, and Windows' clock moves in ~15 ms steps, so quick attempts
+    # that shared a time counted once and a burst of guesses never locked anyone out.
     now = time.time()
-    _failed.setdefault(ip, []).append(now)
+    earlier = _failed.setdefault(ip, [])
+    if earlier and now <= earlier[-1]:
+        now = earlier[-1] + 0.001
+    earlier.append(now)
     # Persist to DB
     try:
         from helm.db import get_db
