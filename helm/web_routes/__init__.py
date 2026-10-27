@@ -34,6 +34,7 @@ from .backup_routes import router as backup_router
 from .chrome_ws import router as chrome_ws_router
 from .update_routes import router as update_router
 from .agent_routes import router as agent_router
+from .agent_generate_routes import router as agent_generate_router
 from .council_routes import router as council_router
 from .groupchat_routes import router as groupchat_router
 from .whatsapp_routes import router as whatsapp_router
@@ -69,6 +70,7 @@ app.include_router(backup_router)
 app.include_router(chrome_ws_router)
 app.include_router(update_router)
 app.include_router(agent_router)
+app.include_router(agent_generate_router)
 app.include_router(council_router)
 app.include_router(groupchat_router)
 app.include_router(whatsapp_router)
