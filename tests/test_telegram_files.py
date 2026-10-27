@@ -13,7 +13,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import helm.state as _st
-from helm.telegram_bot import commands
+from helm.telegram_bot import media
 
 
 class _File:
@@ -52,7 +52,7 @@ def test_attachment_is_saved(session, kind):
         update = _update(replies, photo=[_Attachment()])
     else:
         update = _update(replies, document=_Attachment(file_name=None))
-    asyncio.run(commands.tg_file.__wrapped__(update, None))
+    asyncio.run(media.tg_file.__wrapped__(update, None))
     saved = os.listdir(session)
     assert len(saved) == 1 and saved[0].startswith("telegram_")
     assert replies and replies[0].startswith("📎 Saved")

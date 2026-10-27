@@ -23,15 +23,17 @@ from .browse import (
     _tg_browse_state,  # exposed for state access if needed
 )
 
-# Commands (all /command handlers)
+# /command handlers
 from .commands import (
     tg_start, tg_menu, tg_launch, tg_claude, tg_codex, tg_gemini, tg_antigravity,
     tg_stop_ai, tg_clear, tg_cmd, tg_status, tg_kelvin, tg_interrupt, tg_stop,
-    tg_cwd, tg_timeout, tg_schedule, tg_history, tg_resume,
-    tg_clear_context, tg_text, tg_voice, tg_file, tg_pipeline, tg_agent,
-    perform_resume, _perform_resume,
-    _update_env,
+    tg_cwd, tg_timeout, _update_env,
 )
+from .schedule import tg_schedule
+from .history import tg_history, tg_resume, tg_clear_context, perform_resume, _perform_resume
+from .text import tg_text
+from .media import tg_voice, tg_file
+from .workflows import tg_pipeline, tg_agent
 
 # Group chats
 from .groups import tg_group, group_callback
