@@ -82,6 +82,10 @@ services:
   rapr:
     image: {IMAGE}
     restart: unless-stopped
+    environment:
+      # Visitors only arrive through the tunnel below (no port is published),
+      # so RAPR can trust the visitor address Cloudflare passes on.
+      RAPR_BEHIND_TUNNEL: "1"
     volumes:
       - rapr-data:/data
       # The app reads and writes /data/.env (setup, PIN, settings); this is the

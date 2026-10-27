@@ -58,12 +58,12 @@ main() {
     $compose pull -q
   else
     local pin pin2
-    say "Choose a PIN. You'll type it to open RAPR (at least 4 characters)."
+    say "Choose a PIN. You'll type it to open RAPR (at least 8 characters: it's on the internet)."
     while true; do
       read -r -s -p "    PIN: " pin </dev/tty; echo
       read -r -s -p "    PIN again: " pin2 </dev/tty; echo
       if [ "$pin" != "$pin2" ]; then echo "    The PINs don't match, try again."
-      elif [ "${#pin}" -lt 4 ]; then echo "    Use at least 4 characters."
+      elif [ "${#pin}" -lt 8 ]; then echo "    Use at least 8 characters."
       else break; fi
     done
     say "Downloading RAPR (the first time takes a few minutes)..."
