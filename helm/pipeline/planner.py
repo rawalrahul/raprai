@@ -264,6 +264,12 @@ def _parse_planner_json(raw: str) -> Optional[dict]:
 # Available AI discovery
 # ---------------------------------------------------------------------------
 
+def _safe_step_id(value, fallback: str = "") -> str:
+    """Step ids come from the planner AI and end up in the page's HTML and onclick
+    handlers: keep letters, digits, "_" and "-" only."""
+    return re.sub(r"[^A-Za-z0-9_-]", "", str(value))[:40] or fallback
+
+
 def discover_available_ais() -> list[str]:
     """Return list of AI keys that are currently available."""
     import helm.state as _st
@@ -430,11 +436,11 @@ async def plan_pipeline(
     pipeline = make_pipeline(prompt, session_id, cwd, planner_ai=actual_planner)
 
     for raw_step in parsed["steps"]:
-        sid = raw_step.get("id", f"step-{len(pipeline['steps']) + 1}")
+        sid = _safe_step_id(raw_step.get("id"), f"step-{len(pipeline['steps']) + 1}")
         title = raw_step.get("title", "Untitled step")
         desc = raw_step.get("description", "")
         ai = raw_step.get("assigned_ai", "claude")
-        deps = raw_step.get("depends_on", [])
+        deps = [d for d in map(_safe_step_id, raw_step.get("depends_on") or []) if d]
         expected = raw_step.get("expected_output", "text")
         condition = raw_step.get("condition")
         fallback_ais = raw_step.get("fallback_ais", [])
