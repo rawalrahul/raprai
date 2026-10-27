@@ -1,43 +1,19 @@
 """
 helm/packages/mcp_installer.py — Install/uninstall MCP server packages.
 
-MCP servers are merged into mcp_servers.json and hot-started via
+MCP servers are added to your mcp_servers.json (in the data folder) and hot-started via
 MCPManager.reload_servers().
 """
 
-import json
 import pathlib
 from typing import Optional
 
 from helm.config import logger
+# Installed servers go in your own mcp_servers.json in the data folder
+# (helm/mcp/config.py), so updates don't remove them.
+from helm.mcp.config import read_raw, read_user_raw, remove_server, write_user_raw
 from helm.packages import HelmPackManifest, InstallError
 
-
-def _get_mcp_config_path() -> pathlib.Path:
-    """Return path to mcp_servers.json."""
-    from helm.paths import PROJECT_ROOT
-    return PROJECT_ROOT / "mcp_servers.json"
-
-
-def _load_mcp_config() -> dict:
-    """Load existing mcp_servers.json or return empty dict."""
-    path = _get_mcp_config_path()
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.warning("Failed to read mcp_servers.json: %s", e)
-        return {}
-
-
-def _save_mcp_config(config: dict) -> None:
-    """Write mcp_servers.json."""
-    path = _get_mcp_config_path()
-    path.write_text(
-        json.dumps(config, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
 
 
 def install_mcp(
@@ -73,10 +49,10 @@ def install_mcp(
     env_vars = mcp_cfg.get("env", {})
 
     # Load existing config
-    config = _load_mcp_config()
+    config = read_user_raw()
 
     # Check for conflict
-    if server_id in config and not force:
+    if server_id in read_raw() and not force:
         raise InstallError(
             f"MCP server '{server_id}' already configured. Use force=True to overwrite."
         )
@@ -105,7 +81,7 @@ def install_mcp(
                 "name": manifest.name,
             },
         }
-        _save_mcp_config(config)
+        write_user_raw(config)
 
         # Hot-reload MCP servers
         try:
@@ -128,20 +104,14 @@ def install_mcp(
             config[server_id] = backup
         else:
             config.pop(server_id, None)
-        _save_mcp_config(config)
+        write_user_raw(config)
         raise InstallError(f"MCP installation failed: {e}") from e
 
 
 def uninstall_mcp(package_id: str) -> dict:
     """Remove an MCP server entry and stop the running server."""
-    config = _load_mcp_config()
-
-    if package_id not in config:
+    if not remove_server(package_id):
         return {"ok": True, "message": f"MCP server '{package_id}' not found (already removed)"}
-
-    # Remove from config
-    config.pop(package_id)
-    _save_mcp_config(config)
 
     # Remove server files
     server_files_dir = _get_server_files_dir(package_id)
