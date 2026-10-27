@@ -69,7 +69,7 @@ def load_config(config_path: Optional[str] = None) -> dict:
         enabled = cfg.get("enabled", False)
         status = "enabled" if enabled else "disabled"
 
-        # WebSocket-based servers (e.g. Chrome extension) have no command
+        # WebSocket servers (the removed Chrome extension) have no command
         if server_type == "websocket":
             servers[server_id] = {
                 "type": "websocket",

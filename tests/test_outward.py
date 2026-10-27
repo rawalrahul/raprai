@@ -64,7 +64,6 @@ def test_actions_that_change_things_are_outward(name):
     "google_workspace_gmail_users_messages_list",
     "mcp__claude_ai_Gmail__create_draft",          # a draft stays with you
     "mcp__postgres__query",
-    "chrome_click",                                 # computer use has its own switch
 ])
 def test_reading_and_drafting_are_not(name):
     assert not outward.is_outward(name)

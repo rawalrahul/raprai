@@ -18,7 +18,6 @@ See `README.md` for configuration and troubleshooting.
 | `web_app.py` | Entry point (FastAPI + Telegram bot) |
 | `helm/` | Core: sessions, AI runners, memory, council, pipelines, plugins, MCP |
 | `frontend2/` | Web UI (vanilla JS) |
-| `chrome-extension/` | Browser companion for computer use |
 | `tests/` | Test suite (`pytest`) |
 | `.skills/skills/` | Built-in skill library loaded at startup |
 

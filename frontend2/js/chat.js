@@ -52,7 +52,6 @@ const _thinkingMessages = [
   "💡 Tip: Open AI Council ⚖️ — multiple AIs debate your question and agree on an answer",
   "💡 Tip: Click the mic 🎤 to send a voice message instead of typing",
   "💡 Tip: Upload a video demo — AI analyzes it and replicates the workflow",
-  "💡 Tip: AI can control your browser through the Chrome extension",
   "💡 Tip: Risky commands pause for your approval — watch for the approval banner",
   "💡 Tip: Add any CLI tool as a custom AI in Settings",
   "💡 Tip: Vector memory finds related facts even when the wording differs",
