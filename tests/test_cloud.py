@@ -154,7 +154,8 @@ def test_server_files_writes_same_setup_as_the_app(tmp_path, monkeypatch):
     from helm.cloud import server_files
     server_files.write(tmp_path, "rapr", "43214321")
     env = (tmp_path / "rapr.env").read_text()
-    assert oct((tmp_path / "rapr.env").stat().st_mode & 0o777) == "0o600"
+    if os.name != "nt":                      # Windows has no Unix permissions; this runs on Linux servers
+        assert oct((tmp_path / "rapr.env").stat().st_mode & 0o777) == "0o600"
     assert "43214321" not in env and "RAPR_HEADLESS=1" in env
     vals = dict(l.split("=", 1) for l in env.splitlines() if "=" in l and not l.startswith("#"))
     monkeypatch.setenv("PIN_SALT", vals["PIN_SALT"])
