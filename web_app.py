@@ -126,6 +126,76 @@ async def _stop_telegram() -> None:
         logger.warning("Telegram shutdown error: %s", exc)
 
 
+def _build_telegram_app(token: str):
+    """The Telegram bot with all of RAPR's commands and buttons (not started yet)."""
+    from telegram.ext import (
+        Application, CallbackQueryHandler, CommandHandler,
+        MessageHandler, filters,
+    )
+    from helm.telegram_bot import (
+        action_callback, browse_callback, pipeline_callback,
+        approval_callback, agent_callback,
+        tg_browse, tg_clear, tg_clear_context, tg_claude, tg_cmd,
+        tg_codex, tg_cwd, tg_gemini, tg_antigravity, tg_history, tg_interrupt,
+        tg_launch, tg_menu, tg_pipeline, tg_agent, tg_resume, tg_schedule,
+        tg_start, tg_status, tg_kelvin, tg_stop, tg_stop_ai, tg_text, tg_timeout,
+        tg_voice, tg_file,
+    )
+    from helm.telegram_bot.groups import tg_group, group_callback, register as _register_tg_groups
+    from helm.telegram_bot.brief import tg_brief, brief_callback
+    _register_tg_groups()
+
+    tg = Application.builder().token(token).concurrent_updates(True).build()
+
+    # Primary commands
+    tg.add_handler(CommandHandler("start",   tg_start))
+    tg.add_handler(CommandHandler("menu",    tg_menu))
+    # AI selection
+    tg.add_handler(CommandHandler("claude",  tg_claude))
+    tg.add_handler(CommandHandler("gemini",  tg_gemini))
+    tg.add_handler(CommandHandler(["antigravity", "agy"], tg_antigravity))
+    tg.add_handler(CommandHandler("codex",   tg_codex))
+    # Session controls
+    tg.add_handler(CommandHandler("launch",    tg_launch))
+    tg.add_handler(CommandHandler("stop",      tg_stop))
+    tg.add_handler(CommandHandler("interrupt", tg_interrupt))
+    tg.add_handler(CommandHandler("stop_ai",   tg_stop_ai))
+    tg.add_handler(CommandHandler("status",    tg_status))
+    tg.add_handler(CommandHandler("kelvin",    tg_kelvin))
+    # Utility
+    tg.add_handler(CommandHandler("cwd",          tg_cwd))
+    tg.add_handler(CommandHandler("browse",        tg_browse))
+    tg.add_handler(CommandHandler("cmd",           tg_cmd))
+    tg.add_handler(CommandHandler("timeout",       tg_timeout))
+    tg.add_handler(CommandHandler("clear",         tg_clear))
+    tg.add_handler(CommandHandler("history",       tg_history))
+    tg.add_handler(CommandHandler("resume",        tg_resume))
+    tg.add_handler(CommandHandler("clear_context", tg_clear_context))
+    tg.add_handler(CommandHandler("schedule",      tg_schedule))
+    tg.add_handler(CommandHandler("pipeline",      tg_pipeline))
+    tg.add_handler(CommandHandler("agent",         tg_agent))
+    tg.add_handler(CommandHandler("group",         tg_group))
+    tg.add_handler(CommandHandler("brief",         tg_brief))
+    # Inline keyboard callbacks — action/ms: buttons BEFORE browse_callback
+    tg.add_handler(CallbackQueryHandler(action_callback, pattern=r"^(action:|ms:)"))
+    tg.add_handler(CallbackQueryHandler(pipeline_callback, pattern=r"^pl:"))
+    tg.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^appr:"))
+    tg.add_handler(CallbackQueryHandler(agent_callback, pattern=r"^ag:"))
+    tg.add_handler(CallbackQueryHandler(group_callback, pattern=r"^gc:"))
+    tg.add_handler(CallbackQueryHandler(heartbeat_callback, pattern=r"^heartbeat:"))
+    tg.add_handler(CallbackQueryHandler(brief_callback, pattern=r"^brief:"))
+    tg.add_handler(CallbackQueryHandler(browse_callback))
+    # Voice / audio messages
+    tg.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, tg_voice))
+    # Photos and document attachments
+    tg.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, tg_file))
+    # Plain text + natural language
+    # /model [name] is handled by RAPR itself (core /model), like plain text.
+    tg.add_handler(CommandHandler("model", tg_text))
+    tg.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, tg_text))
+    return tg
+
+
 async def _main():
     # Set up crash logging FIRST — everything after this is logged to file
     from helm.resilience import setup_crash_logging
@@ -328,74 +398,7 @@ async def _main():
                 WEB_PORT,
             )
     if BOT_TOKEN and ALLOWED_USER_IDS:
-        from telegram.ext import (
-            Application, CallbackQueryHandler, CommandHandler,
-            MessageHandler, filters,
-        )
-        from helm.telegram_bot import (
-            action_callback, browse_callback, pipeline_callback,
-            approval_callback, agent_callback,
-            tg_browse, tg_clear, tg_clear_context, tg_claude, tg_cmd,
-            tg_codex, tg_cwd, tg_gemini, tg_antigravity, tg_history, tg_interrupt,
-            tg_launch, tg_menu, tg_pipeline, tg_agent, tg_resume, tg_schedule,
-            tg_start, tg_status, tg_kelvin, tg_stop, tg_stop_ai, tg_text, tg_timeout,
-            tg_voice, tg_file,
-        )
-        from helm.telegram_bot.groups import tg_group, group_callback, register as _register_tg_groups
-        from helm.telegram_bot.brief import tg_brief, brief_callback
-        _register_tg_groups()
-
-        _st.telegram_app = (
-            Application.builder().token(BOT_TOKEN).concurrent_updates(True).build()
-        )
-        tg = _st.telegram_app
-
-        # Primary commands
-        tg.add_handler(CommandHandler("start",   tg_start))
-        tg.add_handler(CommandHandler("menu",    tg_menu))
-        # AI selection
-        tg.add_handler(CommandHandler("claude",  tg_claude))
-        tg.add_handler(CommandHandler("gemini",  tg_gemini))
-        tg.add_handler(CommandHandler(["antigravity", "agy"], tg_antigravity))
-        tg.add_handler(CommandHandler("codex",   tg_codex))
-        # Session controls
-        tg.add_handler(CommandHandler("launch",    tg_launch))
-        tg.add_handler(CommandHandler("stop",      tg_stop))
-        tg.add_handler(CommandHandler("interrupt", tg_interrupt))
-        tg.add_handler(CommandHandler("stop_ai",   tg_stop_ai))
-        tg.add_handler(CommandHandler("status",    tg_status))
-        tg.add_handler(CommandHandler("kelvin",    tg_kelvin))
-        # Utility
-        tg.add_handler(CommandHandler("cwd",          tg_cwd))
-        tg.add_handler(CommandHandler("browse",        tg_browse))
-        tg.add_handler(CommandHandler("cmd",           tg_cmd))
-        tg.add_handler(CommandHandler("timeout",       tg_timeout))
-        tg.add_handler(CommandHandler("clear",         tg_clear))
-        tg.add_handler(CommandHandler("history",       tg_history))
-        tg.add_handler(CommandHandler("resume",        tg_resume))
-        tg.add_handler(CommandHandler("clear_context", tg_clear_context))
-        tg.add_handler(CommandHandler("schedule",      tg_schedule))
-        tg.add_handler(CommandHandler("pipeline",      tg_pipeline))
-        tg.add_handler(CommandHandler("agent",         tg_agent))
-        tg.add_handler(CommandHandler("group",         tg_group))
-        tg.add_handler(CommandHandler("brief",         tg_brief))
-        # Inline keyboard callbacks — action/ms: buttons BEFORE browse_callback
-        tg.add_handler(CallbackQueryHandler(action_callback, pattern=r"^(action:|ms:)"))
-        tg.add_handler(CallbackQueryHandler(pipeline_callback, pattern=r"^pl:"))
-        tg.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^appr:"))
-        tg.add_handler(CallbackQueryHandler(agent_callback, pattern=r"^ag:"))
-        tg.add_handler(CallbackQueryHandler(group_callback, pattern=r"^gc:"))
-        tg.add_handler(CallbackQueryHandler(heartbeat_callback, pattern=r"^heartbeat:"))
-        tg.add_handler(CallbackQueryHandler(brief_callback, pattern=r"^brief:"))
-        tg.add_handler(CallbackQueryHandler(browse_callback))
-        # Voice / audio messages
-        tg.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, tg_voice))
-        # Photos and document attachments
-        tg.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, tg_file))
-        # Plain text + natural language
-        # /model [name] is handled by RAPR itself (core /model), like plain text.
-        tg.add_handler(CommandHandler("model", tg_text))
-        tg.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, tg_text))
+        _st.telegram_app = _build_telegram_app(BOT_TOKEN)
 
 
     # --- Hot-start Telegram function (called from setup_save if bot wasn't started at launch) ---
@@ -430,71 +433,8 @@ async def _main():
         # without waiting for the user to send the first Telegram message.
         _st.telegram_chat_id = next(iter(user_ids), None)
         try:
-            from telegram.ext import (
-                Application, CallbackQueryHandler, CommandHandler,
-                MessageHandler, filters,
-            )
-            from helm.telegram_bot import (
-                action_callback, browse_callback, pipeline_callback,
-                approval_callback, agent_callback,
-                tg_browse, tg_clear, tg_clear_context, tg_claude, tg_cmd,
-                tg_codex, tg_cwd, tg_gemini, tg_antigravity, tg_history, tg_interrupt,
-                tg_launch, tg_menu, tg_pipeline, tg_agent, tg_resume, tg_schedule,
-                tg_start, tg_status, tg_kelvin, tg_stop, tg_stop_ai, tg_text, tg_timeout,
-                tg_voice, tg_file,
-            )
-            from helm.telegram_bot.groups import tg_group, group_callback, register as _register_tg_groups
-            from helm.telegram_bot.brief import tg_brief, brief_callback
-            _register_tg_groups()
-            _st.telegram_app = (
-                Application.builder().token(token).concurrent_updates(True).build()
-            )
-            tg = _st.telegram_app
-            if _st.telegram_chat_id is None:
-                # Set up from the setup page while running: send updates (group chats,
-                # files…) to the allowed user straight away, without waiting for /start.
-                _ids = [x.strip() for x in os.environ.get("ALLOWED_USER_IDS", "").split(",") if x.strip().isdigit()]
-                if _ids:
-                    _st.telegram_chat_id = int(_ids[0])
-            tg.add_handler(CommandHandler("start",   tg_start))
-            tg.add_handler(CommandHandler("menu",    tg_menu))
-            tg.add_handler(CommandHandler("claude",  tg_claude))
-            tg.add_handler(CommandHandler("gemini",  tg_gemini))
-            tg.add_handler(CommandHandler(["antigravity", "agy"], tg_antigravity))
-            tg.add_handler(CommandHandler("codex",   tg_codex))
-            tg.add_handler(CommandHandler("launch",    tg_launch))
-            tg.add_handler(CommandHandler("stop",      tg_stop))
-            tg.add_handler(CommandHandler("interrupt", tg_interrupt))
-            tg.add_handler(CommandHandler("stop_ai",   tg_stop_ai))
-            tg.add_handler(CommandHandler("status",    tg_status))
-            tg.add_handler(CommandHandler("kelvin",    tg_kelvin))
-            tg.add_handler(CommandHandler("cwd",          tg_cwd))
-            tg.add_handler(CommandHandler("browse",        tg_browse))
-            tg.add_handler(CommandHandler("cmd",           tg_cmd))
-            tg.add_handler(CommandHandler("timeout",       tg_timeout))
-            tg.add_handler(CommandHandler("clear",         tg_clear))
-            tg.add_handler(CommandHandler("history",       tg_history))
-            tg.add_handler(CommandHandler("resume",        tg_resume))
-            tg.add_handler(CommandHandler("clear_context", tg_clear_context))
-            tg.add_handler(CommandHandler("schedule",      tg_schedule))
-            tg.add_handler(CommandHandler("pipeline",      tg_pipeline))
-            tg.add_handler(CommandHandler("agent",         tg_agent))
-            tg.add_handler(CommandHandler("group",         tg_group))
-            tg.add_handler(CommandHandler("brief",         tg_brief))
-            tg.add_handler(CallbackQueryHandler(action_callback, pattern=r"^(action:|ms:)"))
-            tg.add_handler(CallbackQueryHandler(pipeline_callback, pattern=r"^pl:"))
-            tg.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^appr:"))
-            tg.add_handler(CallbackQueryHandler(agent_callback, pattern=r"^ag:"))
-            tg.add_handler(CallbackQueryHandler(group_callback, pattern=r"^gc:"))
-            tg.add_handler(CallbackQueryHandler(heartbeat_callback, pattern=r"^heartbeat:"))
-            tg.add_handler(CallbackQueryHandler(brief_callback, pattern=r"^brief:"))
-            tg.add_handler(CallbackQueryHandler(browse_callback))
-            tg.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, tg_voice))
-            tg.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, tg_file))
-            # /model [name] is handled by RAPR itself (core /model), like plain text.
-            tg.add_handler(CommandHandler("model", tg_text))
-            tg.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, tg_text))
-            _start_telegram(tg, "Hot-start")
+            _st.telegram_app = _build_telegram_app(token)
+            _start_telegram(_st.telegram_app, "Hot-start")
         except Exception as exc:
             logger.error("Telegram hot-start failed: %s", exc)
             _st.telegram_app = None
