@@ -6,7 +6,7 @@ Covers: tg_browse, show_browse, browse state management.
 
 import pathlib
 
-from helm.config import ALLOWED_USER_IDS
+import helm.config as _cfg   # read ALLOWED_USER_IDS live: startup replaces it after the vault loads
 
 from .auth import authorized_only
 from .keyboards import session_controls_keyboard, sessions_keyboard
@@ -90,7 +90,7 @@ async def browse_callback(update, context):
 
     query = update.callback_query
     user_id = query.from_user.id
-    if not ALLOWED_USER_IDS or user_id not in ALLOWED_USER_IDS:
+    if not _cfg.ALLOWED_USER_IDS or user_id not in _cfg.ALLOWED_USER_IDS:
         await query.answer("Not authorized.", show_alert=True)
         return
     await query.answer()

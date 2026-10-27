@@ -246,8 +246,7 @@ def tg(env, monkeypatch):
     pytest.importorskip("telegram")
     import helm.telegram_bot.groups as tgg
     import helm.telegram_bot.auth as auth
-    monkeypatch.setattr(auth, "ALLOWED_USER_IDS", {7})
-    monkeypatch.setattr(tgg, "ALLOWED_USER_IDS", {7})
+    monkeypatch.setattr(auth._cfg, "ALLOWED_USER_IDS", {7})
     return tgg
 
 

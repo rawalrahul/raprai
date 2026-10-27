@@ -11,7 +11,8 @@ come from helm/groupchat_channels.py and work the same on WhatsApp.
 import helm.state as _st
 import helm.groupchat as gc
 import helm.groupchat_channels as gch
-from helm.config import ALLOWED_USER_IDS, logger
+import helm.config as _cfg   # read ALLOWED_USER_IDS live: startup replaces it after the vault loads
+from helm.config import logger
 
 from .auth import authorized_only
 
@@ -123,7 +124,7 @@ async def handle_group_text(update, text: str) -> bool:
 async def group_callback(update, context):
     """Inline buttons with gc:* data."""
     query = update.callback_query
-    if not ALLOWED_USER_IDS or query.from_user.id not in ALLOWED_USER_IDS:
+    if not _cfg.ALLOWED_USER_IDS or query.from_user.id not in _cfg.ALLOWED_USER_IDS:
         await query.answer("Not authorized.", show_alert=True)
         return
     await query.answer()

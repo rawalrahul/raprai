@@ -7,7 +7,8 @@ Covers: authorized_only decorator, tg_send_chunks helper.
 from functools import wraps
 
 import helm.state as _st
-from helm.config import ALLOWED_USER_IDS, logger
+import helm.config as _cfg   # read ALLOWED_USER_IDS live: startup replaces it after the vault loads
+from helm.config import logger
 
 
 def authorized_only(func):
@@ -17,7 +18,7 @@ def authorized_only(func):
         user_id = update.effective_user.id
         # effective_message: a button press has no update.message.
         msg = update.effective_message
-        if not ALLOWED_USER_IDS:
+        if not _cfg.ALLOWED_USER_IDS:
             if msg:
                 await msg.reply_text(
                     "⛔ Bot is locked — no authorised users are configured.\n\n"
@@ -30,7 +31,7 @@ def authorized_only(func):
                 user_id,
             )
             return
-        if user_id not in ALLOWED_USER_IDS:
+        if user_id not in _cfg.ALLOWED_USER_IDS:
             if msg:
                 await msg.reply_text("⛔ Unauthorized.")
             logger.warning("Rejected unauthorised user %d", user_id)

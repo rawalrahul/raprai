@@ -75,7 +75,7 @@ def test_tg_kelvin_replies_to_the_owner(monkeypatch):
     _fresh_status(monkeypatch)
     monkeypatch.setattr(_st, "scheduled_tasks", {}, raising=False)
     import helm.telegram_bot.auth as auth
-    monkeypatch.setattr(auth, "ALLOWED_USER_IDS", [42])
+    monkeypatch.setattr(auth._cfg, "ALLOWED_USER_IDS", [42])
     from helm.telegram_bot.commands import tg_kelvin
     replies = []
 
@@ -91,7 +91,7 @@ def test_tg_kelvin_replies_to_the_owner(monkeypatch):
 
 def test_tg_kelvin_refuses_strangers(monkeypatch):
     import helm.telegram_bot.auth as auth
-    monkeypatch.setattr(auth, "ALLOWED_USER_IDS", [42])
+    monkeypatch.setattr(auth._cfg, "ALLOWED_USER_IDS", [42])
     from helm.telegram_bot.commands import tg_kelvin
     replies = []
 
