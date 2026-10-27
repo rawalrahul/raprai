@@ -122,7 +122,8 @@ async def run_claude(sess: dict, text: str, safe_text: str, cwd: str,
     from helm.broadcast import push_message, push_thinking
     from helm.config import CLAUDE_TIMEOUT, logger
     from helm.mcp.inject import inject_mcp_context
-    from helm.skills import auto_create_skill_template, detect_skill
+    from helm.skill_creation import auto_create_skill_template
+    from helm.skills import detect_skill
     from . import core
     from .core import _is_coherent_task, _is_failure
     from .prompt import enrich_prompt

@@ -20,9 +20,8 @@ import helm.state as _st
 from helm.broadcast import broadcast, push_agent_error, push_message, push_state, push_thinking
 from helm.config import CLAUDE_TIMEOUT, INTEGRATION_TIMEOUT, logger
 from helm.session_mgr import record_usage_task
-from helm.skills import (
-    inject_skill_prefix, generate_skill,
-)
+from helm.skills import inject_skill_prefix
+from helm.skill_creation import generate_skill
 from helm.plugins import inject_plugin_context
 from helm.context_manager import update_token_count, check_and_compact
 

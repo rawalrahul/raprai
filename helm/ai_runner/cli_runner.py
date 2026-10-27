@@ -9,7 +9,8 @@ import helm.state as _st
 from helm.broadcast import push_message, push_thinking
 from helm.config import INTEGRATION_TIMEOUT, logger
 from helm.mcp.inject import inject_mcp_context
-from helm.skills import auto_create_skill_template, detect_skill
+from helm.skill_creation import auto_create_skill_template
+from helm.skills import detect_skill
 
 from .helpers import _clean_output
 from .prompt import enrich_prompt
