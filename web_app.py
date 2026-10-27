@@ -68,6 +68,64 @@ def _telegram_polling_error_handler(label: str):
     return _on_error
 
 
+_telegram_tasks: set = set()   # keeps the background start-up tasks from being garbage-collected
+
+
+async def _keep_telegram_polling(tg, label: str) -> None:
+    """Start polling, retrying until Telegram can be reached.
+
+    Right after the computer wakes up or joins Wi-Fi, api.telegram.org often times
+    out. Giving up then left Telegram off until the next restart, so keep trying,
+    backing off to a minute. A rejected token is final: Settings sets a new one.
+    """
+    from telegram import Update
+    from telegram.error import InvalidToken
+
+    delay = 5
+    while True:
+        try:
+            await tg.initialize()
+            if not tg.running:
+                await tg.start()
+            await tg.updater.start_polling(
+                allowed_updates=Update.ALL_TYPES,
+                error_callback=_telegram_polling_error_handler(label),
+            )
+            logger.info("Telegram bot started. Polling for updates...")
+            return
+        except InvalidToken as exc:
+            logger.error("Telegram bot disabled: the bot token was rejected (%s). Set it again in Settings.", exc)
+            if _st.telegram_app is tg:
+                _st.telegram_app = None
+            return
+        except Exception as exc:
+            logger.warning("Telegram couldn't connect (%s); trying again in %d s", exc, delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 60)
+
+
+def _start_telegram(tg, label: str) -> None:
+    task = asyncio.create_task(_keep_telegram_polling(tg, label))
+    _telegram_tasks.add(task)
+    task.add_done_callback(_telegram_tasks.discard)
+
+
+async def _stop_telegram() -> None:
+    for task in list(_telegram_tasks):
+        task.cancel()
+    tg = _st.telegram_app
+    if not tg:
+        return
+    try:
+        if tg.updater and tg.updater.running:
+            await tg.updater.stop()
+        if tg.running:
+            await tg.stop()
+        await tg.shutdown()
+    except Exception as exc:
+        logger.warning("Telegram shutdown error: %s", exc)
+
+
 async def _main():
     # Set up crash logging FIRST — everything after this is logged to file
     from helm.resilience import setup_crash_logging
@@ -270,7 +328,6 @@ async def _main():
                 WEB_PORT,
             )
     if BOT_TOKEN and ALLOWED_USER_IDS:
-        from telegram import Update
         from telegram.ext import (
             Application, CallbackQueryHandler, CommandHandler,
             MessageHandler, filters,
@@ -373,7 +430,6 @@ async def _main():
         # without waiting for the user to send the first Telegram message.
         _st.telegram_chat_id = next(iter(user_ids), None)
         try:
-            from telegram import Update as _Upd
             from telegram.ext import (
                 Application, CallbackQueryHandler, CommandHandler,
                 MessageHandler, filters,
@@ -438,13 +494,7 @@ async def _main():
             # /model [name] is handled by RAPR itself (core /model), like plain text.
             tg.add_handler(CommandHandler("model", tg_text))
             tg.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, tg_text))
-            await tg.initialize()
-            await tg.start()
-            await tg.updater.start_polling(
-                allowed_updates=_Upd.ALL_TYPES,
-                error_callback=_telegram_polling_error_handler("Hot-start"),
-            )
-            logger.info("Telegram bot hot-started successfully after setup!")
+            _start_telegram(tg, "Hot-start")
         except Exception as exc:
             logger.error("Telegram hot-start failed: %s", exc)
             _st.telegram_app = None
@@ -632,43 +682,16 @@ async def _main():
     from helm.updater import auto_check_loop
     asyncio.create_task(auto_check_loop())
 
+    # Telegram connects in the background: the web UI never waits for it, and a
+    # network that isn't ready yet only delays Telegram instead of disabling it.
     if _st.telegram_app:
-        from telegram import Update
-        try:
-            async with _st.telegram_app:
-                await _st.telegram_app.start()
-                await _st.telegram_app.updater.start_polling(
-                    allowed_updates=Update.ALL_TYPES,
-                    error_callback=_telegram_polling_error_handler("Startup"),
-                )
-                logger.info("Telegram bot started. Polling for updates...")
-                if _st.telegram_chat_id:
-                    logger.info("Telegram chat_id pre-set to %s — web→Telegram forwarding ready", _st.telegram_chat_id)
-                else:
-                    logger.warning("No ALLOWED_USER_IDS configured — web→Telegram forwarding disabled until first Telegram message")
-                await server.serve()           # blocks until Ctrl+C
-                await _st.telegram_app.updater.stop()
-                await _st.telegram_app.stop()
-        except Exception as exc:
-            # Telegram init/start must never take down the web UI. A network
-            # timeout reaching api.telegram.org (firewall/VPN/ISP block) or a
-            # stale token should degrade gracefully: log it, drop the bot, and
-            # keep serving the web app.
-            logger.error("Telegram bot disabled (%s) — serving web UI without Telegram", exc)
-            _st.telegram_app = None
-            if not server.started:
-                await server.serve()
-    else:
-        await server.serve()
-        # Clean up any hot-started Telegram bot
-        if _st.telegram_app:
-            try:
-                await _st.telegram_app.updater.stop()
-                await _st.telegram_app.stop()
-                await _st.telegram_app.shutdown()
-                logger.info("Hot-started Telegram bot stopped.")
-            except Exception as exc:
-                logger.warning("Telegram shutdown error: %s", exc)
+        _start_telegram(_st.telegram_app, "Startup")
+        if _st.telegram_chat_id:
+            logger.info("Telegram chat_id pre-set to %s — web→Telegram forwarding ready", _st.telegram_chat_id)
+        else:
+            logger.warning("No ALLOWED_USER_IDS configured — web→Telegram forwarding disabled until first Telegram message")
+    await server.serve()           # blocks until Ctrl+C
+    await _stop_telegram()
 
 
 def main():
