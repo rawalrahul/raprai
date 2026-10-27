@@ -48,10 +48,6 @@ book cancel schedule move rename upload write insert append modify add set
 # Drafts stay with you until something sends them.
 _DRAFT_WORDS = frozenset({"draft", "drafts"})
 
-# Servers whose tools are already controlled elsewhere: the Chrome extension is
-# computer use, which has its own switch in Settings.
-_SKIP_SERVERS = frozenset({"chrome"})
-
 
 def enabled() -> bool:
     return os.environ.get("OUTWARD_ACTIONS", "ask").strip().lower() != "allow"
@@ -96,8 +92,6 @@ def words(name: str) -> list[str]:
 def is_outward(tool_name: str) -> bool:
     """True when a tool's name says it changes something in a connected app."""
     app, tool = split_tool(tool_name)
-    if app.lower() in _SKIP_SERVERS:
-        return False
     ws = set(words(tool))
     if ws & _DRAFT_WORDS and "send" not in ws:
         return False

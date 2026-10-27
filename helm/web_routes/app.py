@@ -76,13 +76,10 @@ _PLUGIN_PUBLIC_PREFIXES = (
 # and a bearer token that's auto-generated at startup.
 _MCP_PREFIXES = ("/mcp/call", "/mcp/servers", "/mcp/gate")
 
-# Bearer token for subprocess MCP calls + Chrome plugin auth.
-# Persisted to .env so it survives restarts (Chrome plugin stores it once).
-MCP_BEARER_TOKEN: str = os.environ.get("MCP_BEARER_TOKEN", "")
-_MCP_TOKEN_IS_NEW = False
-if not MCP_BEARER_TOKEN:
-    MCP_BEARER_TOKEN = secrets.token_urlsafe(32)
-    _MCP_TOKEN_IS_NEW = True
+# Bearer token the AIs RAPR starts use for /mcp/call and Claude Code's /mcp/gate
+# hook. New every start and never saved: those processes get it from RAPR's
+# environment or their instructions, so nothing needs it after a restart.
+MCP_BEARER_TOKEN: str = secrets.token_urlsafe(32)
 os.environ["MCP_BEARER_TOKEN"] = MCP_BEARER_TOKEN
 logger.info("MCP bearer token: %s…%s", MCP_BEARER_TOKEN[:4], MCP_BEARER_TOKEN[-4:])
 
@@ -321,15 +318,6 @@ def update_env(key: str, value: str):
 
 _update_env = update_env  # legacy alias
 
-# Persist the MCP bearer token to .env if it was just generated
-# Only write if .env already exists — otherwise we'd create it prematurely
-# and the setup wizard redirect (which checks .env existence) would be skipped.
-if _MCP_TOKEN_IS_NEW and (user_data_dir() / ".env").exists():
-    try:
-        update_env("MCP_BEARER_TOKEN", MCP_BEARER_TOKEN)
-    except Exception:
-        logger.warning("Couldn't save the MCP bearer token to .env; the Chrome extension needs it again after a restart", exc_info=True)
-
 
 def reload_env():
     """Reload .env into os.environ AND re-apply vault tokens on top.
@@ -350,6 +338,9 @@ def reload_env():
 
     from dotenv import load_dotenv
     load_dotenv(dotenv_path=str(user_data_dir() / ".env"), override=True)
+    # An older .env still holds a saved token; the live one must win, or the
+    # AIs' tool calls and approval checks would be refused.
+    os.environ["MCP_BEARER_TOKEN"] = MCP_BEARER_TOKEN
 
     # Re-apply decrypted tokens so vault-managed placeholders don't stick
     try:

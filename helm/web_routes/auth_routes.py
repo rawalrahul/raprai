@@ -119,10 +119,6 @@ async def setup_save(request: Request):
                 # Non-secret (e.g. ALLOWED_USER_IDS) → plaintext .env
                 update_env(key, value)
 
-        # Persist the MCP bearer token now that .env exists
-        from helm.web_routes.app import MCP_BEARER_TOKEN
-        update_env("MCP_BEARER_TOKEN", MCP_BEARER_TOKEN)
-
         # Reload so the running process picks up new values immediately
         from helm.web_routes.app import reload_env
         reload_env()

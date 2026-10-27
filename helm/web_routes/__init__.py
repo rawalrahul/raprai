@@ -31,7 +31,6 @@ from .context_routes import router as context_router
 from .packages_routes import router as packages_router
 from .memory_routes import router as memory_router
 from .backup_routes import router as backup_router
-from .chrome_ws import router as chrome_ws_router
 from .update_routes import router as update_router
 from .agent_routes import router as agent_router
 from .agent_generate_routes import router as agent_generate_router
@@ -67,7 +66,6 @@ app.include_router(context_router)
 app.include_router(packages_router)
 app.include_router(memory_router)
 app.include_router(backup_router)
-app.include_router(chrome_ws_router)
 app.include_router(update_router)
 app.include_router(agent_router)
 app.include_router(agent_generate_router)

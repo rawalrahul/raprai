@@ -18,7 +18,6 @@ from typing import Optional
 
 from helm.config import logger
 from .client import MCPClient
-from .chrome_client import ChromeBrowserClient
 from .config import load_config
 
 
@@ -33,7 +32,6 @@ class MCPManager:
     def __init__(self):
         self._clients: dict[str, MCPClient] = {}       # server_id → MCPClient
         self._tool_map: dict[str, tuple[str, str]] = {} # prefixed_name → (server_id, real_name)
-        self._chrome_client: ChromeBrowserClient = ChromeBrowserClient()
         self._initialized = False
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
@@ -50,8 +48,8 @@ class MCPManager:
         for server_id, cfg in config.items():
             if not cfg["enabled"]:
                 continue
-            # WebSocket-based servers (e.g. chrome) connect on their own —
-            # they are not subprocess-based and don't need to be started here.
+            # Old configs may still list the removed Chrome extension as a
+            # websocket server; there is nothing to start for it.
             if cfg.get("type") == "websocket":
                 logger.info("MCP '%s': websocket server — waiting for extension to connect",
                             server_id)
@@ -100,13 +98,6 @@ class MCPManager:
                 real_name = tool.get("name", "")
                 prefixed = f"{server_id}_{real_name}"
                 self._tool_map[prefixed] = (server_id, real_name)
-
-        # Include Chrome browser tools if extension is connected
-        if self._chrome_client.is_running():
-            for tool in self._chrome_client.get_tools():
-                real_name = tool.get("name", "")
-                prefixed = f"chrome_{real_name}"
-                self._tool_map[prefixed] = ("chrome", real_name)
 
     async def reload_servers(self, config_path: Optional[str] = None) -> None:
         """Reload MCP configuration: stop removed servers, start new ones.
@@ -205,11 +196,6 @@ class MCPManager:
                 logger.info("MCP '%s': stopped", server_id)
             except Exception as exc:
                 logger.warning("MCP '%s': stop error: %s", server_id, exc)
-        # Disconnect Chrome extension
-        try:
-            await self._chrome_client.stop()
-        except Exception:
-            logger.debug("Couldn't stop the Chrome extension client", exc_info=True)
         self._clients.clear()
         self._tool_map.clear()
         self._initialized = False
@@ -221,10 +207,6 @@ class MCPManager:
                 client._stop_sync()
             except Exception:
                 logger.debug("Couldn't stop an MCP server at exit", exc_info=True)
-        try:
-            self._chrome_client._stop_sync()
-        except Exception:
-            logger.debug("Couldn't stop the Chrome extension client at exit", exc_info=True)
 
     # ── Tool routing ──────────────────────────────────────────────────────
 
@@ -232,17 +214,12 @@ class MCPManager:
         """Route a tool call to the correct MCP server.
 
         Args:
-            prefixed_name: e.g. "slack_send_message" or "chrome_list_tabs"
+            prefixed_name: e.g. "slack_send_message"
             arguments: tool arguments
         """
         # Direct lookup first
         if prefixed_name in self._tool_map:
             server_id, real_name = self._tool_map[prefixed_name]
-            # Route to Chrome extension client
-            if server_id == "chrome":
-                if self._chrome_client.is_running():
-                    return await self._chrome_client.call_tool(real_name, arguments)
-                return "Error: Chrome extension is not connected."
             client = self._clients.get(server_id)
             if client and client.is_running():
                 return await client.call_tool(real_name, arguments)
@@ -346,11 +323,6 @@ class MCPManager:
                     },
                 })
 
-        # Include Chrome browser tools if extension is connected
-        if self._chrome_client.is_running():
-            for tool in self._chrome_client.get_tools():
-                defs.append(self._make_ollama_tool("chrome", tool))
-
         return defs
 
     @staticmethod
@@ -399,11 +371,6 @@ class MCPManager:
                     f"  (Use `{server_id}_list_tools` to see all {count} tools, "
                     f"or `{server_id}_call` for unlisted tools)"
                 )
-
-        # Include Chrome browser tools
-        if self._chrome_client.is_running():
-            summary = self._chrome_client.get_tool_summary_short()
-            lines.append(f"**chrome** — Browser automation: {summary}")
 
         lines.append("")
         lines.append(
@@ -456,24 +423,6 @@ class MCPManager:
                 )
             lines.append("")
 
-        # Include Chrome browser tools in text descriptions
-        if self._chrome_client.is_running():
-            lines.append("### chrome (Browser Automation)")
-            for tool in self._chrome_client.get_tools():
-                real_name = tool.get("name", "")
-                prefixed = f"chrome_{real_name}"
-                desc = (tool.get("description") or "")[:200]
-                lines.append(f"- **{prefixed}**: {desc}")
-                schema = tool.get("inputSchema", {})
-                required = schema.get("required", [])
-                props = schema.get("properties", {})
-                if required:
-                    param_parts = []
-                    for p in required[:5]:
-                        ptype = props.get(p, {}).get("type", "string")
-                        param_parts.append(f"`{p}` ({ptype})")
-                    lines.append(f"  Required: {', '.join(param_parts)}")
-            lines.append("")
 
         return "\n".join(lines)
 
@@ -483,13 +432,9 @@ class MCPManager:
         """Get a specific MCP client by ID."""
         return self._clients.get(server_id)
 
-    def get_chrome_client(self) -> ChromeBrowserClient:
-        """Get the Chrome browser extension client."""
-        return self._chrome_client
-
     def list_servers(self) -> list[dict]:
         """Return summary list for Settings UI."""
-        servers = [
+        return [
             {
                 "id": sid,
                 "running": client.is_running(),
@@ -498,26 +443,13 @@ class MCPManager:
             }
             for sid, client in self._clients.items()
         ]
-        # Always include the Chrome browser server
-        servers.append({
-            "id": "chrome",
-            "running": self._chrome_client.is_running(),
-            "tool_count": self._chrome_client.get_tool_count(),
-            "summary": (self._chrome_client.get_tool_summary_short()
-                        if self._chrome_client.is_running()
-                        else "Waiting for Chrome extension to connect"),
-            "type": "websocket",
-        })
-        return servers
 
     def has_running_servers(self) -> bool:
-        return (any(c.is_running() for c in self._clients.values())
-                or self._chrome_client.is_running())
+        return any(c.is_running() for c in self._clients.values())
 
     def _get_subprocess_servers(self) -> dict[str, dict]:
         """Return running subprocess-based servers as {id: {command, args, env}}.
 
-        Websocket servers (e.g. Chrome) are excluded — CLIs can't connect to those.
         """
         servers: dict[str, dict] = {}
         for sid, client in self._clients.items():

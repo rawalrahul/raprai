@@ -5,7 +5,7 @@
 # errors (E9), blocking calls that freeze the server's event loop (ASYNC), and
 # common loop and default-argument mistakes (B).
 
-extend-exclude = ["frontend2", "chrome-extension", "web_app.build", "web_app.dist"]
+extend-exclude = ["frontend2", "web_app.build", "web_app.dist"]
 
 [lint]
 select = [
