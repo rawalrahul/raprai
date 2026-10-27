@@ -10,6 +10,7 @@ import ctypes
 import shutil
 import subprocess
 import sys
+import time
 import webbrowser
 
 import uvicorn
@@ -40,6 +41,10 @@ from helm.web_routes import app
 import helm.state as _st
 
 
+def _tg_status(status: str, error: str = "") -> None:
+    _st.telegram_status = {"status": status, "error": error, "at": time.time()}
+
+
 def _telegram_polling_error_handler(label: str):
     """Return a sync PTB polling error callback that logs a getUpdates conflict once.
 
@@ -55,6 +60,8 @@ def _telegram_polling_error_handler(label: str):
     def _on_error(exc):
         nonlocal warned
         if isinstance(exc, Conflict):
+            _tg_status("conflict", "Another copy of RAPR (maybe on another computer or a server) is "
+                                   "using this bot. Telegram works again once that one stops.")
             if not warned:
                 warned = True
                 logger.warning(
@@ -63,6 +70,7 @@ def _telegram_polling_error_handler(label: str):
                     label,
                 )
             return
+        _tg_status("connecting", f"Lost the connection to Telegram ({exc}). Reconnecting…")
         logger.exception("Exception happened while polling for Telegram updates.", exc_info=exc)
 
     return _on_error
@@ -92,14 +100,17 @@ async def _keep_telegram_polling(tg, label: str) -> None:
                 error_callback=_telegram_polling_error_handler(label),
             )
             logger.info("Telegram bot started. Polling for updates...")
+            _tg_status("connected")
             return
         except InvalidToken as exc:
             logger.error("Telegram bot disabled: the bot token was rejected (%s). Set it again in Settings.", exc)
+            _tg_status("error", "Telegram rejected the bot token. Enter it again in setup (from @BotFather).")
             if _st.telegram_app is tg:
                 _st.telegram_app = None
             return
         except Exception as exc:
             logger.warning("Telegram couldn't connect (%s); trying again in %d s", exc, delay)
+            _tg_status("connecting", f"Can't reach Telegram ({exc}). Trying again every minute or sooner.")
             await asyncio.sleep(delay)
             delay = min(delay * 2, 60)
 

@@ -31,7 +31,8 @@ def rapr_url(tmp_path_factory):
     env = {**{k: v for k, v in os.environ.items() if not k.startswith("PIN_")},
            "RAPR_HEADLESS": "1", "RAPR_DATA_DIR": str(data),
            "WEB_HOST": "127.0.0.1", "WEB_PORT": str(port),
-           "OUTPUT_IDLE_TIMEOUT": "0.5"}            # a shell reply is done after 0.5s of quiet
+           "OUTPUT_IDLE_TIMEOUT": "0.5",            # a shell reply is done after 0.5s of quiet
+           "RAPR_RATE_LIMIT": "2000"}               # every test loads the page (~25 API calls)
     log = open(data / "server.log", "w")
     proc = subprocess.Popen([sys.executable, "web_app.py"], cwd=ROOT, env=env,
                             stdout=log, stderr=subprocess.STDOUT)
@@ -190,3 +191,11 @@ def test_page_reloads_itself_when_its_files_failed_to_load(browser, rapr_url):
             pytest.fail("the page never reloaded with its CSS and JS")
     finally:
         ctx.close()
+
+
+def test_settings_shows_the_telegram_status(page):
+    """No bot set up in the test server: Settings says so, and how to fix it."""
+    page.evaluate("() => openSettings()")
+    status = page.locator("#tg-status")
+    sync_api.expect(status).to_have_text("Not set up", timeout=5000)
+    sync_api.expect(page.locator("#tg-msg")).to_contain_text("/setup")

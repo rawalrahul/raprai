@@ -48,6 +48,9 @@ last_cwd: str = _DEFAULT_CWD         # persists even when no session is focused
 # sends their first Telegram message.
 telegram_chat_id: Optional[int] = next(iter(ALLOWED_USER_IDS), None)
 telegram_app: Optional["Application"] = None   # set in startup._main()
+# Settings → Telegram shows this. status: off | connecting | connected | conflict | error;
+# "at" is when it was set (web_app.py sets it as the bot connects or polling fails).
+telegram_status: dict = {"status": "off", "error": "", "at": 0.0}
 
 pending_tg_context: Optional[str] = None       # injected into next Telegram msg after /resume
 tg_browse_state: dict = {}                      # user_id -> {path, dirs, page}
