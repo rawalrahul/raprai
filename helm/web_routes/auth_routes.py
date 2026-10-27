@@ -148,7 +148,7 @@ async def login_page(request: Request, error: str = ""):
     if _auth.check_auth(request):
         return RedirectResponse(url="/", status_code=303)
 
-    ip   = request.client.host if request.client else "unknown"
+    ip   = _auth.client_ip(request)
     wait = _auth.seconds_until_unlock(ip)
 
     disabled = "disabled" if wait > 0 else ""
@@ -179,7 +179,7 @@ async def login_page(request: Request, error: str = ""):
 @router.post("/login")
 async def login_post(request: Request):
     """Verify PIN, issue session cookie, redirect home (or back to login on failure)."""
-    ip = request.client.host if request.client else "unknown"
+    ip = _auth.client_ip(request)
 
     # Locked out?
     if _auth.is_locked_out(ip):
@@ -258,8 +258,9 @@ async def set_pin_endpoint(request: Request):
         new_pin = str(body.get("pin", "")).strip()
         old_pin = str(body.get("old_pin", "")).strip()
 
-        if len(new_pin) < 4:
-            return JSONResponse({"error": "PIN must be at least 4 characters."}, status_code=400)
+        if len(new_pin) < _auth.min_pin_length():
+            return JSONResponse({"error": f"PIN must be at least {_auth.min_pin_length()} characters."},
+                                status_code=400)
 
         first_pin = not _auth.pin_is_set()
         if not first_pin:

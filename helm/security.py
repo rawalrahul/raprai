@@ -213,7 +213,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if request.headers.get("upgrade", "").lower() == "websocket":
             return await call_next(request)
 
-        ip = request.client.host if request.client else "127.0.0.1"
+        from helm.auth import client_ip
+        ip = client_ip(request, default="127.0.0.1")
         retry_after = _rate_limiter.check(ip, path)
 
         if retry_after is not None:

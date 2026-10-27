@@ -23,8 +23,8 @@ from helm.cloud import plan
 
 
 def write(out: Path, name: str, pin: str) -> None:
-    if len(pin) < 4:
-        raise ValueError("the PIN must be at least 4 characters")
+    if len(pin) < 8:
+        raise ValueError("the PIN must be at least 8 characters: the server is on the internet")
     salt, pin_hash = auth.set_pin(pin)
     opts = plan.CloudOptions(host="localhost", name=name, pin_salt=salt, pin_hash=pin_hash)
     plan.validate(opts)

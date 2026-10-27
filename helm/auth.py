@@ -42,6 +42,28 @@ COOKIE_NAME     = "hq_session"
 
 _failed:   dict[str, list]  = {}       # client_ip -> [attempt_timestamps]
 
+
+def behind_tunnel() -> bool:
+    """True on a cloud server, where every visitor arrives through RAPR's own
+    Cloudflare tunnel (helm/cloud/plan.py) and RAPR's port isn't published."""
+    return os.environ.get("RAPR_BEHIND_TUNNEL") == "1"
+
+
+def client_ip(request: Request, default: str = "unknown") -> str:
+    """The visitor's address. Behind the tunnel every request comes from the
+    tunnel, so one visitor's failed PINs would lock everyone out: use the
+    address Cloudflare saw. Only there: anywhere else the header could be faked."""
+    if behind_tunnel():
+        forwarded = request.headers.get("cf-connecting-ip", "").strip()
+        if forwarded:
+            return forwarded
+    return request.client.host if request.client else default
+
+
+def min_pin_length() -> int:
+    """A cloud server is on the internet: its PIN must be harder to guess."""
+    return 8 if behind_tunnel() else 4
+
 # ---------------------------------------------------------------------------
 # PIN hashing  (bcrypt preferred → PBKDF2-SHA256 600k fallback)
 # ---------------------------------------------------------------------------

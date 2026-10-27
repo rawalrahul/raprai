@@ -70,8 +70,9 @@ async def cloud_state():
 @router.post("/api/cloud/deploy")
 async def start_deploy(body: DeployBody):
     from helm import auth
-    if not body.pin or len(body.pin) < 4:
-        return JSONResponse({"error": "choose a PIN of at least 4 characters for the server"}, status_code=400)
+    if not body.pin or len(body.pin) < 8:
+        return JSONResponse({"error": "choose a PIN of at least 8 characters for the server: "
+                                      "it will be on the internet"}, status_code=400)
     salt, pin_hash = auth.set_pin(body.pin)
     local_env = {k: os.environ.get(k, "") for k in plan.COPYABLE}
     opts = plan.CloudOptions(host=body.host, user=body.user, port=body.port, name=body.name,
