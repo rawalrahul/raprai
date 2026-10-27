@@ -111,8 +111,7 @@ Batches, the most important first:
 - **D3, running AIs (~63):** `helm/ai_runner/`, `helm/telegram_bot/`, `helm/agent/`.
 - **D4, the rest (~104):** `helm/learning/`, `helm/mcp/` and the remaining modules.
 
-Since D1, S110 is on for the whole codebase except the files `ruff.toml` still
-lists under D2, D3 and D4; each batch deletes its own lines from that list.
+Since D4, S110 is on for the whole codebase: `ruff.toml` has no exceptions left.
 
 ## Order and status
 
@@ -126,10 +125,10 @@ lists under D2, D3 and D4; each batch deletes its own lines from that list.
 | E1 | Ship the fonts | Done (#110) |
 | B2 | Split `complete.js` | Done (#109) |
 | C3 | One runner per AI type | Done (#111) |
-| D2 | Swallowed errors: web routes | Done |
-| C4 | Prompt preparation out of `process_message` | Done |
-| D3 | Swallowed errors: running AIs | Done |
-| D4 | Swallowed errors: the rest; S110 on everywhere | This PR |
+| D2 | Swallowed errors: web routes | Done (#112) |
+| C4 | Prompt preparation out of `process_message` | Done (#113) |
+| D3 | Swallowed errors: running AIs | Done (#114) |
+| D4 | Swallowed errors: the rest; S110 on everywhere | Done (#115) |
 
 Quick wins and the security batch come first. Each refactor follows the tests
 it needs. Error batches are spread between refactors so no PR is huge.
