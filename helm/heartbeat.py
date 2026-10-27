@@ -18,6 +18,7 @@ import time
 import helm.state as _st
 from helm.config import logger
 from helm.paths import user_data_dir as _udd
+from helm.telegram_bot.auth import authorized_only
 
 # ---------------------------------------------------------------------------
 # Config helpers — read live from os.environ so Settings UI changes take
@@ -243,6 +244,7 @@ async def _notify_telegram_idle():
 # Heartbeat callback handler (for inline buttons)
 # ---------------------------------------------------------------------------
 
+@authorized_only
 async def heartbeat_callback(update, context):
     """Handle heartbeat inline button presses."""
     query = update.callback_query
@@ -274,7 +276,7 @@ async def heartbeat_callback(update, context):
         _st._heartbeat_snoozed = False
         from helm.telegram_bot import perform_resume
         await query.answer("Resuming…")
-        await perform_resume(payload, update, context)
+        await perform_resume(query.message, date_str=payload)
         return
 
     await query.answer()
