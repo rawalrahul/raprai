@@ -1,7 +1,8 @@
 name: Mac check
 
 # Installs RAPR on a real Mac (Apple Silicon) with scripts/install-mac.sh, opens
-# the "RAPR AI" app, checks RAPR answers, quits the app, and runs the tests.
+# the "RAPR AI" app, checks RAPR answers and its page loads, quits the app, and runs
+# the tests. Runs for any change to RAPR's code.
 # Free for public repositories.
 
 on:
@@ -12,23 +13,21 @@ on:
       - scripts/install-mac.sh
       - .github/workflows/mac-check.yml
       - web_app.py
-      - requirements.txt
-      - helm/keep_awake.py
-      - helm/tray.py
-      - helm/paths.py
-      - helm/mcp_server.py
       - rapr_mcp.py
+      - requirements.txt
+      - helm/**
+      - frontend2/**
+      - tests/**
   pull_request:
     paths:
       - scripts/install-mac.sh
       - .github/workflows/mac-check.yml
       - web_app.py
-      - requirements.txt
-      - helm/keep_awake.py
-      - helm/tray.py
-      - helm/paths.py
-      - helm/mcp_server.py
       - rapr_mcp.py
+      - requirements.txt
+      - helm/**
+      - frontend2/**
+      - tests/**
 
 concurrency:
   group: mac-check-${{ github.ref }}
@@ -67,6 +66,10 @@ jobs:
           curl -fsS "http://127.0.0.1:$port/health" >/dev/null || { tail -80 "$HOME/Library/Logs/RAPR AI/rapr.log"; exit 1; }
           # First run: no settings yet, so RAPR shows its setup wizard.
           test "$(curl -s -o /dev/null -w '%{redirect_url}' "http://127.0.0.1:$port/")" = "http://127.0.0.1:$port/setup"
+          # The main page's styles and scripts are served (a bare, unstyled page otherwise).
+          for f in /css/design-system.css /js/core.js /js/telegram.js /sw.js; do
+            test "$(curl -s -o /dev/null -w '%{http_code} %{size_download}' "http://127.0.0.1:$port$f" | awk '{print ($1==200 && $2>100)}')" = 1 || { echo "$f wasn't served"; exit 1; }
+          done
           rapr status
           osascript -e 'quit app "RAPR AI"'
           for i in $(seq 1 30); do rapr status >/dev/null 2>&1 || break; sleep 1; done
