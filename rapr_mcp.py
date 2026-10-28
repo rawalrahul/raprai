@@ -4,7 +4,7 @@
     codex mcp add rapr -- rapr mcp                        # Codex (set tool_timeout_sec, see the guide)
     claude mcp add --scope user rapr -- python /path/to/raprai/rapr_mcp.py   # from source
 
-See helm/mcp_server.py and the "Use RAPR from Claude Code, Cursor or Codex" section of docs/guide.md.
+See helm/mcp_server.py and the "Use RAPR from your coding agent" section of docs/guide.md.
 """
 import os
 import sys

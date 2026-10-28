@@ -21,7 +21,7 @@ dependencies = ["python-dotenv>=1.0"]
 
 [project.urls]
 Homepage = "https://github.com/rawalrahul/raprai"
-Documentation = "https://github.com/rawalrahul/raprai/blob/main/docs/guide.md#use-rapr-from-claude-code-cursor-or-codex-mcp"
+Documentation = "https://github.com/rawalrahul/raprai/blob/main/docs/guide.md#use-rapr-from-your-coding-agent-mcp"
 
 [project.scripts]
 rapr-mcp = "helm.mcp_server:standalone"

@@ -349,7 +349,7 @@ Once you've merged a winner (or discarded them all), **🏆 Share result** opens
 
 Finished bake-offs are kept (the numbers only, not the code), so they count toward your monthly recap.
 
-## Use RAPR from Claude Code, Cursor or Codex (MCP)
+## Use RAPR from your coding agent (MCP)
 
 RAPR is also an MCP server, so the AI you're coding with can call the others. The `rapr mcp` command comes with the Windows and Mac installs; from a source checkout, use `python /path/to/raprai/rapr_mcp.py` wherever you see `rapr mcp` below.
 
