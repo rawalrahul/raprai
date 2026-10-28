@@ -38,8 +38,8 @@ def fake_agents(monkeypatch):
     """Two fake AIs. 'editor' also rewrites app.py wherever it runs; prompts are recorded."""
     seen = []
 
-    def run(agent, prompt, cwd, model=None):
-        seen.append({"agent": agent, "prompt": prompt, "cwd": cwd})
+    def run(agent, prompt, cwd, model=None, **kw):
+        seen.append({"agent": agent, "prompt": prompt, "cwd": cwd, "edits": kw.get("edits", False)})
         if agent == "editor":
             Path(cwd, "app.py").write_text("def add(a, b):\n    return a + b\n")
         return f"{agent} says hi"

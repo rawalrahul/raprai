@@ -41,11 +41,14 @@ ATTEMPT_DIFF_LIMIT = 8_000
 # tool time limits (Codex gives up after 60 seconds unless tool_timeout_sec is raised).
 STATUS_WAIT_DEFAULT = 45
 STATUS_WAIT_MAX = 50
+AGENT_TIMEOUT = 300        # seconds an AI gets to answer (a bake-off attempt gets BUILD_TIMEOUT)
+BUILD_TIMEOUT = 1800
 
 INSTRUCTIONS = (
     "RAPR AI runs other AI coding agents installed on this computer (Claude Code, Codex, "
-    "Antigravity, Ollama…) with the user's own sign-ins. Use second_opinion to have a different "
-    "AI review the current changes, ask_agent to put any question or task to another AI, and "
+    "Antigravity, Grok, Ollama…) with the user's own sign-ins. Use second_opinion to have a "
+    "different AI review the current changes, ask_agent to put any question or task to another "
+    "AI, start_relay to have one AI plan, another build, and another review and get fixes, and "
     "start_bakeoff to give the same task to several AIs in separate copies of the project and "
     "compare them. Call list_agents first to see which AIs are available. Each call can take "
     "a few minutes while the other AI works."
@@ -114,8 +117,14 @@ def _check_agent(agent: str) -> None:
                         "Use list_agents to see them.")
 
 
-def run_agent(agent: str, prompt: str, cwd: str, model: Optional[str] = None) -> str:
-    """Run one AI's command-line tool in `cwd` and return its reply."""
+def run_agent(agent: str, prompt: str, cwd: str, model: Optional[str] = None, *, edits: bool = False,
+              timeout: int = AGENT_TIMEOUT, on_start=None) -> str:
+    """Run one AI's command-line tool in `cwd` and return its reply.
+
+    edits: the AI is meant to change files. Claude Code asks before every edit, and
+    with nobody there to answer it would change nothing, so it's allowed file edits
+    (not commands). The other AIs' commands already let them edit.
+    """
     from helm.council.runner import _build_cmd_for_session, _run_subprocess_blocking
     _load()
     sess = {"id": "mcp", "ai": agent, "cwd": cwd, "model": model}
@@ -123,7 +132,9 @@ def run_agent(agent: str, prompt: str, cwd: str, model: Optional[str] = None) ->
         cmd, stdin_text, extra_env = _build_cmd_for_session(sess, prompt)
     except ValueError as exc:
         raise ToolError(str(exc)) from exc
-    return _run_subprocess_blocking(cmd, cwd, stdin_text, extra_env)
+    if edits and agent == "claude":
+        cmd[1:1] = ["--permission-mode", "acceptEdits"]
+    return _run_subprocess_blocking(cmd, cwd, stdin_text, extra_env, on_start=on_start, timeout=timeout)
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +187,18 @@ def current_changes(folder: str, base: Optional[str] = None) -> tuple[str, str]:
     raise ToolError("There are no changes to review (no uncommitted changes and only one commit).")
 
 
+_SKIP = ("node_modules", ".venv", "venv", "__pycache__", ".git")
+
+
+def _files(root: str) -> dict[str, bytes]:
+    """Every file in a plain copy (not a git one) and its contents."""
+    out = {}
+    for p in Path(root).rglob("*"):
+        if p.is_file() and not p.is_symlink() and not any(part in _SKIP for part in p.relative_to(root).parts):
+            out[p.relative_to(root).as_posix()] = p.read_bytes()
+    return out
+
+
 class Scratch:
     """A throwaway copy of a project, including uncommitted changes. The other AI works here."""
 
@@ -194,8 +217,9 @@ class Scratch:
                 self.root = tempfile.mkdtemp(prefix="rapr-mcp-")
                 self.path = str(Path(self.root, Path(folder).name or "project"))
         shutil.copytree(folder, self.path, symlinks=True,
-                        ignore=shutil.ignore_patterns("node_modules", ".venv", "venv", "__pycache__", ".git"))
+                        ignore=shutil.ignore_patterns(*_SKIP))
         self.cwd = self.path
+        self.start_files = _files(self.path)
 
     def _from_git(self, folder: str) -> None:
         top = _git(folder, "rev-parse", "--show-toplevel").strip()
@@ -222,6 +246,69 @@ class Scratch:
             return ""
         _git(self.path, "add", "-A")
         return _git(self.path, "diff", "--cached", self.start)
+
+    # A relay works in one copy for several steps: these keep a planner or reviewer
+    # from leaving changes behind, and bring the result back to the project.
+
+    def snapshot(self):
+        """A point to go back to: a git tree, or every file's contents in a plain copy."""
+        if self.git:
+            _git(self.path, "add", "-A")
+            return _git(self.path, "write-tree").strip()
+        return _files(self.path)
+
+    def restore(self, point) -> None:
+        """Put the copy back the way it was at `point`."""
+        if self.git:
+            _git(self.path, "read-tree", "-u", "--reset", point)
+            _git(self.path, "clean", "-fdq")
+            return
+        now = _files(self.path)
+        for name in now.keys() - point.keys():
+            Path(self.path, name).unlink()
+        for name, data in point.items():
+            if now.get(name) != data:
+                Path(self.path, name).parent.mkdir(parents=True, exist_ok=True)
+                Path(self.path, name).write_bytes(data)
+
+    def diff(self) -> tuple[str, list[str]]:
+        """(diff for people, changed files) since the copy was made."""
+        if self.git:
+            _git(self.path, "add", "-A")
+            names = [n for n in _git(self.path, "diff", "--cached", "--name-only", self.start).splitlines() if n]
+            return self._patch().decode("utf-8", "replace"), names
+        before, now = self.start_files, _files(self.path)
+        names = sorted(n for n in before.keys() | now.keys() if before.get(n) != now.get(n))
+        return "\n".join(("deleted: " if n not in now else "changed: ") + n for n in names), names
+
+    def _patch(self) -> bytes:
+        # Bytes, so files with Windows line endings still apply (see bakeoff._collect).
+        out = subprocess.run(["git", "diff", "--cached", "--binary", self.start], cwd=self.path,
+                             capture_output=True, timeout=120)
+        if out.returncode != 0:
+            raise RuntimeError(out.stderr.decode(errors="replace").strip()[:300])
+        return out.stdout
+
+    def apply(self) -> list[str]:
+        """Bring the copy's changes into the real project (not staged, not committed)."""
+        _, names = self.diff()
+        if self.git:
+            patch = self._patch()
+            if patch.strip():
+                r = subprocess.run(["git", "apply", "--whitespace=nowarn", "-"], cwd=self.top,
+                                   input=patch, capture_output=True, timeout=120)
+                if r.returncode != 0:
+                    raise RuntimeError("the changes don't apply to the project any more (did it change "
+                                       "meanwhile?): " + r.stderr.decode(errors="replace").strip()[:300])
+            return names
+        for name in names:
+            src, dst = Path(self.path, name), Path(self.folder, name)
+            if src.exists():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+            elif dst.exists():
+                dst.unlink()
+        return names
 
     def close(self) -> None:
         if getattr(self, "top", None):
@@ -250,8 +337,9 @@ def tool_latest_brief(args: dict, ctx: "Server") -> str:
     from helm import brief
     latest = brief.latest()
     if not latest:
-        return ("No brief yet. In the RAPR app, open Settings → Your brief, pick which AIs should look "
-                "through their connected apps, and press 'Send me one now'.")
+        return ("No brief yet. Briefs are made by the RAPR app (raprai.com): in it, open Settings → Your "
+                "brief, pick which AIs should look through their connected apps, and press 'Send me one "
+                "now'. The other tools here work without the app.")
     return brief.text(latest, how_to_act=False) + (
         "\n\nTo act on an item, open RAPR (Needs you) or reply /do <number> on Telegram or WhatsApp.")
 
@@ -263,11 +351,11 @@ def tool_ask_agent(args: dict, ctx: "Server") -> str:
     _check_agent(agent)
     folder = _folder(args.get("folder"), ctx.cwd)
     if args.get("allow_edits"):
-        reply = run_agent(agent, prompt, folder, args.get("model"))
+        reply = run_agent(agent, prompt, folder, args.get("model"), edits=True)
         return f"{agent} (working in {folder}, edits allowed):\n\n{_clip(reply, REPLY_LIMIT)}"
     scratch = Scratch(folder)
     try:
-        reply = run_agent(agent, prompt, scratch.cwd, args.get("model"))
+        reply = run_agent(agent, prompt, scratch.cwd, args.get("model"), edits=True)
         changes = scratch.changes()
     finally:
         scratch.close()
@@ -343,7 +431,7 @@ def tool_start_bakeoff(args: dict, ctx: "Server") -> str:
         raise ToolError(str(exc)) from exc
 
     async def runner(ai: str, prompt: str, cwd: str) -> str:
-        return run_agent(ai, prompt, cwd)
+        return run_agent(ai, prompt, cwd, edits=True, timeout=BUILD_TIMEOUT)
 
     def go():
         import asyncio
@@ -413,6 +501,134 @@ def tool_discard_bakeoff(args: dict, ctx: "Server") -> str:
         _save(b)
     return f"Discarded bake-off {b.id}; all copies removed and your project is unchanged."
 
+
+# ---------------------------------------------------------------------------
+# Relays: one AI plans, another builds, another reviews, fixes, reviews again
+# ---------------------------------------------------------------------------
+
+ROLE_NAMES = {"plan": "Plan", "build": "Build", "review": "Review", "fix": "Fix"}
+
+
+def tool_start_relay(args: dict, ctx: "Server") -> str:
+    from helm import relay
+    executor = args["executor"]
+    reviewer = args.get("reviewer") or args.get("planner") or ""
+    if not reviewer:
+        raise ToolError("Pick a reviewer (or a planner, who then reviews too).")
+    plan = (args.get("plan") or "").strip()
+    planner = None if plan else (args.get("planner") or None)
+    for a in dict.fromkeys(x for x in (planner, executor, reviewer, args.get("fixer")) if x):
+        _check_agent(a)
+    folder = _folder(args.get("folder"), ctx.cwd)
+    try:
+        r = relay.create(folder, args["task"], executor, reviewer, planner=planner, plan=plan,
+                         fixer=args.get("fixer"), fix_rounds=int(args.get("fix_rounds", 1)),
+                         test_command=args.get("test_command"))
+    except ValueError as exc:
+        raise ToolError(str(exc)) from exc
+    scratch = Scratch(folder)
+
+    def runner(agent, prompt, cwd, *, edits, timeout, on_start):
+        return run_agent(agent, prompt, cwd, edits=edits, timeout=timeout, on_start=on_start)
+
+    def go():
+        relay.run(r, runner, scratch)
+        if r.status in ("failed", "discarded"):
+            scratch.close()
+
+    ctx.relays[r.id] = r
+    threading.Thread(target=go, daemon=True, name=f"relay-{r.id}").start()
+    who = ([f"{planner} plans"] if planner else []) + [f"{executor} builds", f"{reviewer} reviews"]
+    if r.fix_rounds:
+        who.append(f"{r.fixer} fixes what it finds")
+    return (f"Started relay {r.id} in a copy of {folder}: {', '.join(who)}. This usually takes "
+            f"10 minutes or more. Call relay_status with id {r.id!r} to follow it.")
+
+
+def _relay_report(r, include_diff: bool) -> str:
+    roles = ([f"planner {r.planner}"] if r.planner else ["plan given"] if r.plan else []) + [
+        f"executor {r.executor}", f"reviewer {r.reviewer}"]
+    if r.fix_rounds:
+        roles.append(f"fixer {r.fixer}")
+    lines = [f"Relay {r.id}: {r.status}" + (f" ({r.stage})" if r.busy else ""),
+             f"Task: {r.task}", "Roles: " + ", ".join(roles)]
+    if r.plan and not r.planner:
+        lines.append("\n## The plan you gave\n" + _clip(r.plan, 3000))
+    for st in r.steps:
+        head = f"\n## {ROLE_NAMES.get(st.role, st.role)}: {st.agent}"
+        if not st.seconds and r.busy and st is r.steps[-1]:
+            lines.append(head + ": working…")
+            continue
+        lines.append(head + f" ({st.seconds:.0f}s)" + (f", failed: {st.error}" if st.error else ""))
+        if st.output.strip():
+            lines.append(_clip(st.output.strip(), 6000 if st.role in ("plan", "review") else 2000))
+    if r.tests_passed is not None:
+        lines.append(f"\nTests (`{r.test_command}`): {'passed' if r.tests_passed else 'FAILED'}")
+        if not r.tests_passed and r.test_output:
+            lines.append(_clip(r.test_output, 2000))
+    if r.error:
+        lines.append(f"\nStopped: {r.error}")
+    if r.files and r.status != "discarded":
+        lines.append(f"\nFiles changed ({len(r.files)}): " + ", ".join(r.files[:30])
+                     + (" …" if len(r.files) > 30 else ""))
+        if include_diff and r.diff.strip():
+            lines.append("Diff:\n" + _clip(r.diff, REPLY_LIMIT))
+    if r.busy:
+        lines.append("\nStill running. Call relay_status again to keep waiting.")
+    elif r.status == "done":
+        said = {True: "The reviewer approved the change.",
+                False: "The reviewer still wants changes after the last fix round.",
+                None: "The reviewer gave no clear verdict; read the review."}[r.approved]
+        lines.append(f"\n{said} Next: merge_relay to apply it to the project (not staged or "
+                     "committed), or discard_relay to throw it away.")
+    return "\n".join(lines)
+
+
+def _get_relay(args: dict, ctx: "Server"):
+    r = ctx.relays.get(args.get("id", ""))
+    if not r:
+        raise ToolError(f"No relay {args.get('id')!r} in this session. Relays: {', '.join(ctx.relays) or 'none'}.")
+    return r
+
+
+def tool_relay_status(args: dict, ctx: "Server") -> str:
+    r = _get_relay(args, ctx)
+    wait = max(0, min(int(args.get("wait_seconds", STATUS_WAIT_DEFAULT)), STATUS_WAIT_MAX))
+    end = time.monotonic() + wait
+    while r.busy and time.monotonic() < end:
+        time.sleep(1)
+    return _relay_report(r, include_diff=args.get("include_diff", True))
+
+
+def tool_merge_relay(args: dict, ctx: "Server") -> str:
+    r = _get_relay(args, ctx)
+    if r.status != "done":
+        raise ToolError(f"Relay {r.id} is {r.status}; only a finished relay can be merged.")
+    try:
+        names = r.workspace.apply()
+    except RuntimeError as exc:
+        raise ToolError(str(exc)) from exc
+    r.workspace.close()
+    r.status = "merged"
+    return (f"Applied relay {r.id} to {r.folder}: {len(names)} file(s) changed. The changes are not "
+            "staged or committed; the copy was removed.")
+
+
+def tool_discard_relay(args: dict, ctx: "Server") -> str:
+    from helm import relay
+    r = _get_relay(args, ctx)
+    if r.status in ("merged", "discarded"):
+        return f"Relay {r.id} is already {r.status}."
+    _discard_relay(r, relay)
+    return f"Discarded relay {r.id}; the copy is removed and your project is unchanged."
+
+
+def _discard_relay(r, relay) -> None:
+    if relay.stop(r) != "running" and r.workspace is not None:
+        r.workspace.close()   # otherwise the relay's thread removes it as it stops
+
+
+_ROLE = "Which AI, e.g. claude, codex, antigravity, grok. See list_agents."
 
 _FOLDER = {"type": "string", "description": "Project folder. Defaults to the folder the MCP client started in."}
 _AGENT = {"type": "string", "description": "Which AI, e.g. codex, claude, antigravity, ollama. See list_agents."}
@@ -490,6 +706,49 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
         "description": "Throw away every attempt of a bake-off. The project is left unchanged.",
         "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}},
     }, tool_discard_bakeoff),
+    "start_relay": ({
+        "description": "Hand a task down a line of AIs, each in a role the user picks: the planner writes a "
+                       "plan, the executor carries it out, the reviewer reviews it and gives a verdict, the "
+                       "fixer fixes what it found, and the reviewer checks again (up to fix_rounds times). "
+                       "Any AI from list_agents can take any role, and one AI can take several, e.g. plan "
+                       "with claude, build with codex, review with claude. Instead of a planner you can pass "
+                       "a plan you wrote. It all happens in a copy of the project, so nothing changes until "
+                       "merge_relay. Returns an id right away; call relay_status to follow it.",
+        "inputSchema": {"type": "object", "required": ["task", "executor"], "properties": {
+            "task": {"type": "string", "description": "The task, as you'd give it to one AI."},
+            "planner": {"type": "string", "description": "AI that writes the plan. " + _ROLE},
+            "plan": {"type": "string", "description": "Optional: a plan to follow instead of asking a planner."},
+            "executor": {"type": "string", "description": "AI that carries out the plan. " + _ROLE},
+            "reviewer": {"type": "string", "description": "AI that reviews the result. Defaults to the planner. " + _ROLE},
+            "fixer": {"type": "string", "description": "AI that fixes what the reviewer found. Defaults to the executor."},
+            "fix_rounds": {"type": "integer", "minimum": 0, "maximum": 3, "default": 1,
+                           "description": "How many times to fix and review again if the reviewer wants changes."},
+            "test_command": {"type": "string", "description": "Optional command run after each build or fix, e.g. pytest -q. "
+                                                              "The reviewer sees the result."},
+            "folder": _FOLDER,
+        }},
+        "annotations": {"openWorldHint": True},
+    }, tool_start_relay),
+    "relay_status": ({
+        "description": "Wait for a relay (up to wait_seconds) and report where it is: the plan, what each AI "
+                       "said, the reviewer's findings and verdict, test results and the change so far. If "
+                       "it's still running, call again.",
+        "inputSchema": {"type": "object", "required": ["id"], "properties": {
+            "id": {"type": "string"},
+            "wait_seconds": {"type": "integer", "minimum": 0, "maximum": STATUS_WAIT_MAX, "default": STATUS_WAIT_DEFAULT},
+            "include_diff": {"type": "boolean", "default": True},
+        }},
+        "annotations": {"readOnlyHint": True},
+    }, tool_relay_status),
+    "merge_relay": ({
+        "description": "Apply a finished relay's change to the project (not staged or committed) and remove the copy.",
+        "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}},
+        "annotations": {"destructiveHint": True},
+    }, tool_merge_relay),
+    "discard_relay": ({
+        "description": "Stop a relay if it's running and throw away its copy. The project is left unchanged.",
+        "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}},
+    }, tool_discard_relay),
 }
 
 
@@ -502,11 +761,13 @@ class Server:
         self.out = out
         self.cwd = cwd or os.getcwd()
         self.bakeoffs: dict = {}
+        self.relays: dict = {}
         self._lock = threading.Lock()
         self._pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="mcp-tool")
 
     def send(self, msg: dict) -> None:
-        line = json.dumps(msg, ensure_ascii=False)
+        # An AI's reply can hold half an emoji (a lone surrogate), which UTF-8 can't encode.
+        line = json.dumps(msg, ensure_ascii=False).encode("utf-8", "replace").decode("utf-8")
         with self._lock:
             self.out.write(line + "\n")
             self.out.flush()
@@ -533,6 +794,15 @@ class Server:
         except Exception as exc:
             return {"content": [{"type": "text", "text": f"{name} failed: {exc}"}], "isError": True}
 
+    def _answer(self, mid, name: str, args: dict) -> None:
+        """Run a tool and send its result. Whatever goes wrong, the client gets an answer:
+        an error the thread pool swallowed would leave it waiting forever."""
+        try:
+            self._reply(mid, self.call_tool(name, args))
+        except Exception as exc:
+            logger.exception("MCP: couldn't answer %s", name)
+            self._reply(mid, {"content": [{"type": "text", "text": f"{name} failed: {exc}"}], "isError": True})
+
     def handle(self, msg: dict) -> None:
         method, mid = msg.get("method"), msg.get("id")
         if method is None:          # a response to something we never send
@@ -554,12 +824,19 @@ class Server:
         elif method == "tools/call":
             name, args = params.get("name"), params.get("arguments") or {}
             # Tools take minutes; run them off the reading thread so pings still get answers.
-            self._pool.submit(lambda: self._reply(mid, self.call_tool(name, args)))
+            self._pool.submit(self._answer, mid, name, args)
         elif mid is not None:
             self._reply(mid, error={"code": -32601, "message": f"Method not found: {method}"})
         # other notifications (initialized, cancelled…) need no answer
 
     def serve(self, inp) -> None:
+        try:
+            self._serve(inp)
+        finally:
+            self._pool.shutdown(wait=False, cancel_futures=True)
+            self.close_relays()
+
+    def _serve(self, inp) -> None:
         for line in inp:
             line = line.strip().lstrip("\ufeff")   # Windows PowerShell can put a byte-order mark in front
             if not line:
@@ -572,7 +849,34 @@ class Server:
             for m in msg if isinstance(msg, list) else [msg]:
                 if isinstance(m, dict):
                     self.handle(m)
-        self._pool.shutdown(wait=False, cancel_futures=True)
+
+    def close_relays(self) -> None:
+        """The client went away: nobody can merge these any more, so stop them and remove their copies."""
+        from helm import relay
+        for r in self.relays.values():
+            if r.status not in ("merged", "discarded"):
+                try:
+                    relay.stop(r)
+                    if r.workspace is not None:
+                        r.workspace.close()   # now: a running relay's thread won't outlive the process
+                except Exception:
+                    logger.debug("Couldn't clean up relay %s", r.id, exc_info=True)
+
+
+def default_data_dir() -> Path:
+    """Where the RAPR app keeps its data (scripts/install-*.{sh,ps1}), so a standalone MCP
+    server shares bake-off history, your brief and keys with an app installed later."""
+    if sys.platform == "win32":
+        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "RAPR AI"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "RAPR AI"
+    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "RAPR AI"
+
+
+def standalone() -> None:
+    """`rapr-mcp`: the MCP server installed on its own (pyproject.toml), without the app."""
+    os.environ.setdefault("RAPR_DATA_DIR", str(default_data_dir()))
+    main()
 
 
 def main() -> None:
@@ -581,5 +885,8 @@ def main() -> None:
     sys.stdout = sys.stderr
     inp = open(sys.stdin.fileno(), "r", encoding="utf-8", closefd=False)
     import logging
+    import signal
     logging.getLogger("helm").setLevel(logging.WARNING)
+    # A client that stops the server (rather than closing stdin) still gets the relays' copies removed.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     Server(proto).serve(inp)

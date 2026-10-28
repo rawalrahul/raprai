@@ -49,10 +49,10 @@ def _build_cmd_for_session(sess: dict, prompt: str) -> tuple[list, str | None, d
 
 
 def _run_subprocess_blocking(cmd: list, cwd: str, stdin_text: str | None,
-                             extra_env: dict | None = None, on_start=None) -> str:
+                             extra_env: dict | None = None, on_start=None, timeout: int = 300) -> str:
     """Blocking subprocess run. Returns stdout as string.
     on_start(proc), if given, is called once the process is running (so a caller
-    can stop it)."""
+    can stop it). timeout is in seconds."""
     from helm.paths import child_env
     env = child_env(cmd, extra_env)   # RAPR's own helpers (Groq…) need RAPR on their path
     dummy = {"proc": None}
@@ -73,7 +73,7 @@ def _run_subprocess_blocking(cmd: list, cwd: str, stdin_text: str | None,
         if on_start:
             on_start(proc)
         try:
-            stdout, _ = proc.communicate(input=stdin_text, timeout=300)
+            stdout, _ = proc.communicate(input=stdin_text, timeout=timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.communicate()
