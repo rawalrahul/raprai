@@ -1,0 +1,34 @@
+# Packaging for the MCP server on its own, without the RAPR app:
+#
+#     claude mcp add --scope user rapr -- uvx --from git+https://github.com/rawalrahul/raprai rapr-mcp
+#
+# The app itself is installed with the scripts in scripts/ (see the README), not from here.
+# Only what the MCP server needs is listed below; tests/test_mcp_standalone.py checks that
+# its tools still load with nothing more installed.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rapr-mcp"
+dynamic = ["version"]
+description = "RAPR AI as an MCP server: have Claude Code, Codex, Antigravity, Grok and other AIs plan, build, review and second-guess each other from inside your editor."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = ["python-dotenv>=1.0"]
+
+[project.urls]
+Homepage = "https://github.com/rawalrahul/raprai"
+Documentation = "https://github.com/rawalrahul/raprai/blob/main/docs/guide.md#use-rapr-from-claude-code-cursor-or-codex-mcp"
+
+[project.scripts]
+rapr-mcp = "helm.mcp_server:standalone"
+
+[tool.setuptools.dynamic]
+version = {attr = "helm.version.APP_VERSION"}
+
+[tool.setuptools.packages.find]
+include = ["helm", "helm.*", "integrations"]
+namespaces = false

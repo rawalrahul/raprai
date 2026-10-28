@@ -126,17 +126,24 @@ claude mcp add --scope user rapr -- rapr mcp     # Claude Code
 codex mcp add rapr -- rapr mcp                   # Codex
 ```
 
-On Windows, end both with `-- cmd /c rapr mcp`. For Codex, also add `tool_timeout_sec = 600` under `[mcp_servers.rapr]` in `~/.codex/config.toml`: Codex gives up on a tool after 60 seconds, and a review usually takes a few minutes. Cursor, Windsurf and other clients: add a server with the command `rapr` and the argument `mcp`.
+On Windows, end both with `-- cmd /c rapr mcp`. For Codex, also add `tool_timeout_sec = 600` under `[mcp_servers.rapr]` in `~/.codex/config.toml`: Codex gives up on a tool after 60 seconds, and a review usually takes a few minutes. Grok: `grok mcp add rapr -- rapr mcp`. Antigravity, Cursor, Windsurf and other clients: add a server with the command `rapr` and the argument `mcp` ([how, for each](docs/guide.md#use-rapr-from-claude-code-cursor-or-codex-mcp)).
 
-Then ask in plain words: *"get a second opinion from Codex on my changes"*, *"ask Claude how it would structure this"*, *"run a bake-off between Claude and Codex on this task, with pytest -q"*, *"what needs me today?"*.
+**Just the MCP server, without the app:** if you have [uv](https://docs.astral.sh/uv/), use `uvx --from git+https://github.com/rawalrahul/raprai rapr-mcp` in place of `rapr mcp`:
+
+```bash
+claude mcp add --scope user rapr -- uvx --from git+https://github.com/rawalrahul/raprai rapr-mcp
+```
+
+Then ask in plain words: *"get a second opinion from Codex on my changes"*, *"plan this with Claude, have Codex build it and Claude review it"*, *"run a bake-off between Claude and Codex on this task, with pytest -q"*, *"what needs me today?"*.
 
 | Tool | What it does |
 |---|---|
 | `second_opinion` | Another AI reviews your uncommitted changes (or the last commit, or changes since a branch you name) and reports bugs, most serious first. |
 | `ask_agent` | Puts any question or task to another AI and returns its reply. |
+| `start_relay`, `relay_status`, `merge_relay`, `discard_relay` | Plan, build, review, fix: pick any AI for each role (say Claude plans, Codex builds, Claude reviews and Codex fixes what it found), all in a copy of the project until you merge. |
 | `start_bakeoff`, `bakeoff_status`, `merge_bakeoff`, `discard_bakeoff` | A bake-off from your editor: 2 to 4 AIs, each in its own copy of the project; merge the one you like. |
 | `list_agents` | The AIs installed and signed in on this computer. |
-| `latest_brief` | What needs you, from your latest brief in the RAPR app. |
+| `latest_brief` | What needs you, from your latest brief in the RAPR app (needs the app). |
 
 The other AI works in a temporary copy of your project, so your files only change if you allow edits or merge a bake-off. Nothing is hosted and the RAPR app doesn't need to be open. More in the [full guide](docs/guide.md#use-rapr-from-claude-code-cursor-or-codex-mcp).
 
