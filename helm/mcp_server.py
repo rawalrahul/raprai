@@ -97,6 +97,9 @@ def _ready(key: str, info: dict) -> bool:
         return False
     if not (cmd and _found((cmd[0] or "").strip())):
         return False
+    from helm.signin import signed_in
+    if not signed_in(key):
+        return False
     ready = info.get("ready")
     if callable(ready):
         try:
@@ -334,14 +337,15 @@ def _clip(text: str, limit: int) -> str:
 # Tools
 # ---------------------------------------------------------------------------
 
-SIGN_IN = {"claude": "claude auth login", "codex": "codex login"}
+SIGN_IN = {"claude": "claude auth login", "codex": "codex login", "grok": "grok login",
+           "amazon_q": "kiro-cli login"}
 
 
 def signed_out() -> list[str]:
     """Installed tools that say they aren't signed in, so they aren't offered."""
     from helm.signin import status
     have = agents()
-    return [name for name in SIGN_IN if name not in have and _found(name) and status(name) is False]
+    return [name for name in SIGN_IN if name not in have and status(name) is False]
 
 
 def tool_list_agents(args: dict, ctx: "Server") -> str:
