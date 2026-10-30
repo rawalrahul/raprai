@@ -109,18 +109,43 @@ def _ready(key: str, info: dict) -> bool:
     return True
 
 
+def _safely(check: Callable[[], bool]) -> bool:
+    try:
+        return bool(check())
+    except Exception:
+        logger.debug("Readiness check failed", exc_info=True)
+        return False
+
+
+AGENTS_CACHE_SECONDS = 60
+_agents_cache: tuple[float, dict[str, str]] = (0.0, {})
+
+
 def agents() -> dict[str, str]:
-    """AIs that can be run here: key -> display name."""
+    """AIs that can be run here: key -> display name. Each check can take a moment (asking a
+    tool whether it's signed in, a local server whether it's up), so they run side by side and
+    the answer is kept for a minute: every tool call asks, and a client gives up on a slow one."""
+    global _agents_cache
+    at, found = _agents_cache
+    if found and time.monotonic() - at < AGENTS_CACHE_SECONDS:
+        return dict(found)
     import helm.state as _st
     _load()
     from helm.signin import signed_in
-    found = {}
-    if _found("claude") and signed_in("claude"):
-        found["claude"] = "Claude Code"
+
+    def claude_ready() -> bool:
+        return _found("claude") and signed_in("claude")
+
+    checks = {"claude": claude_ready}
     for key, info in _st.integrations.items():
-        if key not in found and _ready(key, info):
-            found[key] = info.get("name") or key
-    return found
+        checks.setdefault(key, lambda key=key, info=info: _ready(key, info))
+    with ThreadPoolExecutor(max_workers=8, thread_name_prefix="mcp-ready") as pool:
+        ready = dict(zip(checks, pool.map(_safely, checks.values())))
+    names = {"claude": "Claude Code"}
+    found = {key: names.get(key) or _st.integrations[key].get("name") or key
+             for key in checks if ready[key]}
+    _agents_cache = (time.monotonic(), found)
+    return dict(found)
 
 
 def _check_agent(agent: str) -> None:
@@ -348,11 +373,19 @@ def signed_out() -> list[str]:
     return [name for name in SIGN_IN if name not in have and status(name) is False]
 
 
+COPILOT_CLI = ("GitHub Copilot is installed in your editor, but RAPR runs AIs through their "
+               "command-line tools, and Copilot Chat isn't one. To add Copilot, install Copilot CLI: "
+               "`npm install -g @github/copilot`, then `copilot login`.")
+
+
 def tool_list_agents(args: dict, ctx: "Server") -> str:
+    from helm.editor_clis import has_extension
     have = agents()
     out = signed_out()
     note = "".join(f"\n{name} is installed but not signed in: run `{SIGN_IN[name]}` in a terminal."
                    for name in out)
+    if "copilot" not in have and has_extension("github.copilot-chat-") and not _found("copilot"):
+        note += "\n" + COPILOT_CLI
     if not have:
         return ("No AI command-line tools are ready. Install one (for example Codex: "
                 "npm i -g @openai/codex) and sign in, then try again." + note)
@@ -554,12 +587,21 @@ def tool_start_relay(args: dict, ctx: "Server") -> str:
                          test_command=args.get("test_command"))
     except ValueError as exc:
         raise ToolError(str(exc)) from exc
-    scratch = Scratch(folder)
 
     def runner(agent, prompt, cwd, *, edits, timeout, on_start):
         return run_agent(agent, prompt, cwd, edits=edits, timeout=timeout, on_start=on_start)
 
     def go():
+        # The copy is made here, not before replying: copying a big project can take longer
+        # than an MCP client waits for a tool to answer.
+        r.stage = "copying the project"
+        try:
+            scratch = Scratch(folder)
+        except Exception as exc:
+            with r.lock:
+                if r.status == "running":
+                    r.status, r.stage, r.error = "failed", "couldn't copy the project", str(exc)
+            return
         relay.run(r, runner, scratch)
         if r.status in ("failed", "discarded"):
             scratch.close()
@@ -704,6 +746,8 @@ def _run_part(t: Team, part: TeamPart) -> None:
     start = time.monotonic()
     part.status = "working"
     try:
+        # Copied here rather than in start_team, which has to answer quickly.
+        part.scratch = Scratch(t.folder)
         part.reply = run_agent(part.agent, _team_prompt(t, part), part.scratch.cwd, edits=True,
                                timeout=BUILD_TIMEOUT)
         part.diff, part.files = part.scratch.diff()
@@ -713,7 +757,8 @@ def _run_part(t: Team, part: TeamPart) -> None:
         part.status = "failed"
     part.seconds = time.monotonic() - start
     if t.closed:   # discarded while it worked
-        part.scratch.close()
+        if part.scratch is not None:
+            part.scratch.close()
         part.status = "discarded"
 
 
@@ -730,14 +775,6 @@ def tool_start_team(args: dict, ctx: "Server") -> str:
         parts.append(TeamPart(i, agent, task))
     folder = _folder(args.get("folder"), ctx.cwd)
     t = Team(folder, (args.get("plan") or "").strip(), parts)
-    try:
-        for part in parts:
-            part.scratch = Scratch(folder)
-    except Exception as exc:
-        for part in parts:
-            if part.scratch is not None:
-                part.scratch.close()
-        raise ToolError(f"Couldn't copy the project: {exc}") from exc
     ctx.teams[t.id] = t
     for part in parts:
         threading.Thread(target=_run_part, args=(t, part), daemon=True,

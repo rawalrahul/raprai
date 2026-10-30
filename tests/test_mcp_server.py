@@ -291,7 +291,9 @@ def test_team_parts_run_separately_and_merge_with_your_own_work(repo, team_agent
     report = wait_team(s, team_id)
     assert "Part 1: claude, done" in report and "Part 2: codex, done" in report
     assert not (repo / "api.py").exists()          # nothing applied before merging
-    assert "Split the app in two" in team_agents[0] and "part 2 (codex): write ui.py" in team_agents[0]
+    assert all("Split the app in two" in prompt for prompt in team_agents)
+    claude_prompt = next(prompt for prompt in team_agents if "write api.py" in prompt.split("Your part")[1][:40])
+    assert "part 2 (codex): write ui.py" in claude_prompt
 
     text, err = call(s, "merge_team", id=team_id)
     assert not err, text
@@ -322,8 +324,8 @@ def test_team_in_a_plain_folder_wont_overwrite_your_changes(tmp_path, team_agent
     text, _ = call(s, "start_team", parts=[{"agent": "claude", "task": "write notes.txt: from claude"},
                                            {"agent": "codex", "task": "write extra.txt: from codex"}])
     team_id = text.split()[2]
-    (tmp_path / "notes.txt").write_text("mine\n")
     wait_team(s, team_id)
+    (tmp_path / "notes.txt").write_text("mine\n")   # changed after the copies were made
     text, _ = call(s, "merge_team", id=team_id)
     assert "part 1 (claude) not merged: notes.txt" in text
     assert (tmp_path / "notes.txt").read_text() == "mine\n"
@@ -339,3 +341,77 @@ def test_team_checks_its_parts(repo, team_agents):
     assert err and "Part 1 needs" in text
     text, err = call(s, "merge_team", id="team-nope")
     assert err
+
+
+def test_start_relay_and_team_answer_before_the_copy_is_made(repo, team_agents, monkeypatch):
+    """A big project can take longer to copy than an MCP client waits for a tool."""
+    import threading
+    gate = threading.Event()
+    real = mcp.Scratch
+
+    class SlowScratch(real):
+        def __init__(self, folder):
+            gate.wait(10)
+            super().__init__(folder)
+    monkeypatch.setattr(mcp, "Scratch", SlowScratch)
+    s = mcp.Server(out=None, cwd=str(repo))
+    start = time.monotonic()
+    text, err = call(s, "start_relay", task="write a.py: A = 1", executor="claude", reviewer="codex",
+                     fix_rounds=0)
+    assert not err, text
+    text, err = call(s, "start_team", parts=[{"agent": "claude", "task": "write api.py: API = 1"}])
+    assert not err, text
+    assert time.monotonic() - start < 3
+    gate.set()
+    report = wait_team(s, text.split()[2])
+    assert "Part 1: claude, done" in report
+
+
+def test_a_relay_whose_copy_fails_says_so(repo, team_agents, monkeypatch):
+    def broken(folder):
+        raise OSError("disk full")
+    monkeypatch.setattr(mcp, "Scratch", broken)
+    s = mcp.Server(out=None, cwd=str(repo))
+    text, _ = call(s, "start_relay", task="x", executor="claude", reviewer="codex")
+    relay_id = text.split()[2]
+    for _ in range(50):
+        text, _ = call(s, "relay_status", id=relay_id, wait_seconds=1)
+        if "failed" in text:
+            break
+    assert "failed" in text and "disk full" in text
+
+
+def test_agents_are_checked_once_a_minute(monkeypatch):
+    import helm.state as st
+    mcp._load()
+    calls = []
+    monkeypatch.setattr(mcp, "_agents_cache", (0.0, {}))
+    monkeypatch.setattr(mcp, "_found", lambda exe: False)
+    monkeypatch.setattr(mcp, "_ready", lambda key, info: calls.append(key) or key == "codex")
+    assert mcp.agents() == {"codex": st.integrations["codex"]["name"]}
+    n = len(calls)
+    mcp.agents()
+    mcp._check_agent("codex")
+    assert len(calls) == n                      # answered from the cache
+
+
+def test_loading_the_ais_does_not_import_the_web_app():
+    """It took seconds (the Gemini check imported the whole app) and timed out MCP clients."""
+    code = ("import sys; sys.path.insert(0, '.'); import helm.mcp_server as m; m._load(); "
+            "print('helm.web_routes' in sys.modules)")
+    out = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, timeout=120)
+    assert out.stdout.strip().splitlines()[-1] == "False", out.stderr[-2000:]
+
+
+def test_list_agents_explains_copilot_chat_is_not_a_cli(monkeypatch, tmp_path):
+    import helm.editor_clis as ec
+    (tmp_path / ".vscode" / "extensions" / "github.copilot-chat-0.40.0").mkdir(parents=True)
+    monkeypatch.setattr(ec.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(mcp, "agents", lambda: {"claude": "Claude Code"})
+    monkeypatch.setattr(mcp, "signed_out", lambda: [])
+    monkeypatch.setattr(mcp, "_found", lambda exe: False)
+    text = mcp.Server(out=None).call_tool("list_agents", {})["content"][0]["text"]
+    assert "npm install -g @github/copilot" in text
+    monkeypatch.setattr(mcp, "agents", lambda: {"claude": "Claude Code", "copilot": "Copilot"})
+    text = mcp.Server(out=None).call_tool("list_agents", {})["content"][0]["text"]
+    assert "npm install" not in text

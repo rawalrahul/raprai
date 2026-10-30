@@ -88,3 +88,15 @@ def add_to_path(home: Optional[Path] = None) -> dict[str, str]:
             os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + str(binary.parent)
             added[name] = str(binary)
     return added
+
+
+def has_extension(prefix: str, home: Optional[Path] = None) -> bool:
+    """Whether any editor has an extension whose folder starts with `prefix` installed."""
+    home = home or Path.home()
+    for editor in EDITOR_DIRS:
+        try:
+            if any(p.name.startswith(prefix) for p in (home / editor / "extensions").iterdir()):
+                return True
+        except OSError:
+            continue
+    return False
