@@ -149,7 +149,11 @@ def test_discard_stops_a_running_relay(repo, monkeypatch):
     s = mcp.Server(out=None, cwd=str(repo))
     text, _ = call(s, "start_relay", task="t", executor="builder", reviewer="critic")
     rid = rid_of(text)
+    end = time.time() + 10   # the copy is made in the background first
     status, _ = call(s, "relay_status", id=rid, wait_seconds=0)
+    while "builder is carrying out the task" not in status and time.time() < end:
+        time.sleep(0.05)
+        status, _ = call(s, "relay_status", id=rid, wait_seconds=0)
     assert "running" in status and "builder is carrying out the task" in status
     text, err = call(s, "discard_relay", id=rid)
     assert not err and "Discarded" in text
@@ -160,6 +164,32 @@ def test_discard_stops_a_running_relay(repo, monkeypatch):
     assert "rapr-mcp" not in worktrees(repo)
     assert [c["agent"] for c in ais.calls] == ["builder"]     # it never went on to review
     assert (repo / "app.py").read_text().endswith("a - b\n")
+
+
+def test_discard_while_the_project_is_still_being_copied(repo, monkeypatch):
+    ais = FakeAIs(monkeypatch)
+    gate = threading.Event()
+    real = mcp.Scratch
+
+    class SlowScratch(real):
+        def __init__(self, folder):
+            gate.wait(10)
+            super().__init__(folder)
+    monkeypatch.setattr(mcp, "Scratch", SlowScratch)
+    s = mcp.Server(out=None, cwd=str(repo))
+    text, _ = call(s, "start_relay", task="t", executor="builder", reviewer="critic")
+    rid = rid_of(text)
+    status, _ = call(s, "relay_status", id=rid, wait_seconds=0)
+    assert "copying the project" in status
+    text, err = call(s, "discard_relay", id=rid)
+    assert not err and "Discarded" in text
+    gate.set()
+    end = time.time() + 10
+    time.sleep(0.3)
+    while "rapr-mcp" in worktrees(repo) and time.time() < end:
+        time.sleep(0.1)
+    assert "rapr-mcp" not in worktrees(repo)
+    assert ais.calls == []                                    # no AI was started
 
 
 def test_closing_the_server_discards_open_relays(repo, monkeypatch):
