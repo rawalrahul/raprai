@@ -136,13 +136,14 @@ On Windows, end both with `-- cmd /c rapr mcp`. For Codex, also add `tool_timeou
 claude mcp add --scope user rapr -- uvx --from git+https://github.com/rawalrahul/raprai rapr-mcp
 ```
 
-Then ask in plain words: *"get a second opinion from Codex on my changes"*, *"plan this with Claude, have Codex build it and Claude review it"*, *"run a bake-off between Claude and Codex on this task, with pytest -q"*, *"what needs me today?"*.
+Then ask in plain words: *"get a second opinion from Codex on my changes"*, *"plan this with Claude, have Codex build it and Claude review it"*, *"give part 1 of the plan to Claude and part 2 to Codex, I'll do part 3"*, *"run a bake-off between Claude and Codex on this task, with pytest -q"*, *"what needs me today?"*.
 
 | Tool | What it does |
 |---|---|
 | `second_opinion` | Another AI reviews your uncommitted changes (or the last commit, or changes since a branch you name) and reports bugs, most serious first. |
 | `ask_agent` | Puts any question or task to another AI and returns its reply. |
 | `start_relay`, `relay_status`, `merge_relay`, `discard_relay` | Plan, build, review, fix: pick any AI for each role (say Claude plans, Codex builds, Claude reviews and Codex fixes what it found), all in a copy of the project until you merge. |
+| `start_team`, `team_status`, `merge_team`, `discard_team` | Split a plan into parts: say Claude does the API and Codex the UI at the same time, each in its own copy, while you do your own part; then merge them all into the project. |
 | `start_bakeoff`, `bakeoff_status`, `merge_bakeoff`, `discard_bakeoff` | A bake-off from your editor: 2 to 4 AIs, each in its own copy of the project; merge the one you like. |
 | `list_agents` | The AIs installed and signed in on this computer. |
 | `latest_brief` | What needs you, from your latest brief in the RAPR app (needs the app). |
