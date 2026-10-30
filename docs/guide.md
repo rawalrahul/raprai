@@ -353,6 +353,8 @@ Finished bake-offs are kept (the numbers only, not the code), so they count towa
 
 RAPR is also an MCP server, so the AI you're coding with can call the others. The `rapr mcp` command comes with the Windows and Mac installs; from a source checkout, use `python /path/to/raprai/rapr_mcp.py` wherever you see `rapr mcp` below.
 
+The other AIs need their own command-line tools on this computer. If Claude Code or Codex came only with its extension for VS Code, Cursor or Windsurf, RAPR uses the copy inside the extension; a separate install of the command-line tool, when you have one, comes first.
+
 ### Without installing the app
 
 You don't need the RAPR app for this. With [uv](https://docs.astral.sh/uv/getting-started/installation/) installed, use this command wherever you see `rapr mcp` below (Windows included, no `cmd /c`):

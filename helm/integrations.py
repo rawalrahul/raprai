@@ -199,6 +199,15 @@ def _register_custom(entry: dict) -> None:
 def load_integrations() -> None:
     """Load all integrations: file-based first, then custom overlays."""
 
+    # Claude Code or Codex that came only with an editor extension: put it on PATH first,
+    # so the integrations below (and the app's own checks) find it.
+    try:
+        from helm.editor_clis import add_to_path
+        for name, path in add_to_path().items():
+            logger.info("Using %s from an editor extension: %s", name, path)
+    except Exception as exc:
+        logger.warning("Couldn't look for AI tools in editor extensions: %s", exc)
+
     # 1. File-based integrations (integrations/*.py)
     folder = resolve("integrations")
     if folder.exists():
