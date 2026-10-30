@@ -226,6 +226,9 @@ def load_integrations() -> None:
                     "setup_hint":    getattr(mod, "SETUP_HINT",  ""),
                     "stdin_prompt":  getattr(mod, "STDIN_PROMPT", False),
                     "process_env":   getattr(mod, "PROCESS_ENV",  {}),
+                    # Optional check that the AI can answer right now, e.g. that the
+                    # local server it talks to is running (its command alone isn't enough).
+                    "ready":         getattr(mod, "READY",        None),
                     # Catalog (Settings → AI Integrations): one-line description,
                     # install command and docs link.
                     "about":         getattr(mod, "ABOUT",        ""),

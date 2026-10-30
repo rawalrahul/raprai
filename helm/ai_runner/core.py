@@ -287,6 +287,9 @@ def is_backend_available(ai_key: str) -> bool:
                     result = True
                 else:
                     result = False
+                ready = info.get("ready")
+                if result and callable(ready):
+                    result = bool(ready())
             except Exception:
                 result = False
 

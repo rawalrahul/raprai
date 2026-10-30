@@ -40,6 +40,19 @@ def _process_env() -> dict:
     return {"CODEX_OSS_BASE_URL": host.rstrip("/") + "/v1"}
 
 
+def READY() -> bool:
+    """Listed as ready only while Ollama answers: `codex` alone being installed isn't enough."""
+    import urllib.request
+    host = os.environ.get("OLLAMA_HOST", "").strip() or "127.0.0.1:11434"
+    if not host.startswith("http"):
+        host = "http://" + host
+    try:
+        urllib.request.build_opener(urllib.request.ProxyHandler({})).open(host.rstrip("/") + "/api/version", timeout=1).close()
+        return True
+    except Exception:
+        return False
+
+
 STDIN_PROMPT = True
 ENV_VARS: list[str] = []
 PROCESS_ENV = _process_env()

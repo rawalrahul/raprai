@@ -94,7 +94,15 @@ def _ready(key: str, info: dict) -> bool:
         cmd = info["build_command"]("test", model=None)
     except Exception:
         return False
-    return bool(cmd) and _found((cmd[0] or "").strip())
+    if not (cmd and _found((cmd[0] or "").strip())):
+        return False
+    ready = info.get("ready")
+    if callable(ready):
+        try:
+            return bool(ready())
+        except Exception:
+            return False
+    return True
 
 
 def agents() -> dict[str, str]:
