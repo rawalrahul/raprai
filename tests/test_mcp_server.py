@@ -215,3 +215,42 @@ def test_a_byte_order_mark_before_a_message_is_ignored():
     out = io.StringIO()
     mcp.Server(out=out).serve(io.StringIO('\ufeff{"jsonrpc":"2.0","id":7,"method":"ping"}\n'))
     assert json.loads(out.getvalue()) == {"jsonrpc": "2.0", "id": 7, "result": {}}
+
+
+def test_local_model_ais_are_listed_only_while_their_server_answers(monkeypatch):
+    """claude_ollama used to be listed whenever `claude` was installed, and local_ai always
+    (its command is Python), even with no Ollama or local server on the computer."""
+    import http.server
+    import socket
+    import threading
+    import helm.state as st
+
+    mcp._load()
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        free = sock.getsockname()[1]
+    monkeypatch.setenv("OLLAMA_HOST", f"127.0.0.1:{free}")
+    monkeypatch.setenv("LOCAL_AI_URL", f"http://127.0.0.1:{free}")
+    monkeypatch.setattr(mcp, "_found", lambda exe: True)   # as if claude and codex are installed
+    for key in ("claude_ollama", "codex_ollama", "local_ai"):
+        assert not mcp._ready(key, st.integrations[key]), key
+
+    class Answer(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *a):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Answer)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        port = server.server_address[1]
+        monkeypatch.setenv("OLLAMA_HOST", f"127.0.0.1:{port}")
+        monkeypatch.setenv("LOCAL_AI_URL", f"http://127.0.0.1:{port}")
+        for key in ("claude_ollama", "codex_ollama", "local_ai"):
+            assert mcp._ready(key, st.integrations[key]), key
+    finally:
+        server.shutdown()

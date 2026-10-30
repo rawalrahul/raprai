@@ -45,6 +45,16 @@ def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
     return cmd
 
 
+def READY() -> bool:
+    """Listed as ready only while the local server answers: the command is Python, which is always there."""
+    import urllib.request
+    try:
+        urllib.request.build_opener(urllib.request.ProxyHandler({})).open(_server_url() + "/v1/models", timeout=1).close()
+        return True
+    except Exception:
+        return False
+
+
 STDIN_PROMPT = True
 ENV_VARS = []  # key is optional — most local servers need no auth
 SETUP_HINT = (

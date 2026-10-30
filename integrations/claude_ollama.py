@@ -63,6 +63,16 @@ def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
             "--settings", _settings_file(m)]
 
 
+def READY() -> bool:
+    """Listed as ready only while Ollama answers here: `claude` alone being installed isn't enough."""
+    import urllib.request
+    try:
+        urllib.request.build_opener(urllib.request.ProxyHandler({})).open(f"http://127.0.0.1:{_local_port()}/api/version", timeout=1).close()
+        return True
+    except Exception:
+        return False
+
+
 STDIN_PROMPT = True
 ENV_VARS: list[str] = []
 PROCESS_ENV = {
