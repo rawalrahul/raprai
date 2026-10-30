@@ -25,12 +25,15 @@ def SHOW() -> bool:
     """List Gemini only where its CLI is installed. Google stopped the Gemini CLI
     for personal accounts (June 2026); Antigravity (agy) replaces it, so a new
     install offers Antigravity instead."""
-    try:
-        from helm.web_routes.app import _find_cli
-        return _find_cli("gemini")
-    except Exception:
-        import shutil
-        return bool(shutil.which("gemini") or shutil.which("gemini.cmd"))
+    # Inside the app, its finder also looks in npm folders that aren't on PATH. Elsewhere
+    # (the MCP server) don't import the whole web app for it: that took seconds and made
+    # an MCP client's first tool call time out.
+    import shutil
+    app = sys.modules.get("helm.web_routes.app")
+    finder = getattr(app, "_find_cli", None)
+    if finder is not None:
+        return bool(finder("gemini"))
+    return bool(shutil.which("gemini") or shutil.which("gemini.cmd"))
 
 
 STDIN_PROMPT = True  # signals ai_runner to pipe prompt via stdin

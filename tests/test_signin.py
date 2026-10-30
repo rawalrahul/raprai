@@ -83,6 +83,7 @@ def test_answers_are_cached(clean):
 def test_list_agents_skips_and_explains_signed_out_tools(monkeypatch):
     import helm.state as st
     mcp._load()
+    monkeypatch.setattr(mcp, "_agents_cache", (0.0, {}))
     monkeypatch.setattr(mcp, "_found", lambda exe: exe in ("claude", "codex"))
     monkeypatch.setattr(signin, "_cache", {"claude": (True, 1e18), "codex": (False, 1e18)})
     monkeypatch.setattr(signin.time, "monotonic", lambda: 1e18)
