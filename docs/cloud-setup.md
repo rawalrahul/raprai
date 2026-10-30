@@ -14,10 +14,11 @@ and 4 GB of free disk. Ubuntu or Debian are the easiest.
    card to verify you; the "Always Free" resources below are not charged.
 2. In the Oracle console: **Compute → Instances → Create instance**.
    - Image: **Canonical Ubuntu**.
-   - Shape: **VM.Standard.A1.Flex** (Ampere, ARM), e.g. 2 OCPUs and 12 GB.
-     Always free up to 4 OCPUs and 24 GB in total, and much roomier than the
-     1 GB **VM.Standard.E2.1.Micro**, which also works but is tight. If A1 says
-     it's out of capacity, try another availability domain or try again later.
+   - Shape: **VM.Standard.A1.Flex** (Ampere, ARM) with 2 OCPUs and 12 GB, the
+     whole Always Free Arm allowance (Oracle cut it from 4 OCPUs and 24 GB in
+     2026). That's much roomier than the 1 GB **VM.Standard.E2.1.Micro**, which
+     also works but is tight. If A1 says it's out of capacity, try another
+     availability domain or try again later.
    - Networking: keep the default public subnet and assign a public IP.
    - SSH keys: **Generate a key pair** and **download the private key**. Keep it safe.
 3. Once the instance is running, copy its **Public IP address**.
@@ -70,6 +71,14 @@ saved), starts RAPR and prints the address to open. It's the same setup as
 AI keys and chat-app tokens are then added in the server's own RAPR, under Settings.
 
 ## Things to know
+
+- **Oracle may reclaim an idle Always Free server.** Oracle's
+  [Always Free page](https://docs.oracle.com/en-us/iaas/Content/FreeTier/resourceref.htm)
+  says an Always Free instance can be reclaimed if, over 7 days, its CPU and
+  network use (and memory, on Arm shapes) stay below 20%. A RAPR server that
+  mostly waits for messages can look idle. Keep a copy of anything important
+  (RAPR's data lives in its Docker volume on the server), and check Oracle's
+  current terms if you rely on the server staying up.
 
 - **The address can change.** The free Cloudflare tunnel gives a new
   `https://….trycloudflare.com` address each time the server restarts. RAPR
