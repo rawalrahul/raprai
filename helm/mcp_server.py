@@ -110,8 +110,9 @@ def agents() -> dict[str, str]:
     """AIs that can be run here: key -> display name."""
     import helm.state as _st
     _load()
+    from helm.signin import signed_in
     found = {}
-    if _found("claude"):
+    if _found("claude") and signed_in("claude"):
         found["claude"] = "Claude Code"
     for key, info in _st.integrations.items():
         if key not in found and _ready(key, info):
@@ -333,12 +334,26 @@ def _clip(text: str, limit: int) -> str:
 # Tools
 # ---------------------------------------------------------------------------
 
+SIGN_IN = {"claude": "claude auth login", "codex": "codex login"}
+
+
+def signed_out() -> list[str]:
+    """Installed tools that say they aren't signed in, so they aren't offered."""
+    from helm.signin import status
+    have = agents()
+    return [name for name in SIGN_IN if name not in have and _found(name) and status(name) is False]
+
+
 def tool_list_agents(args: dict, ctx: "Server") -> str:
     have = agents()
+    out = signed_out()
+    note = "".join(f"\n{name} is installed but not signed in: run `{SIGN_IN[name]}` in a terminal."
+                   for name in out)
     if not have:
-        return ("No AI command-line tools were found. Install one (for example Codex: "
-                "npm i -g @openai/codex) and sign in, then try again.")
-    return "AIs available through RAPR on this computer:\n" + "\n".join(f"- {k} ({v})" for k, v in have.items())
+        return ("No AI command-line tools are ready. Install one (for example Codex: "
+                "npm i -g @openai/codex) and sign in, then try again." + note)
+    return ("AIs available through RAPR on this computer:\n"
+            + "\n".join(f"- {k} ({v})" for k, v in have.items()) + ("\n" + note if note else ""))
 
 
 def tool_latest_brief(args: dict, ctx: "Server") -> str:

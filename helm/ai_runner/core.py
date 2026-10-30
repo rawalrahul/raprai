@@ -247,7 +247,8 @@ def is_backend_available(ai_key: str) -> bool:
 
     # Built-in CLI check
     if ai_key == "claude":
-        result = bool(shutil.which("claude"))
+        from helm.signin import signed_in
+        result = bool(shutil.which("claude")) and signed_in("claude")
     elif ai_key == "ollama":
         result = bool(shutil.which("ollama"))
     elif ai_key == "openrouter":
