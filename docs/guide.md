@@ -425,13 +425,14 @@ Ask in plain words: *"get a second opinion from Codex on my changes"*, *"ask Ant
 | `second_opinion` | Another AI reviews your uncommitted changes (or the last commit, or changes since a branch you name) and reports bugs and risks, most serious first. |
 | `ask_agent` | Sends any question or task to another AI and returns its reply. |
 | `start_relay`, `relay_status`, `merge_relay`, `discard_relay` | One task down a line of AIs: a planner, an executor, a reviewer and a fixer, each any AI you like (see below). |
+| `start_team`, `team_status`, `merge_team`, `discard_team` | One plan split into parts, each part done by a different AI at the same time while you do your own; then merged (see below). |
 | `start_bakeoff`, `bakeoff_status`, `merge_bakeoff`, `discard_bakeoff` | The same bake-off as in the app: 2 to 4 AIs, each in its own copy of the project. Merge the one you like (staged, not committed). |
 | `list_agents` | The AIs that are installed and set up on this computer. |
 | `latest_brief` | What needs you, from your latest brief in the RAPR app: approvals, unfinished work, scheduled results and what your AIs found in their apps. |
 
 - **It runs on your computer.** Your MCP client starts `rapr mcp` itself and talks to it over stdin/stdout. Nothing is hosted, and the RAPR app doesn't need to be open. The AIs run through their own command-line tools with your sign-ins, as in a bake-off.
 - **Your files are safe by default.** `second_opinion` and `ask_agent` run the other AI in a temporary copy of the project, including your uncommitted changes. If it edits anything, you get the diff back; your files don't change. Pass `allow_edits` to `ask_agent` to let it work in the real folder.
-- Each call takes as long as the other AI does, usually a minute or a few. Relays and bake-offs run in the background: `start_bakeoff` returns an id, and `bakeoff_status` waits up to 50 seconds per call (inside Codex's time limit, even without `tool_timeout_sec`), so your AI calls it again until the results are in. `relay_status` works the same way. Bake-offs from MCP are kept like the app's, so they count in your monthly recap.
+- Each call takes as long as the other AI does, usually a minute or a few. Relays and bake-offs run in the background: `start_bakeoff` returns an id, and `bakeoff_status` waits up to 50 seconds per call (inside Codex's time limit, even without `tool_timeout_sec`), so your AI calls it again until the results are in. `relay_status` and `team_status` work the same way. Bake-offs from MCP are kept like the app's, so they count in your monthly recap.
 
 #### Relays: plan, build, review, fix
 
@@ -447,6 +448,12 @@ A relay gives each AI one job. You pick who does what:
 Any AI from `list_agents` can take any role, and one AI can take several: plan with Claude, build with Codex, review with Claude; or plan with Grok, build with Antigravity, review with Codex. `fix_rounds` (0 to 3, default 1) is how many times it goes back to the fixer when the reviewer still wants changes. With a `test_command` (say `pytest -q`), the tests run after each build and fix, and the reviewer sees the result.
 
 Everything happens in one copy of your project, starting from your uncommitted work. `relay_status` shows the plan, what each AI said, the review and the diff so far; nothing in your project changes until `merge_relay`, which applies the result without staging or committing it. `discard_relay` stops a running relay and throws it away. A relay usually takes 10 minutes or more, and it ends if your MCP client closes.
+
+#### Teams: split a plan between AIs (and you)
+
+When a plan has parts that can be done separately, give each to a different AI with `start_team`: say *"give the API part of PLAN.md to Claude and the UI part to Codex; I'll write the tests myself"*. Each part is an AI and its task (1 to 6 parts; the same AI can take more than one). Pass the whole `plan` too, so each AI sees how its part fits; each is also told what the other parts are, so it stays out of them.
+
+The AIs work at the same time, each in its own copy of your project, while you work on your own part in the project itself. `team_status` shows each part's progress, what it said, its diff, and any file that more than one part changed. `merge_team` applies the finished parts one after another on top of what's in your project now, your own work included, without staging or committing; pass `parts` to merge only some, in your order. A part that clashes (it changed the same lines as your work or as a part merged before it) is skipped, reported and kept, so you can read its diff and make that change by hand or with `ask_agent`. In a folder that isn't a git repository, a part is skipped if any file it changed also changed in your project meanwhile. `discard_team` throws away whatever isn't merged. Like a relay, a team ends if your MCP client closes.
 
 
 **🐧 Your month with RAPR** (top of the **Usage** panel, or in the AI menu) turns a month of work into a card: tasks sent, AI replies, active days and longest streak, your AI crew and its MVP, bake-offs judged, tasks sent from your phone, and a title for the month ("The Conductor", "Night Owl", "Local Hero"…). Use **‹ Previous** to look back. At the start of each month RAPR offers last month's recap once.

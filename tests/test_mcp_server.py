@@ -254,3 +254,88 @@ def test_local_model_ais_are_listed_only_while_their_server_answers(monkeypatch)
             assert mcp._ready(key, st.integrations[key]), key
     finally:
         server.shutdown()
+
+
+@pytest.fixture
+def team_agents(monkeypatch):
+    """AIs whose task is "write FILE: TEXT"; they write that file wherever they run."""
+    prompts = []
+
+    def run(agent, prompt, cwd, model=None, **kw):
+        prompts.append(prompt)
+        task = prompt.split("Your part")[1].split("\n")[1]
+        name, text = task.removeprefix("write ").split(": ", 1)
+        Path(cwd, name).write_text(text + "\n")
+        return f"{agent} wrote {name}"
+    monkeypatch.setattr(mcp, "agents", lambda: {"claude": "Claude Code", "codex": "Codex"})
+    monkeypatch.setattr(mcp, "run_agent", run)
+    return prompts
+
+
+def wait_team(s, team_id):
+    for _ in range(100):
+        text, _ = call(s, "team_status", id=team_id, wait_seconds=1, include_diffs=False)
+        if "working" not in text.splitlines()[0]:
+            return text
+    raise AssertionError("team never finished")
+
+
+def test_team_parts_run_separately_and_merge_with_your_own_work(repo, team_agents):
+    s = mcp.Server(out=None, cwd=str(repo))
+    text, err = call(s, "start_team", plan="Split the app in two",
+                     parts=[{"agent": "claude", "task": "write api.py: API = 1"},
+                            {"agent": "codex", "task": "write ui.py: UI = 2"}])
+    assert not err, text
+    team_id = text.split()[2]
+    (repo / "app.py").write_text("def add(a, b):\n    return a + b\n")   # the user's own part
+    report = wait_team(s, team_id)
+    assert "Part 1: claude, done" in report and "Part 2: codex, done" in report
+    assert not (repo / "api.py").exists()          # nothing applied before merging
+    assert "Split the app in two" in team_agents[0] and "part 2 (codex): write ui.py" in team_agents[0]
+
+    text, err = call(s, "merge_team", id=team_id)
+    assert not err, text
+    assert (repo / "api.py").read_text() == "API = 1\n"
+    assert (repo / "ui.py").read_text() == "UI = 2\n"
+    assert "a + b" in (repo / "app.py").read_text()
+    assert not any(Path(p.scratch.root).exists() for p in s.teams[team_id].parts)
+
+
+def test_team_part_that_clashes_is_kept_back(repo, team_agents):
+    s = mcp.Server(out=None, cwd=str(repo))
+    text, _ = call(s, "start_team", parts=[{"agent": "claude", "task": "write app.py: X = 1"},
+                                           {"agent": "codex", "task": "write app.py: X = 2"}])
+    team_id = text.split()[2]
+    report = wait_team(s, team_id)
+    assert "app.py (parts 1, 2)" in report
+    text, _ = call(s, "merge_team", id=team_id)
+    assert "part 1 (claude): 1 file(s)" in text and "part 2 (codex) not merged" in text
+    assert (repo / "app.py").read_text() == "X = 1\n"
+    assert s.teams[team_id].parts[1].status == "conflict"
+    call(s, "discard_team", id=team_id)
+    assert not Path(s.teams[team_id].parts[1].scratch.root).exists()
+
+
+def test_team_in_a_plain_folder_wont_overwrite_your_changes(tmp_path, team_agents):
+    (tmp_path / "notes.txt").write_text("old\n")
+    s = mcp.Server(out=None, cwd=str(tmp_path))
+    text, _ = call(s, "start_team", parts=[{"agent": "claude", "task": "write notes.txt: from claude"},
+                                           {"agent": "codex", "task": "write extra.txt: from codex"}])
+    team_id = text.split()[2]
+    (tmp_path / "notes.txt").write_text("mine\n")
+    wait_team(s, team_id)
+    text, _ = call(s, "merge_team", id=team_id)
+    assert "part 1 (claude) not merged: notes.txt" in text
+    assert (tmp_path / "notes.txt").read_text() == "mine\n"
+    assert (tmp_path / "extra.txt").read_text() == "from codex\n"
+
+
+def test_team_checks_its_parts(repo, team_agents):
+    s = mcp.Server(out=None, cwd=str(repo))
+    assert call(s, "start_team", parts=[])[1]
+    text, err = call(s, "start_team", parts=[{"agent": "nobody", "task": "x"}])
+    assert err and "isn't available" in text
+    text, err = call(s, "start_team", parts=[{"agent": "claude", "task": ""}])
+    assert err and "Part 1 needs" in text
+    text, err = call(s, "merge_team", id="team-nope")
+    assert err

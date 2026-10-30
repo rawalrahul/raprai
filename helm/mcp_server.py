@@ -48,7 +48,8 @@ INSTRUCTIONS = (
     "RAPR AI runs other AI coding agents installed on this computer (Claude Code, Codex, "
     "Antigravity, Grok, Ollama…) with the user's own sign-ins. Use second_opinion to have a "
     "different AI review the current changes, ask_agent to put any question or task to another "
-    "AI, start_relay to have one AI plan, another build, and another review and get fixes, and "
+    "AI, start_relay to have one AI plan, another build, and another review and get fixes, "
+    "start_team to split a plan into parts that different AIs do at the same time and then merge, and "
     "start_bakeoff to give the same task to several AIs in separate copies of the project and "
     "compare them. Call list_agents first to see which AIs are available. Each call can take "
     "a few minutes while the other AI works."
@@ -636,6 +637,227 @@ def _discard_relay(r, relay) -> None:
         r.workspace.close()   # otherwise the relay's thread removes it as it stops
 
 
+# ---------------------------------------------------------------------------
+# Teams: one plan split into parts, each AI on its own part at the same time
+# ---------------------------------------------------------------------------
+
+TEAM_PROMPT = """You are one of several AI coding agents working on the same plan at the same time, each in a separate copy of the project. Your changes will be merged with theirs afterwards.
+{plan}
+Your part ({n} of {total}):
+{task}
+{others}
+Do only your part. Don't make changes that belong to the other parts, and avoid reformatting or moving code you don't need to touch, so the parts merge cleanly. When you're done, say briefly what you changed.
+"""
+
+
+class TeamPart:
+    def __init__(self, n: int, agent: str, task: str):
+        self.n, self.agent, self.task = n, agent, task
+        self.status = "waiting"     # waiting, working, done, failed, merged, conflict, discarded
+        self.reply = self.error = self.diff = ""
+        self.files: list[str] = []
+        self.seconds = 0.0
+        self.scratch: Optional[Scratch] = None
+
+
+class Team:
+    def __init__(self, folder: str, plan: str, parts: list[TeamPart]):
+        import uuid
+        self.id = "team-" + uuid.uuid4().hex[:6]
+        self.folder, self.plan, self.parts = folder, plan, parts
+        self.closed = False
+
+    @property
+    def busy(self) -> bool:
+        return any(p.status in ("waiting", "working") for p in self.parts)
+
+
+def _team_prompt(t: Team, part: TeamPart) -> str:
+    others = [f"- part {o.n} ({o.agent}): {o.task}" for o in t.parts if o is not part]
+    return TEAM_PROMPT.format(
+        plan=f"\nThe overall plan:\n{t.plan}\n" if t.plan else "",
+        n=part.n, total=len(t.parts), task=part.task,
+        others=("\nThe other parts, done by others (and maybe the user) at the same time:\n"
+                + "\n".join(others) + "\n") if others else "")
+
+
+def _run_part(t: Team, part: TeamPart) -> None:
+    start = time.monotonic()
+    part.status = "working"
+    try:
+        part.reply = run_agent(part.agent, _team_prompt(t, part), part.scratch.cwd, edits=True,
+                               timeout=BUILD_TIMEOUT)
+        part.diff, part.files = part.scratch.diff()
+        part.status = "done"
+    except Exception as exc:
+        part.error = str(exc) or type(exc).__name__
+        part.status = "failed"
+    part.seconds = time.monotonic() - start
+    if t.closed:   # discarded while it worked
+        part.scratch.close()
+        part.status = "discarded"
+
+
+def tool_start_team(args: dict, ctx: "Server") -> str:
+    raw = args.get("parts") or []
+    if not 1 <= len(raw) <= 6:
+        raise ToolError("Give 1 to 6 parts, each with an agent and its task.")
+    parts = []
+    for i, item in enumerate(raw, 1):
+        agent, task = (item.get("agent") or "").strip(), (item.get("task") or "").strip()
+        if not agent or not task:
+            raise ToolError(f"Part {i} needs both an agent and a task.")
+        _check_agent(agent)
+        parts.append(TeamPart(i, agent, task))
+    folder = _folder(args.get("folder"), ctx.cwd)
+    t = Team(folder, (args.get("plan") or "").strip(), parts)
+    try:
+        for part in parts:
+            part.scratch = Scratch(folder)
+    except Exception as exc:
+        for part in parts:
+            if part.scratch is not None:
+                part.scratch.close()
+        raise ToolError(f"Couldn't copy the project: {exc}") from exc
+    ctx.teams[t.id] = t
+    for part in parts:
+        threading.Thread(target=_run_part, args=(t, part), daemon=True,
+                         name=f"{t.id}-{part.n}").start()
+    who = ", ".join(f"part {p.n} to {p.agent}" for p in parts)
+    return (f"Started team {t.id} in separate copies of {folder}: {who}. They work at the same time; "
+            "you can work on your own part in the project meanwhile. Call team_status with id "
+            f"{t.id!r} to follow them, then merge_team to bring their parts into the project.")
+
+
+def _overlaps(t: Team) -> dict[str, list[int]]:
+    seen: dict[str, list[int]] = {}
+    for p in t.parts:
+        if p.status in ("done", "merged", "conflict"):
+            for name in p.files:
+                seen.setdefault(name, []).append(p.n)
+    return {name: ns for name, ns in seen.items() if len(ns) > 1}
+
+
+def _team_report(t: Team, include_diffs: bool) -> str:
+    lines = [f"Team {t.id}" + (": working" if t.busy else ""), f"Project: {t.folder}"]
+    for p in t.parts:
+        head = f"\n## Part {p.n}: {p.agent}, {p.status}"
+        if p.seconds:
+            head += f" ({p.seconds:.0f}s)"
+        lines.append(head + f"\nTask: {_clip(p.task, 500)}")
+        if p.error:
+            lines.append(f"Error: {_clip(p.error, 1000)}")
+        if p.reply.strip():
+            lines.append(_clip(p.reply.strip(), 2000))
+        if p.files:
+            lines.append(f"Files changed ({len(p.files)}): " + ", ".join(p.files[:30])
+                         + (" …" if len(p.files) > 30 else ""))
+            if include_diffs and p.diff.strip() and p.status == "done":
+                lines.append("Diff:\n" + _clip(p.diff, ATTEMPT_DIFF_LIMIT))
+    overlaps = _overlaps(t)
+    if overlaps:
+        lines.append("\nFiles changed by more than one part (check these merge cleanly): "
+                     + "; ".join(f"{name} (parts {', '.join(map(str, ns))})" for name, ns in overlaps.items()))
+    if t.busy:
+        lines.append("\nStill running. Call team_status again to keep waiting; merge_team can already "
+                     "bring in the parts that are done.")
+    elif any(p.status == "done" for p in t.parts):
+        lines.append("\nNext: merge_team to apply the finished parts to the project (not staged or "
+                     "committed), or discard_team to throw them away.")
+    return "\n".join(lines)
+
+
+def _get_team(args: dict, ctx: "Server") -> Team:
+    t = ctx.teams.get(args.get("id", ""))
+    if not t:
+        raise ToolError(f"No team {args.get('id')!r} in this session. Teams: {', '.join(ctx.teams) or 'none'}.")
+    return t
+
+
+def tool_team_status(args: dict, ctx: "Server") -> str:
+    t = _get_team(args, ctx)
+    wait = max(0, min(int(args.get("wait_seconds", STATUS_WAIT_DEFAULT)), STATUS_WAIT_MAX))
+    end = time.monotonic() + wait
+    while t.busy and time.monotonic() < end:
+        time.sleep(1)
+    return _team_report(t, include_diffs=args.get("include_diffs", True))
+
+
+def _changed_since_copy(s: Scratch, names: list[str]) -> list[str]:
+    """Files this part changed that also changed in the project since its copy was made (plain folders:
+    a part replaces whole files there, so it would undo the other change)."""
+    out = []
+    for name in names:
+        now = Path(s.folder, name)
+        before = s.start_files.get(name)
+        current = now.read_bytes() if now.is_file() else None
+        if current != before:
+            out.append(name)
+    return out
+
+
+def tool_merge_team(args: dict, ctx: "Server") -> str:
+    t = _get_team(args, ctx)
+    wanted = args.get("parts") or [p.n for p in t.parts]
+    by_n = {p.n: p for p in t.parts}
+    unknown = [n for n in wanted if n not in by_n]
+    if unknown:
+        raise ToolError(f"No part {', '.join(map(str, unknown))}; this team has parts 1 to {len(t.parts)}.")
+    merged, problems = [], []
+    for n in wanted:
+        p = by_n[n]
+        if p.status != "done":
+            if p.status != "merged":
+                problems.append(f"part {n} ({p.agent}) is {p.status}, not merged")
+            continue
+        if not p.files:
+            p.status = "merged"
+            p.scratch.close()
+            merged.append(f"part {n} ({p.agent}): no changes")
+            continue
+        clash = [] if p.scratch.git else _changed_since_copy(p.scratch, p.files)
+        if clash:
+            p.status = "conflict"
+            problems.append(f"part {n} ({p.agent}) not merged: {', '.join(clash[:10])} also changed in the "
+                            "project since the copy was made")
+            continue
+        try:
+            names = p.scratch.apply()
+        except RuntimeError as exc:
+            p.status = "conflict"
+            problems.append(f"part {n} ({p.agent}) not merged, it clashes with changes already in the "
+                            f"project: {exc}")
+            continue
+        p.status = "merged"
+        p.scratch.close()
+        merged.append(f"part {n} ({p.agent}): {len(names)} file(s)")
+    out = [f"Team {t.id} into {t.folder}. The changes are not staged or committed."]
+    if merged:
+        out.append("Merged: " + "; ".join(merged) + ".")
+    if problems:
+        out.append("Not merged: " + "; ".join(problems) + ".")
+    if any(p.status == "conflict" for p in t.parts):
+        out.append("A part that clashes keeps its copy: read its diff with team_status, then make that "
+                   "change by hand or with ask_agent, or discard_team.")
+    return "\n".join(out)
+
+
+def tool_discard_team(args: dict, ctx: "Server") -> str:
+    t = _get_team(args, ctx)
+    _close_team(t)
+    return f"Discarded team {t.id}: the parts not yet merged are thrown away; merged ones stay in the project."
+
+
+def _close_team(t: Team) -> None:
+    t.closed = True
+    for p in t.parts:
+        if p.status in ("waiting", "working", "merged", "discarded"):
+            continue   # a part still working removes its own copy when it stops
+        if p.scratch is not None:
+            p.scratch.close()
+        p.status = "discarded"
+
+
 _ROLE = "Which AI, e.g. claude, codex, antigravity, grok. See list_agents."
 
 _FOLDER = {"type": "string", "description": "Project folder. Defaults to the folder the MCP client started in."}
@@ -757,6 +979,50 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
         "description": "Stop a relay if it's running and throw away its copy. The project is left unchanged.",
         "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}},
     }, tool_discard_relay),
+    "start_team": ({
+        "description": "Split a plan into parts and give each part to a different AI (or the same AI more "
+                       "than once). They work at the same time, each in its own copy of the project, while "
+                       "the user can do their own part in the project itself. Each AI is told the whole plan "
+                       "and what the others are doing. Returns an id right away; call team_status to follow "
+                       "it and merge_team to combine the parts.",
+        "inputSchema": {"type": "object", "required": ["parts"], "properties": {
+            "parts": {"type": "array", "minItems": 1, "maxItems": 6, "items": {
+                "type": "object", "required": ["agent", "task"], "properties": {
+                    "agent": _AGENT,
+                    "task": {"type": "string", "description": "This part of the plan, as you'd give it to that AI."},
+                }}, "description": "1 to 6 parts. Leave out the part the user does themselves."},
+            "plan": {"type": "string", "description": "Optional: the whole plan, so each AI sees how its part fits."},
+            "folder": _FOLDER,
+        }},
+        "annotations": {"openWorldHint": True},
+    }, tool_start_team),
+    "team_status": ({
+        "description": "Wait for a team (up to wait_seconds) and report each part: its AI, status, time, what "
+                       "it said, the files it changed and its diff, plus files changed by more than one part. "
+                       "If it's still running, call again.",
+        "inputSchema": {"type": "object", "required": ["id"], "properties": {
+            "id": {"type": "string"},
+            "wait_seconds": {"type": "integer", "minimum": 0, "maximum": STATUS_WAIT_MAX, "default": STATUS_WAIT_DEFAULT},
+            "include_diffs": {"type": "boolean", "default": True},
+        }},
+        "annotations": {"readOnlyHint": True},
+    }, tool_team_status),
+    "merge_team": ({
+        "description": "Apply the finished parts of a team to the project, one after another, on top of what "
+                       "is there now (including the user's own work). A part that clashes with changes "
+                       "already in the project is skipped and reported, and keeps its copy. Not staged or "
+                       "committed.",
+        "inputSchema": {"type": "object", "required": ["id"], "properties": {
+            "id": {"type": "string"},
+            "parts": {"type": "array", "items": {"type": "integer"},
+                      "description": "Optional: which part numbers to merge, in order. Defaults to all finished parts."},
+        }},
+        "annotations": {"destructiveHint": True},
+    }, tool_merge_team),
+    "discard_team": ({
+        "description": "Throw away a team's parts that aren't merged yet. Parts already merged stay in the project.",
+        "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}},
+    }, tool_discard_team),
 }
 
 
@@ -770,6 +1036,7 @@ class Server:
         self.cwd = cwd or os.getcwd()
         self.bakeoffs: dict = {}
         self.relays: dict = {}
+        self.teams: dict = {}
         self._lock = threading.Lock()
         self._pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="mcp-tool")
 
@@ -869,6 +1136,11 @@ class Server:
                         r.workspace.close()   # now: a running relay's thread won't outlive the process
                 except Exception:
                     logger.debug("Couldn't clean up relay %s", r.id, exc_info=True)
+        for t in self.teams.values():
+            try:
+                _close_team(t)
+            except Exception:
+                logger.debug("Couldn't clean up team %s", t.id, exc_info=True)
 
 
 def default_data_dir() -> Path:
