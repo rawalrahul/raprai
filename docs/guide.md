@@ -363,7 +363,7 @@ You don't need the RAPR app for this. With [uv](https://docs.astral.sh/uv/gettin
 uvx --from git+https://github.com/rawalrahul/raprai rapr-mcp
 ```
 
-For example: `claude mcp add --scope user rapr -- uvx --from git+https://github.com/rawalrahul/raprai rapr-mcp`. It installs only the MCP server and one small package (python-dotenv), not the app. Every tool works except `latest_brief`, because briefs are made by the app. Your data goes in the same folder the app uses, so installing the app later keeps your bake-off history. To update, run `uv cache clean rapr-mcp` and restart your MCP client.
+For example: `claude mcp add --scope user rapr -- uvx --from git+https://github.com/rawalrahul/raprai rapr-mcp`. It installs only the MCP server and one small package (python-dotenv), not the app. Every tool works except `latest_brief`, because briefs are made by the app. Your data goes in the same folder the app uses, so installing the app later keeps your bake-off history. To update, run `uv cache clean rapr-mcp` and restart your MCP client. If you installed it with `uv tool install git+https://github.com/rawalrahul/raprai` instead (your client then runs `rapr-mcp`), update with `uv tool upgrade rapr-mcp`. The README's [Update, reset or remove](../README.md#update-reset-or-remove-the-mcp-server) section explains which you have.
 
 ### Claude Code
 
