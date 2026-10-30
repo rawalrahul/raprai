@@ -150,6 +150,46 @@ Then ask in plain words: *"get a second opinion from Codex on my changes"*, *"pl
 
 The other AI works in a temporary copy of your project, so your files only change if you allow edits or merge a relay or bake-off. Nothing is hosted, and the RAPR app doesn't need to be open, or even installed. More in the [full guide](docs/guide.md#use-rapr-from-your-coding-agent-mcp).
 
+RAPR only offers the AIs you can actually use: their command-line tool is installed (or came with their VS Code, Cursor or Windsurf extension), you're signed in where RAPR can check (Claude Code, Codex, Grok, Kiro), and a local model server like Ollama or LM Studio is running. Ask for `list_agents` to see them; it also says which installed AI still needs signing in, and how.
+
+### GitHub Copilot
+
+In **VS Code**, run **MCP: Open User Configuration** from the Command Palette and add:
+
+```json
+{
+  "servers": {
+    "rapr": { "type": "stdio", "command": "uvx",
+              "args": ["--from", "git+https://github.com/rawalrahul/raprai", "rapr-mcp"] }
+  }
+}
+```
+
+Then switch Copilot Chat to **Agent** mode and turn on RAPR's tools. In **Copilot CLI**, add the same server with `/mcp add`, or in `~/.copilot/mcp-config.json` under `"mcpServers"`, with `"type": "local"` and `"tools": ["*"]`. With the app installed, use `"command": "rapr", "args": ["mcp"]` instead (on Windows, if `rapr` isn't found: `"command": "cmd", "args": ["/c", "rapr", "mcp"]`).
+
+### Update, reset or remove the MCP server
+
+**Update.** Restart your MCP client after either of these, so it starts the new version (in VS Code, restart the `rapr` server or VS Code itself).
+
+| You set it up with | To update |
+|---|---|
+| `uvx … rapr-mcp` (no app) | `uv cache clean rapr-mcp`. `uvx` keeps the copy it downloaded first and doesn't look for a newer one by itself; clearing it makes the next start fetch the latest `main`. |
+| `rapr mcp` (the app) | Update the app: `rapr update` or **Settings → Updates**. |
+
+If `uv cache clean rapr-mcp` reports that it removed nothing, `uv cache clean` (everything `uv` downloaded; other tools re-download once) does it. To always get the latest without clearing the cache, put `--refresh` before `--from` in your setup; each start then checks GitHub, so it starts a little slower.
+
+**Check it worked:** ask for `list_agents` and look for the new tools in your client's tool list.
+
+**Something stuck?** Close your MCP client, run `uv cache clean rapr-mcp`, and open the client again.
+
+**Leftover copies.** RAPR works in copies of your project. Relay, team and `ask_agent` copies are removed when they finish or your client closes; if it crashed, delete the `rapr-mcp-*` folders in your system's temp folder. Bake-off copies stay in `~/.rapr-bakeoff` until you merge or discard the bake-off. After deleting any of these by hand, run `git worktree prune` in your project so git forgets them too, and delete the `bakeoff/…` branches if you don't want them.
+
+**Remove it.**
+
+1. Take RAPR out of your MCP client: `claude mcp remove rapr --scope user` (or without `--scope user` if you added it to one project), `codex mcp remove rapr`; in VS Code, Copilot CLI, Antigravity, Cursor, Windsurf and the rest, delete the `rapr` entry from their MCP settings.
+2. No app: `uv cache clean rapr-mcp` deletes the downloaded server. With the app: `rapr uninstall` (see [Update and uninstall](#update-and-uninstall)).
+3. Optional, deletes your bake-off history and settings: the `RAPR AI` folder in `%LOCALAPPDATA%` (Windows), `~/Library/Application Support` (Mac) or `~/.local/share` (Linux). The app keeps its data there too, so leave it if you use the app.
+
 ## How it works
 
 ```
