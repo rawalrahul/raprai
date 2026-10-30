@@ -232,7 +232,7 @@ def test_local_model_ais_are_listed_only_while_their_server_answers(monkeypatch)
     monkeypatch.setenv("OLLAMA_HOST", f"127.0.0.1:{free}")
     monkeypatch.setenv("LOCAL_AI_URL", f"http://127.0.0.1:{free}")
     monkeypatch.setattr(mcp, "_found", lambda exe: True)   # as if claude and codex are installed
-    for key in ("claude_ollama", "codex_ollama", "local_ai"):
+    for key in ("ollama", "claude_ollama", "codex_ollama", "local_ai"):
         assert not mcp._ready(key, st.integrations[key]), key
 
     class Answer(http.server.BaseHTTPRequestHandler):
@@ -250,7 +250,7 @@ def test_local_model_ais_are_listed_only_while_their_server_answers(monkeypatch)
         port = server.server_address[1]
         monkeypatch.setenv("OLLAMA_HOST", f"127.0.0.1:{port}")
         monkeypatch.setenv("LOCAL_AI_URL", f"http://127.0.0.1:{port}")
-        for key in ("claude_ollama", "codex_ollama", "local_ai"):
+        for key in ("ollama", "claude_ollama", "codex_ollama", "local_ai"):
             assert mcp._ready(key, st.integrations[key]), key
     finally:
         server.shutdown()

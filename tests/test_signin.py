@@ -77,7 +77,7 @@ def test_answers_are_cached(clean):
     answer({"codex": (1, "Not logged in")})
     assert signin.status("codex") is False and signin.status("codex") is False
     assert len(calls) == 1
-    assert signin.status("grok") is None                            # no check: never hidden
+    assert signin.status("copilot") is None                         # no check: never hidden
 
 
 def test_list_agents_skips_and_explains_signed_out_tools(monkeypatch):
@@ -92,3 +92,34 @@ def test_list_agents_skips_and_explains_signed_out_tools(monkeypatch):
     text = mcp.Server(out=None).call_tool("list_agents", {})["content"][0]["text"]
     assert "- claude (Claude Code)" in text
     assert "codex is installed but not signed in: run `codex login`" in text
+
+
+def test_grok_from_its_login_file_or_key(clean, monkeypatch, tmp_path):
+    monkeypatch.setattr(signin.Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+    assert signin.grok() is False
+    (tmp_path / ".grok").mkdir()
+    (tmp_path / ".grok" / "auth.json").write_text('{"token": "x"}')
+    assert signin.grok() is True
+    (tmp_path / ".grok" / "auth.json").write_text("{}")            # after `grok logout`
+    assert signin.grok() is False
+    monkeypatch.setenv("XAI_API_KEY", "xai-test")
+    assert signin.grok() is True
+    monkeypatch.setattr(signin, "_exe", lambda name: None)         # not installed: nothing to say
+    assert signin.grok() is None
+
+
+def test_kiro_from_whoami(clean):
+    answer, calls = clean
+    answer({"kiro-cli": (1, "Not logged in\n")})
+    assert signin.kiro() is False
+    answer({"kiro-cli": (0, '{"accountType": "BuilderId", "email": "a@b.c"}')})
+    assert signin.kiro() is True
+    answer({"kiro-cli": (2, "error: unexpected")})
+    assert signin.kiro() is None
+    assert calls[0][1:] == ("whoami",)
+
+
+def test_tools_without_a_check_are_never_hidden(clean):
+    for name in ("copilot", "antigravity", "gemini", "opencode", "kilocode", "qwen_code", "droid"):
+        assert signin.status(name) is None and signin.signed_in(name)

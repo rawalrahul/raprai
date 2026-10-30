@@ -84,7 +84,42 @@ def codex() -> Optional[bool]:
     return None
 
 
-CHECKS: dict[str, Callable[[], Optional[bool]]] = {"claude": claude, "codex": codex}
+def grok() -> Optional[bool]:
+    """Grok Build keeps its `grok login` in ~/.grok/auth.json; XAI_API_KEY works instead."""
+    if not _exe("grok"):
+        return None
+    if _any_env("XAI_API_KEY"):
+        return True
+    path = Path.home() / ".grok" / "auth.json"
+    try:
+        return bool(path.is_file() and path.read_text(encoding="utf-8").strip() not in ("", "{}"))
+    except OSError:
+        return None
+
+
+def kiro() -> Optional[bool]:
+    """Kiro CLI (formerly Amazon Q): `whoami` shows the account, or says you aren't logged in."""
+    exe = _exe("kiro-cli") or _exe("q")
+    if not exe:
+        return None
+    try:
+        code, out = _run(exe, "whoami")
+    except Exception:
+        return None
+    text = out.lower()
+    if "not logged in" in text or "not authenticated" in text:
+        return False
+    return True if code == 0 else None
+
+
+# Keyed like the integrations. The others can't be told apart from here: Copilot CLI,
+# Antigravity and Gemini keep their sign-in in the system keychain, and OpenCode, Kilo,
+# Qwen Code, Droid, Aider, Goose and Open Interpreter take keys from their own config
+# files as well as the environment. None of them has a command that reports it, so RAPR
+# lists them whenever they're installed rather than hide one that works.
+CHECKS: dict[str, Callable[[], Optional[bool]]] = {
+    "claude": claude, "codex": codex, "grok": grok, "amazon_q": kiro,
+}
 
 
 def status(name: str) -> Optional[bool]:

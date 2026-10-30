@@ -23,12 +23,6 @@ def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
         cmd.extend(["--model", model])
     return cmd
 
-def READY() -> bool:
-    """Not offered while Codex says it isn't signed in (`codex login`)."""
-    from helm.signin import signed_in
-    return signed_in("codex")
-
-
 STDIN_PROMPT = True  # signals ai_runner to pipe prompt via stdin
 
 ENV_VARS   = []   # API key is optional — Codex CLI handles auth internally

@@ -54,6 +54,18 @@ def build_command(prompt: str, model: str | None = None, **kwargs) -> list[str]:
     chosen = (model or _model()).strip()
     return ["ollama", "run", chosen, "--nowordwrap", prompt]
 
+def READY() -> bool:
+    """Listed as ready only while Ollama answers: `ollama run` needs its server running."""
+    import urllib.request
+    host = os.environ.get("OLLAMA_HOST", "").strip() or "127.0.0.1:11434"
+    if not host.startswith("http"):
+        host = "http://" + host
+    try:
+        urllib.request.build_opener(urllib.request.ProxyHandler({})).open(host.rstrip("/") + "/api/version", timeout=1).close()
+        return True
+    except Exception:
+        return False
+
 # ── Metadata ──────────────────────────────────────────────────────────────────
 
 # No API key needed — Ollama is fully local.

@@ -250,7 +250,8 @@ def is_backend_available(ai_key: str) -> bool:
         from helm.signin import signed_in
         result = bool(shutil.which("claude")) and signed_in("claude")
     elif ai_key == "ollama":
-        result = bool(shutil.which("ollama"))
+        ready = (_st.integrations.get("ollama") or {}).get("ready")
+        result = bool(shutil.which("ollama")) and (not callable(ready) or bool(ready()))
     elif ai_key == "openrouter":
         result = bool(os.environ.get("OPENROUTER_API_KEY", "").strip())
     elif ai_key == "groq":
@@ -288,6 +289,8 @@ def is_backend_available(ai_key: str) -> bool:
                     result = True
                 else:
                     result = False
+                from helm.signin import signed_in
+                result = result and signed_in(ai_key)
                 ready = info.get("ready")
                 if result and callable(ready):
                     result = bool(ready())
