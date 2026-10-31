@@ -223,6 +223,7 @@ async def login_post(request: Request):
         value    = token,
         httponly = True,
         samesite = "lax",
+        secure   = _auth.behind_tunnel(),   # HTTPS-only on a cloud server
         max_age  = _auth.SESSION_DAYS * 86_400,
     )
     return response
@@ -297,6 +298,7 @@ async def set_pin_endpoint(request: Request):
                 value    = _auth.issue_token(),
                 httponly = True,
                 samesite = "lax",
+                secure   = _auth.behind_tunnel(),   # HTTPS-only on a cloud server
                 max_age  = _auth.SESSION_DAYS * 86_400,
             )
         return response
