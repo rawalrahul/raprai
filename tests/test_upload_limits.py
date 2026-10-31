@@ -21,6 +21,23 @@ class _File:
         return b"x" * (self.size if n < 0 else min(n, self.size))
 
 
+def test_validate_upload_enforces_the_allowlist():
+    # Known-safe extensions pass (including code files the app never serves).
+    for name in ("notes.txt", "script.py", "page.html", "app.js", "icon.svg"):
+        assert security.validate_upload(name, 10) is None, name
+    # Dangerous executables are blocked with a clear message.
+    for name in ("virus.exe", "x.dll", "run.scr", "setup.msi"):
+        assert security.validate_upload(name, 10) is not None, name
+    # Anything not on the allowlist is refused, even if it isn't a known-dangerous type.
+    for name in ("data.foobar", "payload.php", "shell.jsp", "README"):
+        assert security.validate_upload(name, 10) is not None, name
+
+
+def test_validate_upload_rejects_path_traversal():
+    for name in ("../../etc/passwd", "a/b.txt", "a\\b.txt"):
+        assert security.validate_upload(name, 10) is not None, name
+
+
 def test_an_oversized_upload_is_refused_after_one_byte_past_the_limit():
     big = _File(10_000)
     assert asyncio.run(security.read_upload(big, limit=100)) is None

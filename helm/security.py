@@ -182,6 +182,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "connect-src 'self' ws: wss: https://api.openai.com; "
             "frame-ancestors 'self'; "
             "base-uri 'self'; "
+            # Block plugin/embed vectors (<object>, <embed>, <applet>). Additive
+            # hardening — doesn't affect the SPA's scripts or styles.
+            "object-src 'none'; "
             "form-action 'self'"
         )
 
@@ -299,13 +302,16 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
         # Set/refresh CSRF cookie on every response
         if CSRF_COOKIE not in request.cookies or method == "GET":
+            from helm.auth import behind_tunnel
             csrf_token = generate_csrf_token()
             response.set_cookie(
                 key=CSRF_COOKIE,
                 value=csrf_token,
                 httponly=False,       # JS must be able to read this
                 samesite="lax",
-                secure=False,         # Local app, no HTTPS
+                # Secure on a cloud server (served over HTTPS via the tunnel);
+                # off for the local app, which has no HTTPS.
+                secure=behind_tunnel(),
                 max_age=86400 * 7,    # 7 days
                 path="/",
             )
@@ -345,14 +351,15 @@ ALLOWED_UPLOAD_EXTENSIONS = {
     ".sql", ".db", ".sqlite",
 }
 
-# Blocked dangerous extensions
+# Blocked dangerous executable extensions. Checked explicitly (and ahead of the
+# allowlist) so these always get a clear "blocked" message even if one is ever
+# added to ALLOWED_UPLOAD_EXTENSIONS by mistake. `.js` is deliberately NOT here:
+# it's a legitimate code file written to the session's working directory, not a
+# script the web app ever serves or executes.
 BLOCKED_EXTENSIONS = {
     ".exe", ".msi", ".dll", ".scr", ".com", ".cmd", ".vbs", ".vbe",
-    ".js",   # Only when uploaded (not as code file)
     ".wsf", ".wsh", ".pif", ".reg",
 }
-# Note: .js is in both ALLOWED and BLOCKED — we allow it as a code file
-# but the validation function checks context
 
 
 def validate_upload(filename: str, size: int) -> Optional[str]:
@@ -360,6 +367,12 @@ def validate_upload(filename: str, size: int) -> Optional[str]:
     Validate an uploaded file.
 
     Returns None if valid, or an error message string if invalid.
+
+    Enforcement is allowlist-first: the extension must be one of
+    ALLOWED_UPLOAD_EXTENSIONS. A dangerous executable extension is also
+    rejected explicitly with a clearer message. Uploaded files are written
+    to the active session's working directory and are never served or
+    executed by the web app.
     """
     if not filename:
         return "No filename provided"
@@ -368,22 +381,27 @@ def validate_upload(filename: str, size: int) -> Optional[str]:
         mb = MAX_UPLOAD_SIZE / (1024 * 1024)
         return f"File too large. Maximum size is {mb:.0f} MB."
 
-    # Check extension
-    ext = os.path.splitext(filename.lower())[1]
-    if not ext:
-        return "File must have an extension"
-
-    if ext in (".exe", ".msi", ".dll", ".scr", ".com", ".vbs", ".vbe",
-               ".wsf", ".wsh", ".pif", ".reg"):
-        return f"Blocked file type: {ext}"
-
-    # Sanitize filename — no path traversal
+    # Sanitize filename — no path traversal (check before extension so a
+    # crafted name like "../x.txt" is rejected as a path, not accepted as .txt)
     basename = os.path.basename(filename)
     if basename != filename:
         return "Invalid filename (path components not allowed)"
 
     if ".." in filename or "/" in filename or "\\" in filename:
         return "Invalid filename"
+
+    # Check extension
+    ext = os.path.splitext(filename.lower())[1]
+    if not ext:
+        return "File must have an extension"
+
+    # Explicit blocklist for dangerous executables (clearer error + defense in depth)
+    if ext in BLOCKED_EXTENSIONS:
+        return f"Blocked file type: {ext}"
+
+    # Allowlist enforcement: only known-safe extensions are accepted
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        return f"File type not allowed: {ext}"
 
     return None
 
