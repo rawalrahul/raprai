@@ -354,3 +354,13 @@ def test_plain_copies_restore_from_disk_and_clean_up(tmp_path):
     finally:
         ws.close()
     assert not Path(ws.root).exists()
+
+
+def test_a_step_that_took_no_measurable_time_isnt_shown_as_working():
+    """Windows' clock is coarse: a quick step can take 0.0s and still be finished."""
+    r = relay.create("/x", "t", "builder", "critic")
+    r.steps = [relay.Step(role="build", agent="builder", seconds=0.0, output="Fixed it.", done=True)]
+    report = mcp._relay_report(r, include_diff=False)
+    assert "## Build: builder (0s)" in report and "working…" not in report
+    r.steps.append(relay.Step(role="review", agent="critic"))
+    assert "## Review: critic: working…" in mcp._relay_report(r, include_diff=False)

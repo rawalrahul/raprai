@@ -132,6 +132,7 @@ class Step:
     seconds: float = 0.0
     output: str = ""
     error: Optional[str] = None
+    done: bool = False      # finished (seconds alone can be 0: Windows' clock is coarse)
 
 
 @dataclass
@@ -221,6 +222,7 @@ def _ask(r: Relay, runner: Runner, role: str, agent: str, prompt: str) -> Step:
     finally:
         r.proc = None
         step.seconds = time.time() - t0
+        step.done = True
     with r.lock:
         if r.status != "running":
             raise Stopped

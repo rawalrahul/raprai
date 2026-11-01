@@ -132,7 +132,7 @@ def test_bakeoff_status_answers_inside_codex_tool_timeout(tmp_path, monkeypatch)
                                                      sleep=lambda sec: clock.__setitem__(0, clock[0] + sec)))
     s = mcp.Server(out=None, cwd=str(tmp_path))
     s.bakeoffs["b1"] = SimpleNamespace(id="b1", status="running", task="fix add", test_command=None,
-                                       attempts=[SimpleNamespace(ai="codex", seconds=0)])
+                                       attempts=[SimpleNamespace(ai="codex", seconds=0, done=False)])
     for asked in ({}, {"wait_seconds": 240}):
         clock[0] = 0.0
         text, err = call(s, "bakeoff_status", id="b1", **asked)
@@ -531,6 +531,9 @@ def test_status_is_short_while_running_and_full_when_done(repo, fake_agents, mon
     real_create = bakeoff.create
     monkeypatch.setattr(bakeoff, "create", lambda r, t, a, **kw: real_create(r, t, a, root=str(tmp_path / "w"), **kw))
     monkeypatch.setattr(mcp, "_save", lambda b: None)
+    # Windows' clock is coarse: a quick attempt can take "0 seconds". It's still finished.
+    import types
+    monkeypatch.setattr(bakeoff, "time", types.SimpleNamespace(time=lambda: 1000.0))
     gate = threading.Event()
 
     def run(agent, prompt, cwd, model=None, **kw):
@@ -543,9 +546,10 @@ def test_status_is_short_while_running_and_full_when_done(repo, fake_agents, mon
     call(s, "start_bakeoff", task="fix add", agents=["editor", "reader"])
     bid = next(iter(s.bakeoffs))
     end = time.time() + 30   # copies are slow to make on Windows; wait for the editor's diff itself
-    while not s.bakeoffs[bid].attempts[0].diff and time.time() < end:
+    while not s.bakeoffs[bid].attempts[0].done and time.time() < end:
         time.sleep(0.05)
-    assert s.bakeoffs[bid].attempts[0].diff, "the editor never finished"
+    assert s.bakeoffs[bid].attempts[0].done, "the editor never finished"
+    assert s.bakeoffs[bid].attempts[0].seconds == 0
     text, _ = call(s, "bakeoff_status", id=bid, wait_seconds=0)
     assert "Still running" in text and "Diff:" not in text and len(text) < 1200
     text, _ = call(s, "bakeoff_status", id=bid, wait_seconds=0, include_diffs=True)

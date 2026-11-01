@@ -639,7 +639,7 @@ def _bakeoff_report(b, include_diffs: bool) -> str:
     if b.test_command:
         lines.append(f"Test command: {b.test_command}")
     for a in b.attempts:
-        if b.status in ("created", "running") and not a.seconds:
+        if b.status in ("created", "running") and not a.done:
             lines.append(f"\n## {a.ai}: still working…")
             continue
         bits = ["failed: " + a.error if a.error else f"{a.seconds:.0f}s",
@@ -814,7 +814,7 @@ def _relay_report(r, include_diff: bool) -> str:
         lines.append("\n## The plan you gave\n" + _clip(r.plan, 3000))
     for st in r.steps:
         head = f"\n## {ROLE_NAMES.get(st.role, st.role)}: {st.agent}"
-        if not st.seconds and r.busy and st is r.steps[-1]:
+        if not st.done and r.busy and st is r.steps[-1]:
             lines.append(head + ": working…")
             continue
         lines.append(head + f" ({st.seconds:.0f}s)" + (f", failed: {st.error}" if st.error else ""))
