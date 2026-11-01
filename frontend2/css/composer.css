@@ -183,3 +183,20 @@ html .input-bar #send[data-mode="voice-on"] { background: var(--accent) !importa
 @media (max-width: 640px) {
   .usage-ribbon .ur-mcp { display: none; }
 }
+.usage-ribbon .ur-row { flex-wrap: wrap; row-gap: 2px; }
+.usage-ribbon .ur-row.ur-current .ur-ai { color: var(--accent); }
+.usage-ribbon .ur-row-usage { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.usage-ribbon .ur-row-counters { margin-left: auto; }
+.usage-ribbon .ur-reset-at { margin-left: 2px; font-size: 10.5px; }
+.usage-ribbon .ur-main .ur-tag, .usage-ribbon .ur-row .ur-tag { flex: none; }
+.usage-ribbon .ur-foot a { color: inherit; text-decoration: underline; }
+/* The Usage panel draws the same pieces without the strip around them. */
+.usage-ribbon.usage-ribbon-inline {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 0;
+  border: 0; background: transparent; max-width: none; border-radius: 0; overflow: visible;
+}
+/* Rows: the AI's name in a column, its usage beside it (wrapping under itself, not the name). */
+.usage-ribbon .ur-details .ur-row { display: grid; grid-template-columns: 96px 1fr auto; align-items: start; column-gap: 8px; }
+.usage-ribbon .ur-details .ur-row .ur-ai { min-width: 0; padding-top: 1px; }
+.usage-ribbon .ur-details .ur-row.ur-dim { display: block; }
+.usage-ribbon .ur-details .ur-row-usage { row-gap: 3px; }

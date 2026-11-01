@@ -106,13 +106,11 @@ def _rollout(home, minutes=300, rate=True):
     return f
 
 
-def test_codex_plan_windows_and_tokens_come_from_its_session_file(tmp_path, monkeypatch):
+def test_a_codex_runs_tokens_come_from_its_session_file(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
     _rollout(tmp_path / "codex")
-    mcp_usage.refresh_codex_limits(0)
-    wins = mcp_usage.limits()["codex"]["windows"]
-    assert [(w["label"], w["pct"]) for w in wins] == [("5h", 12.0), ("week", 40.5)]
     assert mcp_usage.codex_run_tokens(0) == 5321
+    assert "codex" not in mcp_usage.limits()      # windows come from Codex itself (app-server), live
 
 
 def test_run_agent_runs_claude_in_stream_mode_and_keeps_its_numbers(monkeypatch, tmp_path):
@@ -186,18 +184,6 @@ def test_money_counts_only_on_an_api_key():
     assert today["agents"]["claude"]["cost_usd"] == 0 and today["agents"]["codex"]["cost_usd"] == 0.25
     text = mcp_usage.summary()
     assert "On an API key (billed per token, no 5-hour or weekly limits):\n- Codex: $0.25 today" in text
-
-
-def test_codex_on_an_api_key_shows_no_windows(tmp_path, monkeypatch):
-    home = tmp_path / "codex"
-    monkeypatch.setenv("CODEX_HOME", str(home))
-    _rollout(home)                                   # an older ChatGPT session left windows behind
-    (home / "auth.json").write_text(json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": "sk-x", "tokens": None}))
-    mcp_usage.refresh_codex_limits(0)
-    assert "codex" not in mcp_usage.limits() and mcp_usage.billing("codex") == mcp_usage.API
-    (home / "auth.json").write_text(json.dumps({"tokens": {"id_token": "x"}, "OPENAI_API_KEY": None}))
-    mcp_usage.refresh_codex_limits(0)
-    assert mcp_usage.limits()["codex"]["windows"][0]["pct"] == 12.0
 
 
 def test_the_app_shows_no_plan_or_cap_for_an_api_key(monkeypatch, tmp_path):

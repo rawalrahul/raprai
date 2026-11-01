@@ -8,3 +8,4 @@ import pytest  # noqa: E402
 def _mcp_usage_in_tmp(tmp_path, monkeypatch):
     """AIs run in tests count toward a throwaway usage file, not ~/.config/rapr (helm/mcp_usage.py)."""
     monkeypatch.setenv("RAPR_MCP_USAGE_FILE", str(tmp_path / "mcp-usage.json"))
+    monkeypatch.setenv("RAPR_USAGE_READERS", "0")   # no asking real AI accounts for their usage

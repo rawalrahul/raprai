@@ -159,17 +159,19 @@ RAPR only offers the AIs you can actually use: their command-line tool is instal
 
 <img src="docs/assets/usage-ribbon-open.png" width="620" alt="RAPR's usage ribbon above the message box: Claude 5h 66%, week 89% of the plan; Codex 5h 12%, week 41%; opened, a row for each AI, including the ones run from your editors through MCP">
 
-A slim ribbon shows how much of each AI's plan you've used, **as the AI itself reports it**, so it matches the AI's own usage page:
+A slim ribbon shows how much of each AI's plan you've used, **asked live of the AI's own service**, so it matches the AI's own usage page. Nothing is estimated, and no tokens are spent to ask:
 
 | AI | What the ribbon shows | Where RAPR reads it |
 |---|---|---|
-| Claude | 5-hour and weekly plan usage (as on claude.ai's usage page) and exact tokens; on an API key, money spent instead | the `rate_limit_event` and result every `claude` run prints |
-| Codex | 5-hour and weekly plan usage (as Codex's `/status` shows), exact tokens | the `token_count` events Codex writes to `~/.codex/sessions` (so Codex used on its own counts too) |
-| Others | time, tasks and tokens (estimated where the AI doesn't report them, marked `~`) | RAPR's own counters |
+| Claude | 5-hour and weekly plan usage (and weekly Opus/Sonnet where your plan has them), as on claude.ai's usage page; on an API key, money spent instead | claude.ai's usage service, with Claude Code's own sign-in (what its `/usage` shows) |
+| Codex | 5-hour and weekly plan usage, as Codex's `/status` shows; on an API key, money spent instead | `codex app-server` (what the Codex IDE extension uses), which reads Codex's own sign-in |
+| Gemini | each model's daily quota, with a Google sign-in; on an API key, money spent instead | Google's Code Assist quota service, with Gemini CLI's sign-in (what its `/stats` shows) |
+| Local models | no limit | (they run on your computer) |
+| Others | no usage service to ask: RAPR's own counters (tasks, time, tokens) | RAPR |
 
 5-hour and weekly windows belong to subscriptions (Claude Pro/Max, ChatGPT plans). An AI used with an **API key** has none, so the ribbon never shows them for it: it shows an **API key** tag and the money spent instead. RAPR tells them apart from what each AI says about its sign-in (Claude's `apiKeySource`, Codex's `~/.codex/auth.json`). On a plan, the dollar figure Claude reports is a list price you aren't billed, so it isn't shown as spending.
 
-In the app it sits above the message box; click it for every AI, × hides it, and the **Usage** panel brings it back. In Claude Code it sits above the prompt, with Claude's numbers taken straight from Claude Code (as [ponytail](https://github.com/DietrichGebert/ponytail) does: plan windows on a subscription, this session's cost on an API key) and what RAPR ran for you today. Add it once (needs Claude Code 2.1.290 or later, in the terminal or the desktop app):
+In the app it sits above the message box once you're in a session; click it to ask every AI set up here for its usage, × hides it, and the **Usage** panel brings it back. In Claude Code it sits above the prompt, with Claude's numbers taken straight from Claude Code (as [ponytail](https://github.com/DietrichGebert/ponytail) does: plan windows on a subscription, this session's cost on an API key) and what RAPR ran for you today. Add it once (needs Claude Code 2.1.290 or later, in the terminal or the desktop app):
 
 ```
 /plugin marketplace add rawalrahul/raprai

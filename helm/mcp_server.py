@@ -544,6 +544,16 @@ def tool_latest_brief(args: dict, ctx: "Server") -> str:
         "\n\nTo act on an item, open RAPR (Needs you) or reply /do <number> on Telegram or WhatsApp.")
 
 
+def _refresh_usage_soon() -> None:
+    """Keep each AI's real usage fresh for the Claude Code band (at most every 5 minutes,
+    in the background: helm/usage_readers.py)."""
+    try:
+        from helm import mcp_usage
+        mcp_usage.refresh_live(max_age=300)
+    except Exception:
+        logger.debug("Couldn't refresh usage", exc_info=True)
+
+
 def tool_usage(args: dict, ctx: "Server") -> str:
     """The usage ribbon as text, for clients without RAPR's Claude Code band."""
     from helm import mcp_usage
@@ -1438,6 +1448,7 @@ class Server:
                              daemon=True, name=f"mcp-progress-{mid}").start()
         try:
             result = self.call_tool(name, args)
+            _refresh_usage_soon()
         except Exception as exc:
             logger.exception("MCP: couldn't answer %s", name)
             result = {"content": [{"type": "text", "text": f"{name} failed: {exc}"}], "isError": True}
