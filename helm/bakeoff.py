@@ -144,12 +144,21 @@ def create(repo: str, task: str, ais: list[str], test_command: Optional[str] = N
     return bo
 
 
-def _snapshot(path: str, git: bool) -> dict[str, bytes]:
-    """File contents for a plain copy (used when not a git repo)."""
+def _snapshot(path: str, git: bool) -> dict[str, str]:
+    """A fingerprint of each file in a plain copy (used when not a git repo): enough to see
+    what changed without holding the whole project in memory."""
+    import hashlib
     out = {}
     for p in Path(path).rglob("*"):
         if p.is_file():
-            out[str(p.relative_to(path))] = p.read_bytes()
+            h = hashlib.sha1()
+            try:
+                with open(p, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        h.update(chunk)
+            except OSError:
+                continue
+            out[str(p.relative_to(path))] = h.hexdigest()
     return out
 
 

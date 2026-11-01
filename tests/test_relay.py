@@ -328,3 +328,29 @@ def test_relay_status_is_short_until_the_relay_finishes(repo, monkeypatch):
     ais.gate.set()
     report = wait(s, rid)
     assert "Diff:" in report and "+    return a + b" in report
+
+
+def test_plain_copies_restore_from_disk_and_clean_up(tmp_path):
+    """A plain folder's copy keeps fingerprints, not file contents; a restore point is a copy
+    on disk that's removed once used."""
+    folder = tmp_path / "plain"
+    (folder / "sub").mkdir(parents=True)
+    (folder / "a.txt").write_text("one")
+    (folder / "sub" / "b.bin").write_bytes(bytes(range(256)) * 100)
+    ws = mcp.Scratch(str(folder))
+    try:
+        assert not ws.git and all(isinstance(v, str) for v in ws.start_files.values())
+        point = ws.snapshot()
+        Path(ws.path, "a.txt").write_text("scribbled")
+        Path(ws.path, "sub", "b.bin").unlink()
+        Path(ws.path, "new.txt").write_text("x")
+        ws.restore(point)
+        assert Path(ws.path, "a.txt").read_text() == "one"
+        assert Path(ws.path, "sub", "b.bin").read_bytes() == bytes(range(256)) * 100
+        assert not Path(ws.path, "new.txt").exists()
+        assert not list(Path(ws.root).glob("point-*"))         # the restore point is gone
+        Path(ws.path, "a.txt").write_text("changed")
+        assert ws.diff() == ("changed: a.txt", ["a.txt"])
+    finally:
+        ws.close()
+    assert not Path(ws.root).exists()

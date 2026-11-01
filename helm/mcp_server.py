@@ -48,7 +48,10 @@ OUTPUT_LIMIT = int(os.environ.get("RAPR_MCP_OUTPUT_CHARS", "60000"))
 OUTPUT_KEEP_SECONDS = 24 * 3600
 # While a tool works, a client that asked for progress gets a note this often.
 PROGRESS_EVERY = 15
-AGENT_TIMEOUT = 300        # seconds an AI gets to answer (a bake-off attempt gets BUILD_TIMEOUT)
+AGENT_TIMEOUT = 900        # seconds an AI gets to answer (a bake-off attempt gets BUILD_TIMEOUT)
+# ask_agent and second_opinion answer within this many seconds: with the reply when the
+# AI is quick, else with an id for agent_status. Under Codex's 60-second tool limit.
+ANSWER_WAIT = int(os.environ.get("RAPR_MCP_ANSWER_WAIT", "50"))
 BUILD_TIMEOUT = 1800
 
 INSTRUCTIONS = (
@@ -59,7 +62,8 @@ INSTRUCTIONS = (
     "start_team to split a plan into parts that different AIs do at the same time and then merge, and "
     "start_bakeoff to give the same task to several AIs in separate copies of the project and "
     "compare them. Call list_agents first to see which AIs are available. Each call can take "
-    "a few minutes while the other AI works. While a relay, team or bake-off runs, its status "
+    "a few minutes while the other AI works: second_opinion and ask_agent answer within a minute, "
+    "with the reply or an id to wait on with agent_status. While a relay, team or bake-off runs, its status "
     "tool gives a short progress report; the plan, reviews and diffs come once it has finished."
 )
 
@@ -278,12 +282,28 @@ def current_changes(folder: str, base: Optional[str] = None) -> tuple[str, str]:
 _SKIP = ("node_modules", ".venv", "venv", "__pycache__", ".git")
 
 
-def _files(root: str) -> dict[str, bytes]:
-    """Every file in a plain copy (not a git one) and its contents."""
+def file_digest(path) -> Optional[str]:
+    """A fingerprint of a file's contents (read in chunks), or None if it isn't a file."""
+    import hashlib
+    try:
+        h = hashlib.sha1()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except (IsADirectoryError, FileNotFoundError, NotADirectoryError):
+        return None
+
+
+def _files(root: str) -> dict[str, str]:
+    """Every file in a plain copy (not a git one) and a fingerprint of its contents.
+    Fingerprints, not contents: a big project mustn't have to fit in memory."""
     out = {}
     for p in Path(root).rglob("*"):
         if p.is_file() and not p.is_symlink() and not any(part in _SKIP for part in p.relative_to(root).parts):
-            out[p.relative_to(root).as_posix()] = p.read_bytes()
+            digest = file_digest(p)
+            if digest is not None:
+                out[p.relative_to(root).as_posix()] = digest
     return out
 
 
@@ -339,11 +359,18 @@ class Scratch:
     # from leaving changes behind, and bring the result back to the project.
 
     def snapshot(self):
-        """A point to go back to: a git tree, or every file's contents in a plain copy."""
+        """A point to go back to: a git tree, or in a plain copy a copy of it on disk (next to
+        it, removed by restore or close) with each file's fingerprint."""
         if self.git:
             _git(self.path, "add", "-A")
             return _git(self.path, "write-tree").strip()
-        return _files(self.path)
+        saved = tempfile.mkdtemp(prefix="point-", dir=self.root)
+        names = _files(self.path)
+        for name in names:
+            dst = Path(saved, name)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(Path(self.path, name), dst)
+        return saved, names
 
     def restore(self, point) -> None:
         """Put the copy back the way it was at `point`."""
@@ -351,13 +378,17 @@ class Scratch:
             _git(self.path, "read-tree", "-u", "--reset", point)
             _git(self.path, "clean", "-fdq")
             return
-        now = _files(self.path)
-        for name in now.keys() - point.keys():
-            Path(self.path, name).unlink()
-        for name, data in point.items():
-            if now.get(name) != data:
-                Path(self.path, name).parent.mkdir(parents=True, exist_ok=True)
-                Path(self.path, name).write_bytes(data)
+        saved, names = point
+        try:
+            now = _files(self.path)
+            for name in now.keys() - names.keys():
+                Path(self.path, name).unlink()
+            for name, digest in names.items():
+                if now.get(name) != digest:
+                    Path(self.path, name).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(Path(saved, name), Path(self.path, name))
+        finally:
+            shutil.rmtree(saved, ignore_errors=True)
 
     def diff(self) -> tuple[str, list[str]]:
         """(diff for people, changed files) since the copy was made."""
@@ -472,26 +503,103 @@ def tool_latest_brief(args: dict, ctx: "Server") -> str:
         "\n\nTo act on an item, open RAPR (Needs you) or reply /do <number> on Telegram or WhatsApp.")
 
 
+# ---------------------------------------------------------------------------
+# Answering in time: ask_agent and second_opinion run as jobs
+# ---------------------------------------------------------------------------
+
+class AgentJob:
+    """An ask_agent or second_opinion running in the background."""
+
+    def __init__(self, kind: str, agent: str, request_id=None):
+        import uuid
+        self.id = "ask-" + uuid.uuid4().hex[:6]
+        self.kind, self.agent, self.request_id = kind, agent, request_id
+        self.done = threading.Event()
+        self.text: Optional[str] = None
+        self.error: Optional[str] = None
+        self.started = time.monotonic()
+        self.handed_off = False      # answered "still working": the client follows it by id
+        self.cancelled = False
+
+
+def _start_job(ctx: "Server", kind: str, agent: str, work: Callable[[], str]) -> AgentJob:
+    job = AgentJob(kind, agent, getattr(_request, "id", None))
+
+    def go():
+        _request.id = job.id     # its AI is registered under the job, so it can be stopped
+        try:
+            job.text = work()
+        except ToolError as exc:
+            job.error = str(exc)
+        except Exception as exc:
+            job.error = f"{kind} failed: {exc}"
+        finally:
+            _request.id = None
+            job.done.set()
+    ctx.jobs[job.id] = job
+    threading.Thread(target=go, daemon=True, name=f"mcp-{job.id}").start()
+    return job
+
+
+def _job_answer(ctx: "Server", job: AgentJob, wait: float) -> str:
+    """The job's answer if it finishes within `wait` seconds, else how to follow it."""
+    if job.done.wait(max(0.0, wait)):
+        ctx.jobs.pop(job.id, None)
+        if job.cancelled:
+            raise ToolError(f"{job.kind} {job.id} was cancelled.")
+        if job.error:
+            raise ToolError(job.error)
+        return job.text or ""
+    job.handed_off = True
+    secs = int(time.monotonic() - job.started)
+    return (f"{job.agent} is still working on this {job.kind} ({secs}s so far; it can take several "
+            f"minutes). Call agent_status with id {job.id!r} to wait for the answer (each call waits "
+            f"up to {STATUS_WAIT_MAX}s), or cancel_agent to stop it.")
+
+
+def tool_agent_status(args: dict, ctx: "Server") -> str:
+    job = ctx.jobs.get(args.get("id", ""))
+    if not job:
+        raise ToolError(f"No running ask {args.get('id')!r}: its answer was already given, or it belongs "
+                        f"to another session. Running: {', '.join(ctx.jobs) or 'none'}.")
+    wait = max(0, min(int(args.get("wait_seconds", STATUS_WAIT_DEFAULT)), STATUS_WAIT_MAX))
+    return _job_answer(ctx, job, wait)
+
+
+def tool_cancel_agent(args: dict, ctx: "Server") -> str:
+    job = ctx.jobs.pop(args.get("id", ""), None)
+    if not job:
+        raise ToolError(f"No running ask {args.get('id')!r}.")
+    job.cancelled = True
+    kill_processes(job.id)
+    job.done.wait(10)   # its copy is removed as it stops
+    return f"Stopped {job.agent}'s {job.kind} ({job.id})."
+
+
 def tool_ask_agent(args: dict, ctx: "Server") -> str:
     agent, prompt = args["agent"], args["prompt"].strip()
     if not prompt:
         raise ToolError("prompt is empty")
     _check_agent(agent)
     folder = _folder(args.get("folder"), ctx.cwd)
-    if args.get("allow_edits"):
-        reply = run_agent(agent, prompt, folder, args.get("model"), edits=True)
-        return f"{agent} (working in {folder}, edits allowed):\n\n{_clip(reply, REPLY_LIMIT)}"
-    scratch = Scratch(folder)
-    try:
-        reply = run_agent(agent, prompt, scratch.cwd, args.get("model"), edits=True)
-        changes = scratch.changes()
-    finally:
-        scratch.close()
-    out = f"{agent} replied:\n\n{_clip(reply, REPLY_LIMIT) if reply.strip() else '(nothing)'}"
-    if changes.strip():
-        out += ("\n\nIt also made changes in a temporary copy of the project (not applied to your files):\n\n"
-                + _clip(changes, REPLY_LIMIT))
-    return out
+    model = args.get("model")
+
+    def work() -> str:
+        if args.get("allow_edits"):
+            reply = run_agent(agent, prompt, folder, model, edits=True)
+            return f"{agent} (working in {folder}, edits allowed):\n\n{_clip(reply, REPLY_LIMIT)}"
+        scratch = Scratch(folder)   # made here: copying a big project takes a while
+        try:
+            reply = run_agent(agent, prompt, scratch.cwd, model, edits=True)
+            changes = scratch.changes()
+        finally:
+            scratch.close()
+        out = f"{agent} replied:\n\n{_clip(reply, REPLY_LIMIT) if reply.strip() else '(nothing)'}"
+        if changes.strip():
+            out += ("\n\nIt also made changes in a temporary copy of the project (not applied to your files):\n\n"
+                    + _clip(changes, REPLY_LIMIT))
+        return out
+    return _job_answer(ctx, _start_job(ctx, "question", agent, work), ANSWER_WAIT)
 
 
 REVIEW_PROMPT = """You are reviewing a code change written by another AI coding agent. You are the second opinion.
@@ -513,12 +621,16 @@ def tool_second_opinion(args: dict, ctx: "Server") -> str:
     what, diff = current_changes(folder, args.get("base"))
     focus = f"\nThe author asks you to focus on: {args['focus'].strip()}\n" if (args.get("focus") or "").strip() else ""
     prompt = REVIEW_PROMPT.format(focus=focus, what=what, diff=_clip(diff, DIFF_LIMIT))
-    scratch = Scratch(folder)
-    try:
-        reply = run_agent(agent, prompt, scratch.cwd, args.get("model"))
-    finally:
-        scratch.close()
-    return f"Second opinion from {agent} on {what}:\n\n{_clip(reply, REPLY_LIMIT)}"
+    model = args.get("model")
+
+    def work() -> str:
+        scratch = Scratch(folder)
+        try:
+            reply = run_agent(agent, prompt, scratch.cwd, model)
+        finally:
+            scratch.close()
+        return f"Second opinion from {agent} on {what}:\n\n{_clip(reply, REPLY_LIMIT)}"
+    return _job_answer(ctx, _start_job(ctx, "review", agent, work), ANSWER_WAIT)
 
 
 def _bakeoff_report(b, include_diffs: bool) -> str:
@@ -926,9 +1038,8 @@ def _changed_since_copy(s: Scratch, names: list[str]) -> list[str]:
     a part replaces whole files there, so it would undo the other change)."""
     out = []
     for name in names:
-        now = Path(s.folder, name)
         before = s.start_files.get(name)
-        current = now.read_bytes() if now.is_file() else None
+        current = file_digest(Path(s.folder, name))
         if current != before:
             out.append(name)
     return out
@@ -1017,7 +1128,8 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
     "second_opinion": ({
         "description": "Have a different AI review the current code changes (uncommitted work, or the last "
                        "commit if there is none) and report bugs and risks. It works in a temporary copy, so "
-                       "your files are never changed. Takes a few minutes.",
+                       "your files are never changed. Takes a few minutes: if it isn't done within "
+                       f"{ANSWER_WAIT} seconds you get an id to follow with agent_status.",
         "inputSchema": {"type": "object", "required": ["agent"], "properties": {
             "agent": _AGENT,
             "focus": {"type": "string", "description": "Optional: what the reviewer should look at hardest."},
@@ -1030,7 +1142,8 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
     "ask_agent": ({
         "description": "Send a question or task to another AI and return its reply. By default it works in a "
                        "temporary copy of the project and any changes it makes are returned as a diff, not "
-                       "applied. Set allow_edits to let it change the real project.",
+                       "applied. Set allow_edits to let it change the real project. If it isn't done within "
+                       f"{ANSWER_WAIT} seconds you get an id to follow with agent_status.",
         "inputSchema": {"type": "object", "required": ["agent", "prompt"], "properties": {
             "agent": _AGENT,
             "prompt": {"type": "string", "description": "What to ask or ask it to do."},
@@ -1041,6 +1154,21 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
         }},
         "annotations": {"openWorldHint": True},
     }, tool_ask_agent),
+    "agent_status": ({
+        "description": "Wait for a second_opinion or ask_agent that was still running when it answered "
+                       "(it gave an id). Waits up to wait_seconds and returns the answer once it's ready; "
+                       "if it's still working, call again.",
+        "inputSchema": {"type": "object", "required": ["id"], "properties": {
+            "id": {"type": "string"},
+            "wait_seconds": {"type": "integer", "minimum": 0, "maximum": STATUS_WAIT_MAX, "default": STATUS_WAIT_DEFAULT},
+        }},
+        "annotations": {"readOnlyHint": True},
+    }, tool_agent_status),
+    "cancel_agent": ({
+        "description": "Stop a second_opinion or ask_agent that's still running (by its id).",
+        "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}},
+        "annotations": {"destructiveHint": True, "idempotentHint": True},
+    }, tool_cancel_agent),
     "start_bakeoff": ({
         "description": "Give the same task to 2-4 AIs, each in its own copy of the project, to compare their "
                        "solutions. Returns an id right away; call bakeoff_status to get the results.",
@@ -1210,6 +1338,7 @@ class Server:
         self.bakeoffs: dict = {}
         self.relays: dict = {}
         self.teams: dict = {}
+        self.jobs: dict = {}             # ask_agent / second_opinion still running
         self._lock = threading.Lock()
         self._pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="mcp-tool")
         self._pending: set = set()       # tools/call requests not answered yet
@@ -1288,6 +1417,10 @@ class Server:
                 return           # already answered (or never asked)
             self._cancelled.add(request_id)
         kill_processes(request_id)
+        for job in list(self.jobs.values()):   # an ask still answering this request
+            if job.request_id == request_id and not job.handed_off:
+                job.cancelled = True
+                kill_processes(job.id)
 
     def handle(self, msg: dict) -> None:
         method, mid = msg.get("method"), msg.get("id")
