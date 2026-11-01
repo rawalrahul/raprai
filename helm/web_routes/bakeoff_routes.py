@@ -44,15 +44,20 @@ def _model_for(ai: str) -> Optional[str]:
 
 async def _real_runner(ai: str, prompt: str, cwd: str) -> str:
     """Run one AI the same way a session does, in the copy's folder."""
-    from helm.council.runner import _build_cmd_for_session, _run_subprocess_blocking
+    from helm.council.runner import _build_cmd_for_session, _run_subprocess_blocking, failed
     sess = {"id": "bakeoff", "ai": ai, "cwd": cwd, "model": _model_for(ai)}
     cmd, stdin_text, extra_env = _build_cmd_for_session(sess, prompt)
     loop = asyncio.get_running_loop()
     try:
-        return await loop.run_in_executor(None, lambda: _run_subprocess_blocking(
+        out = await loop.run_in_executor(None, lambda: _run_subprocess_blocking(
             cmd, cwd, stdin_text, extra_env, on_start=lambda p: _procs.__setitem__(cwd, p)))
     finally:
         _procs.pop(cwd, None)
+    if failed(out) and not out.startswith("(no output)"):
+        # Timed out, crashed, not signed in: the attempt failed (its tests aren't run),
+        # rather than "(timed out)" standing as what it said.
+        raise RuntimeError(out.strip().strip("()"))
+    return "" if out.startswith("(no output)") else out
 
 
 def _stop_running(b: bakeoff.BakeOff) -> None:
@@ -95,7 +100,10 @@ def _result(bid: str) -> Optional[dict]:
 @router.post("/api/bakeoff")
 async def start(body: StartBody):
     try:
-        b = bakeoff.create(body.repo, body.task, body.ais, test_command=body.test_command or None)
+        # The AIs start from the project as it is now, uncommitted work included, and the
+        # winner is merged on top of that work.
+        b = bakeoff.create(body.repo, body.task, body.ais, test_command=body.test_command or None,
+                           carry_uncommitted=True)
     except (ValueError, RuntimeError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
     for a in b.attempts:

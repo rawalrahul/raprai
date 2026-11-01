@@ -64,8 +64,13 @@ def make_session(ai: Optional[str], cwd: Optional[str] = None,
         t.launch()
 
     claude_msgs: list[str] = []
+    claude_session = None
     if ai == "claude":
         claude_msgs = [m["content"] for m in history if m.get("role") == "user"]
+        if claude_msgs:   # reopened with its history: carry on its own Claude conversation
+            from helm.ai_runner.claude import saved_claude_session
+            sid_saved = saved_claude_session(target_cwd)
+            claude_session = {"id": sid_saved, "cwd": target_cwd} if sid_saved else None
 
     import asyncio as _asyncio
     sess: dict = {
@@ -84,6 +89,8 @@ def make_session(ai: Optional[str], cwd: Optional[str] = None,
         # Ollama REST-API conversation history (None = not yet initialised)
         "ollama_messages": None,
     }
+    if claude_session:
+        sess["claude_session"] = claude_session
     _st.sessions[sid] = sess
 
     # Write the CWD record and auto-name entry immediately so history shows

@@ -198,8 +198,12 @@ def _collect(bo: BakeOff, a: Attempt, before: dict) -> None:
         a.files_changed = len(changed)
         a.diff = "\n".join(f"changed: {k}" for k in sorted(changed))
     if bo.test_command and not a.error:
-        r = subprocess.run(bo.test_command, shell=True, cwd=a.path, capture_output=True, text=True, timeout=900)
-        a.tests_passed = r.returncode == 0
+        try:
+            r = subprocess.run(bo.test_command, shell=True, cwd=a.path, capture_output=True, text=True,
+                               stdin=subprocess.DEVNULL, timeout=900)   # never RAPR's own stdin
+            a.tests_passed = r.returncode == 0
+        except subprocess.TimeoutExpired:   # a hung test fails this attempt, not the bake-off
+            a.tests_passed = False
 
 
 def merge(bo: BakeOff, index: int) -> int:

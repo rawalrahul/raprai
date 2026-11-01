@@ -148,10 +148,10 @@ async def _call_planner_ai(planner_ai: str, prompt: str, cwd: str) -> str:
 
     if planner_ai == "claude":
         try:
-            from helm.ai_runner.claude import build_claude_cmd, parse_claude_json_output
+            from helm.ai_runner.claude import build_claude_cmd, parse_claude_json_output, prompt_via_stdin
             # Planner runs non-interactively — no human to approve permissions
-            cmd = build_claude_cmd(prompt, has_history=False, auto_approve=True)
-            raw = await asyncio.to_thread(run_ai_popen, cmd, cwd, "claude", {})
+            cmd, stdin_text = prompt_via_stdin(build_claude_cmd(prompt, has_history=False, auto_approve=True))
+            raw = await asyncio.to_thread(run_ai_popen, cmd, cwd, "claude", {}, stdin_text=stdin_text)
             if not raw or not raw.strip():
                 logger.error("Claude planner returned empty output — "
                              "is Claude CLI installed and authenticated?")

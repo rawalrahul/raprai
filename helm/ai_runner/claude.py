@@ -13,7 +13,8 @@ def build_claude_cmd(prompt: str, has_history: bool,
                      model: str | None = None,
                      auto_approve: bool = False,
                      mcp_config: str | None = None,
-                     settings: str | None = None) -> list[str]:
+                     settings: str | None = None,
+                     resume: str | None = None) -> list[str]:
     """Build the command-line arguments to invoke the Claude CLI.
 
     Uses --output-format json to get structured output including token counts.
@@ -25,11 +26,16 @@ def build_claude_cmd(prompt: str, has_history: bool,
                   instead of going through the text-based agent loop).
     settings:     JSON for --settings: the hook that asks you before Claude
                   acts in a connected app (helm/outward.py).
+    resume:       the Claude session to carry on (--resume <id>). Without it, a
+                  session with history uses --continue, which takes the newest
+                  conversation in the folder: maybe not this session's.
     """
     cmd = ["claude"]
     if model:
         cmd.extend(["--model", model])
-    if has_history:
+    if resume:
+        cmd.extend(["--resume", resume])
+    elif has_history:
         cmd.append("--continue")
     if auto_approve:
         # Override via CLAUDE_SKIP_PERMS_FLAG if Anthropic renames this flag.
@@ -104,6 +110,7 @@ def parse_claude_json_output(raw: str) -> dict:
     cost_usd = data.get("cost_usd")
 
     return {
+        "session_id": data.get("session_id") or None,
         "text": result_text or "(no output)",
         "input_tokens": int(input_tokens) if input_tokens is not None else None,
         "output_tokens": int(output_tokens) if output_tokens is not None else None,
@@ -113,6 +120,63 @@ def parse_claude_json_output(raw: str) -> dict:
 
 
 _build_claude_cmd = build_claude_cmd  # legacy alias
+
+# A prompt longer than this goes to Claude over stdin instead of after -p: Windows
+# limits a command line to 8191 chars through cmd.exe (claude.cmd) and 32767 in all,
+# and a prompt with RAPR's tool descriptions, a diff or tool results passes that.
+CLAUDE_STDIN_CHARS = 6000
+
+
+# The Claude conversation each folder's session last used, so a session reopened after
+# a restart (its history comes back from the folder's log) carries on the same one.
+_SESSIONS_FILE = "claude_sessions.json"
+
+
+def _sessions_path():
+    from helm.paths import user_data_dir
+    return user_data_dir() / _SESSIONS_FILE
+
+
+def saved_claude_session(cwd: str) -> str | None:
+    try:
+        return json.loads(_sessions_path().read_text(encoding="utf-8")).get(os.path.normcase(cwd))
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def save_claude_session(cwd: str, session_id: str) -> None:
+    try:
+        path = _sessions_path()
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        key = os.path.normcase(cwd)
+        if data.get(key) == session_id:
+            return
+        data.pop(key, None)
+        data[key] = session_id
+        while len(data) > 200:          # newest last; forget the oldest folders
+            data.pop(next(iter(data)))
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+# What Claude Code says when --resume names a conversation it doesn't have.
+_NO_SESSION_RE = re.compile(r"No conversation found with session ID", re.IGNORECASE)
+
+
+def prompt_via_stdin(cmd: list[str]) -> tuple[list[str], str | None]:
+    """(cmd, stdin_text): a long prompt moved from `-p <prompt>` to stdin. `claude -p`
+    reads its prompt from stdin when none is given. Short prompts stay as they are."""
+    if len(cmd) >= 2 and cmd[-2] == "-p" and len(cmd[-1]) > CLAUDE_STDIN_CHARS:
+        return cmd[:-1], cmd[-1]
+    return cmd, None
 
 
 async def run_claude(sess: dict, text: str, safe_text: str, cwd: str,
@@ -132,6 +196,15 @@ async def run_claude(sess: dict, text: str, safe_text: str, cwd: str,
 
     await push_thinking(True, "claude", session_id=sid)
     has_history = len(sess["claude_msgs"]) > 0
+    # Carry on this session's own Claude conversation, by id: --continue would take the
+    # newest one in the folder, which may be your terminal's Claude Code or another session.
+    _saved = sess.get("claude_session") or {}
+    resume_id = _saved.get("id") if has_history and _saved.get("cwd") == cwd else None
+
+    def _remember(parsed: dict) -> None:
+        if parsed.get("session_id") and not sess.get("read_only"):
+            sess["claude_session"] = {"id": parsed["session_id"], "cwd": cwd}
+            save_claude_session(cwd, parsed["session_id"])
     # A read-only look (your brief) gets no skill guide: it should only look.
     enriched_text = enrich_prompt(safe_text, text, "claude", sess)
 
@@ -188,6 +261,7 @@ async def run_claude(sess: dict, text: str, safe_text: str, cwd: str,
         auto_approve=True,
         mcp_config=_mcp_config_path,
         settings=_gate_settings,
+        resume=resume_id,
     )
 
     # ── Live-progress helper (default OFF; RAPR_LIVE_PROGRESS=1) ──────────
@@ -197,6 +271,18 @@ async def run_claude(sess: dict, text: str, safe_text: str, cwd: str,
     _emit = activity_emitter(sid, "claude")
 
     async def _claude_raw(_cmd):
+        raw = await _claude_raw_once(_cmd)
+        if "--resume" in _cmd and _NO_SESSION_RE.search(raw or ""):
+            # Claude no longer has that conversation (cleared, or another computer):
+            # carry on the way RAPR used to, with the folder's latest one.
+            i = _cmd.index("--resume")
+            sess.pop("claude_session", None)
+            logger.info("claude: session %s not found; using --continue", _cmd[i + 1])
+            raw = await _claude_raw_once(_cmd[:i] + ["--continue"] + _cmd[i + 2:])
+        return raw
+
+    async def _claude_raw_once(_cmd):
+        _cmd, _stdin = prompt_via_stdin(_cmd)
         _dbg = "disabled"
         try:
             from helm.ai_runner.streaming import (
@@ -209,7 +295,7 @@ async def run_claude(sess: dict, text: str, safe_text: str, cwd: str,
                 _to = CLAUDE_TIMEOUT if CLAUDE_TIMEOUT > 0 else None
                 try:
                     return await asyncio.to_thread(
-                        run_claude_stream, _cmd, cwd, sess, _emit, _to,
+                        run_claude_stream, _cmd, cwd, sess, _emit, _to, _stdin,
                     )
                 except StreamUnavailable as _su:
                     if sess.pop("_user_killed", None):
@@ -228,7 +314,7 @@ async def run_claude(sess: dict, text: str, safe_text: str, cwd: str,
             _dbg = f"import failed: {_e2}"
             logger.warning("live progress disabled (import): %s", _e2)
         logger.info("claude: blocking run (%s)", _dbg)
-        return await asyncio.to_thread(run_ai_popen, _cmd, cwd, "claude", sess)
+        return await asyncio.to_thread(run_ai_popen, _cmd, cwd, "claude", sess, stdin_text=_stdin)
 
     if _needs_tools:
         # Agent loop wrapper: watches for <tool_call> XML in output.
@@ -237,15 +323,18 @@ async def run_claude(sess: dict, text: str, safe_text: str, cwd: str,
         from .agent_loop import run_with_tools
 
         async def _claude_run_fn(prompt: str) -> str:
+            saved = sess.get("claude_session") or {}
             _cmd = build_claude_cmd(
                 prompt, has_history,
                 model=sess.get("model"),
                 auto_approve=True,
                 mcp_config=_mcp_config_path,
                 settings=_gate_settings,
+                resume=saved.get("id") if has_history and saved.get("cwd") == cwd else None,
             )
             raw = await _claude_raw(_cmd)
             parsed = parse_claude_json_output(raw)
+            _remember(parsed)
             if parsed.get("input_tokens") is not None or parsed.get("output_tokens") is not None:
                 sess["_last_tokens"] = {
                     "input": parsed.get("input_tokens", 0),
@@ -271,6 +360,7 @@ async def run_claude(sess: dict, text: str, safe_text: str, cwd: str,
         after  = await asyncio.to_thread(snapshot_dir, cwd)
 
         parsed = parse_claude_json_output(raw_output)
+        _remember(parsed)
         output = parsed["text"]
         if parsed.get("input_tokens") is not None or parsed.get("output_tokens") is not None:
             sess["_last_tokens"] = {

@@ -252,7 +252,8 @@ def test_command_line_members_get_a_tighter_budget(env, monkeypatch):
 
 
 def test_long_claude_prompts_go_over_stdin(monkeypatch):
-    from helm.council.runner import CLAUDE_STDIN_CHARS, _build_cmd_for_session
+    from helm.ai_runner.claude import CLAUDE_STDIN_CHARS
+    from helm.council.runner import _build_cmd_for_session
     short, long_ = "hi", "y" * (CLAUDE_STDIN_CHARS + 1)
     cmd, stdin, _ = _build_cmd_for_session({"ai": "claude"}, short)
     assert cmd[-2:] == ["-p", short] and stdin is None

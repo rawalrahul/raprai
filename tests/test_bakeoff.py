@@ -121,7 +121,7 @@ def test_api_round_trip(repo, tmp_path, monkeypatch):
         return "ok"
     monkeypatch.setattr(routes, "_runner", lambda: runner)
     real_create = bo.create
-    monkeypatch.setattr(bo, "create", lambda repo, task, ais, test_command=None: real_create(repo, task, ais, test_command=test_command, root=str(tmp_path / "w")))
+    monkeypatch.setattr(bo, "create", lambda repo, task, ais, **kw: real_create(repo, task, ais, root=str(tmp_path / "w"), **kw))
     client = TestClient(webapp)
     r = client.post("/api/bakeoff", json={"repo": str(repo), "task": "fix", "ais": ["claude", "codex"]})
     assert r.status_code == 200, r.text
@@ -170,3 +170,62 @@ def test_merge_keeps_windows_line_endings(tmp_path):
     asyncio.run(bo.run(b, runner))
     assert bo.merge(b, 0) == 1
     assert (r / "app.py").read_bytes() == b"def add(a, b):\r\n    return a + b\r\n"
+
+
+def test_carrying_uncommitted_work_with_windows_line_endings(tmp_path):
+    """The copies start from the project as it is (uncommitted work too), the diff is only
+    the AI's change, and the merge lands on top of the work, \\r\\n kept."""
+    r = tmp_path / "crlf"
+    r.mkdir()
+    git(r, "init", "-q")
+    git(r, "config", "user.email", "t@example.com")
+    git(r, "config", "user.name", "t")
+    git(r, "config", "core.autocrlf", "false")
+    (r / "app.py").write_bytes(b"def add(a, b):\r\n    return a - b\r\n")
+    git(r, "add", "-A")
+    git(r, "commit", "-q", "-m", "init")
+    work = b"def add(a, b):\r\n    return a - b\r\n\r\n\r\ndef sub(a, b):\r\n    return a - b\r\n"
+    (r / "app.py").write_bytes(work)          # not committed, not staged
+    (r / "new.txt").write_text("wip")         # untracked
+    b = bo.create(str(r), "fix add", ["claude", "codex"], root=str(tmp_path / "work"), carry_uncommitted=True)
+    seen = []
+
+    async def runner(ai, prompt, cwd):
+        data = Path(cwd, "app.py").read_bytes()
+        seen.append((data == work, Path(cwd, "new.txt").exists()))
+        Path(cwd, "app.py").write_bytes(data.replace(b"return a - b\r\n\r\n", b"return a + b\r\n\r\n", 1))
+        return "done"
+    asyncio.run(bo.run(b, runner))
+    assert seen == [(True, True), (True, True)]
+    assert b.attempts[0].files_changed == 1 and b.attempts[0].lines_added == 1
+    assert bo.merge(b, 0) == 1
+    assert (r / "app.py").read_bytes() == work.replace(b"return a - b\r\n\r\n", b"return a + b\r\n\r\n", 1)
+    assert (r / "new.txt").read_text() == "wip"
+    assert "bakeoff/" not in subprocess.run(["git", "branch"], cwd=r, capture_output=True, text=True).stdout
+
+
+def test_a_hung_test_command_fails_that_attempt_only(repo, tmp_path, monkeypatch):
+    real_run = subprocess.run
+
+    def run(cmd, *a, **k):
+        if k.get("shell"):
+            raise subprocess.TimeoutExpired(cmd, 900)
+        return real_run(cmd, *a, **k)
+    monkeypatch.setattr(bo.subprocess, "run", run)
+    b = bo.create(str(repo), "x", ["claude", "codex"], test_command="hang", root=str(tmp_path / "work"))
+
+    async def runner(ai, prompt, cwd):
+        return "done"
+    asyncio.run(bo.run(b, runner))
+    assert b.status == "done" and [a.tests_passed for a in b.attempts] == [False, False]
+
+
+def test_the_web_runner_reports_an_ai_that_timed_out_as_failed(monkeypatch):
+    import helm.council.runner as runner
+    from helm.web_routes import bakeoff_routes as br
+    monkeypatch.setattr(runner, "_build_cmd_for_session", lambda sess, prompt: (["x"], None, {}))
+    monkeypatch.setattr(runner, "_run_subprocess_blocking", lambda *a, **k: "(timed out)")
+    with pytest.raises(RuntimeError, match="timed out"):
+        asyncio.run(br._real_runner("codex", "hi", "."))
+    monkeypatch.setattr(runner, "_run_subprocess_blocking", lambda *a, **k: "(no output)")
+    assert asyncio.run(br._real_runner("codex", "hi", ".")) == ""

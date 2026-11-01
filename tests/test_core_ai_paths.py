@@ -4,6 +4,7 @@ These pin down today's behaviour before that code is split into one runner per
 AI type (docs/code-health-plan.md, steps C1 and C3). They watch RAPR from the
 outside (tests/core_harness.py), so moving the code shouldn't break them.
 """
+import asyncio
 import json
 import os
 import sys
@@ -54,6 +55,59 @@ def test_claude_continues_the_conversation_and_uses_the_model(rapr):
     assert "--continue" not in first["argv"] and "--continue" in second["argv"]
     assert second["argv"][second["argv"].index("--model") + 1] == "claude-test-9"
     assert sess["claude_msgs"] == ["one", "two"]
+
+
+def test_claude_carries_on_its_own_conversation_by_id(rapr):
+    """--continue takes the newest conversation in the folder (maybe your terminal's
+    Claude Code); RAPR resumes the one this session started."""
+    rapr.claude_reply("ok", session_id="sess-abc")
+    sess = rapr.session("claude")
+    rapr.send("one", sess)
+    rapr.send("two", sess)
+    first, second = rapr.calls("claude")
+    assert "--resume" not in first["argv"]
+    argv = second["argv"]
+    assert argv[argv.index("--resume") + 1] == "sess-abc" and "--continue" not in argv
+    # Reopened after a restart with its history: still the same conversation.
+    from helm.ai_runner.claude import saved_claude_session
+    assert saved_claude_session(sess["cwd"]) == "sess-abc"
+
+
+def test_a_conversation_claude_no_longer_has_falls_back_to_continue(rapr):
+    rapr.claude_reply("ok", session_id="gone-1")
+    sess = rapr.session("claude")
+    rapr.send("one", sess)
+    rapr.reply("claude", "No conversation found with session ID: gone-1", exit=1)
+    rapr.send("two", sess)
+    _, resumed, fallback = rapr.calls("claude")
+    assert "--resume" in resumed["argv"]
+    assert "--continue" in fallback["argv"] and "--resume" not in fallback["argv"]
+    assert "claude_session" not in sess
+
+
+def test_a_reopened_session_resumes_its_saved_conversation(rapr, monkeypatch):
+    import helm.session_mgr as sm
+    from helm.ai_runner.claude import save_claude_session
+    cwd = str(rapr.root / "project")
+    save_claude_session(cwd, "sess-saved")
+    monkeypatch.setattr(sm, "get_history_messages", lambda pid: [{"role": "user", "content": "earlier"}])
+    rapr.claude_reply("ok")
+
+    async def reopen():   # history comes back with the session (and is broadcast from the loop)
+        return sm.make_session("claude", cwd=cwd)
+    sess = asyncio.run(reopen())
+    assert sess["claude_session"] == {"id": "sess-saved", "cwd": cwd}
+    rapr.send("again", sess)
+    argv = rapr.calls("claude")[0]["argv"]
+    assert argv[argv.index("--resume") + 1] == "sess-saved"
+
+
+def test_a_long_message_reaches_claude_over_stdin(rapr):
+    rapr.claude_reply("ok")
+    long_text = "word " * 3000
+    rapr.send(long_text, rapr.session("claude"))
+    [call] = rapr.calls("claude")
+    assert call["argv"][-1] == "-p" and long_text.strip() in call["stdin"]
 
 
 def test_claude_tokens_and_cost_are_counted(rapr):
@@ -158,6 +212,7 @@ def test_claudes_live_progress_shows_its_steps(rapr, live_progress):
     assert out == "Listed it."
     [call] = rapr.calls("claude")
     assert call["argv"][call["argv"].index("--output-format") + 1] == "stream-json"
+    assert call["session"] == sess["id"]        # tool calls inside Claude know their session
     steps = [e for e in rapr.events("activity") if e.get("phase") == "step"]
     assert steps and steps[0]["session_id"] == sess["id"] and steps[0]["n"] == 1
 
@@ -173,18 +228,28 @@ def test_if_claudes_live_progress_fails_it_runs_normally(rapr, live_progress):
 
 # ── Other command-line AIs (Codex, Gemini, …) ─────────────────────────────
 
-def test_a_cli_ai_remembers_the_last_three_exchanges(rapr):
+def test_a_cli_ai_remembers_the_recent_conversation(rapr):
     sess = rapr.session("codex")
     for i in range(5):
         rapr.reply("codex", f"answer {i}")
         rapr.send(f"question {i}", sess)
     last = rapr.prompt(rapr.calls("codex")[-1])
     assert last.startswith("[Prior conversation in this session]\n")
-    assert "User: question 1\nAssistant: answer 1" in last
+    assert "User: question 0\nAssistant: answer 0" in last   # short exchanges: all of them fit
     assert "User: question 3\nAssistant: answer 3" in last
-    assert "question 0" not in last                           # only the last three
     assert "[Current request]\n" in last and last.endswith("question 4")
     assert len(sess["_integration_history"]) == 5
+
+
+def test_cli_history_keeps_the_latest_fullest_within_a_budget():
+    from helm.ai_runner.cli_runner import history_block
+    hist = [{"q": f"q{i} " + "x" * 3000, "a": f"a{i} " + "y" * 5000} for i in range(6)]
+    block = history_block(hist, 6000)
+    assert len(block) < 6200
+    assert "q5 " + "x" * 1400 in block and "q4 " + "x" * 1000 not in block   # newest fuller, older cut
+    assert "earlier exchanges not shown" in block
+    assert block.index("q4") < block.index("q5")                            # oldest first
+    assert history_block(hist, 0) == ""
 
 
 def test_cli_history_keeps_ten_exchanges(rapr):

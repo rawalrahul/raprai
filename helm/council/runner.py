@@ -13,11 +13,6 @@ _ANSI_ESC_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 import json as _json
 
 
-# A long prompt goes to Claude over stdin (`claude -p` reads its prompt there when
-# none is given): the command line has a hard limit, 8191 chars through cmd.exe,
-# which a review prompt with a diff easily passes.
-CLAUDE_STDIN_CHARS = 6000
-
 # What _run_subprocess_blocking returns when the AI didn't answer.
 FAILED_PREFIXES = ("(timed out)", "(error:", "(no output)")
 
@@ -48,10 +43,9 @@ def _build_cmd_for_session(sess: dict, prompt: str) -> tuple[list, str | None, d
 
     if ai == "claude":
         from helm.ai_runner.claude import build_claude_cmd
-        cmd = build_claude_cmd(prompt, has_history=False, model=model)
-        if len(prompt) > CLAUDE_STDIN_CHARS and cmd[-2:] == ["-p", prompt]:
-            return cmd[:-1], prompt, {}
-        return cmd, None, {}
+        from helm.ai_runner.claude import prompt_via_stdin
+        cmd, stdin_text = prompt_via_stdin(build_claude_cmd(prompt, has_history=False, model=model))
+        return cmd, stdin_text, {}
 
     if ai and ai in _st.integrations:
         info = _st.integrations[ai]

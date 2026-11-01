@@ -145,7 +145,8 @@ def _safe(emit: Callable[[dict], None], ev: dict) -> None:
 
 def run_claude_stream(cmd: list, cwd: str, sess: dict,
                       emit: Callable[[dict], None],
-                      timeout: Optional[float] = None) -> str:
+                      timeout: Optional[float] = None,
+                      stdin_text: Optional[str] = None) -> str:
     """Run Claude with stream-json, emit activity events, return the result line.
 
     Intended to run inside ``asyncio.to_thread``. ``emit`` must be a thread-safe
@@ -154,16 +155,22 @@ def run_claude_stream(cmd: list, cwd: str, sess: dict,
     ``parse_claude_json_output``. Raises StreamUnavailable on any failure.
     """
     scmd = to_stream_cmd(cmd)
+    from helm.paths import child_env
+    # Same environment as run_ai_popen: RAPR_SESSION_ID tells tool calls made from inside
+    # Claude (helm/mcp/call_tool.py) which session they belong to, for approvals.
+    env = child_env(scmd, {"RAPR_SESSION_ID": str(sess.get("id", ""))})
 
     try:
         proc = subprocess.Popen(
             scmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,   # merge so a stderr-fill can't deadlock the pipe
+            stdin=subprocess.PIPE if stdin_text else subprocess.DEVNULL,   # never RAPR's own stdin
             text=True,
             encoding="utf-8",
             errors="replace",
             cwd=cwd,
+            env=env,
             **hidden_kwargs(),
         )
     except FileNotFoundError:
@@ -197,6 +204,12 @@ def run_claude_stream(cmd: list, cwd: str, sess: dict,
     _lines = 0
     _t0 = time.time()
     try:
+        if stdin_text and proc.stdin:   # a long prompt (see claude.prompt_via_stdin)
+            try:
+                proc.stdin.write(stdin_text)
+                proc.stdin.close()
+            except (OSError, ValueError):
+                pass
         for line in proc.stdout:
             _lines += 1
             if _lines == 1:
@@ -267,7 +280,7 @@ def _stream_cli(scmd, cwd, sess, stdin_text, extra_env, timeout, on_event, tag="
     try:
         proc = subprocess.Popen(
             scmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            stdin=subprocess.PIPE if stdin_text else None,
+            stdin=subprocess.PIPE if stdin_text else subprocess.DEVNULL,   # never RAPR's own stdin
             text=True, encoding="utf-8", errors="replace",
             cwd=cwd, env=env, **hidden_kwargs(),
         )

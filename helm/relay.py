@@ -236,6 +236,7 @@ def _test(r: Relay) -> None:
     point = r.workspace.snapshot()
     try:
         out = subprocess.run(r.test_command, shell=True, cwd=r.workspace.cwd, capture_output=True,
+                             stdin=subprocess.DEVNULL,   # not ours: in `rapr mcp` that's the client's stream
                              text=True, encoding="utf-8", errors="replace", timeout=TEST_TIMEOUT)
         r.tests_passed = out.returncode == 0
         r.test_output = _clip((out.stdout + out.stderr).strip()[-4000:], 4000)

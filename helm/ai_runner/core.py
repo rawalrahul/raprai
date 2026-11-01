@@ -544,7 +544,9 @@ def run_ai_popen(cmd: list[str], cwd: str, name: str, sess: dict,
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE if stdin_text else None,
+            # Not RAPR's own stdin: a CLI that reads it (Claude Code does, and others ask
+            # questions there) would wait on a terminal nobody is watching.
+            stdin=subprocess.PIPE if stdin_text else subprocess.DEVNULL,
             text=True,
             encoding="utf-8",
             errors="replace",

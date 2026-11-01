@@ -133,7 +133,7 @@ def test_share_and_publish_routes(db, repo, tmp_path, monkeypatch):
         return "ok"
     monkeypatch.setattr(routes, "_runner", lambda: runner)
     real_create = bo.create
-    monkeypatch.setattr(bo, "create", lambda repo, task, ais, test_command=None: real_create(repo, task, ais, test_command=test_command, root=str(tmp_path / "w")))
+    monkeypatch.setattr(bo, "create", lambda repo, task, ais, **kw: real_create(repo, task, ais, root=str(tmp_path / "w"), **kw))
     sent = []
 
     def fake_publish(body):
