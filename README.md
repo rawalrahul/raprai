@@ -58,6 +58,7 @@ An assistant from one AI company sees that company's connectors, runs that compa
 | 🧪 **Bake-off** | Give the same task to several AIs. Each works in its own copy of your project; compare the diffs, test results and time, then merge the winner. Share the result as a card, or publish it to the public [RAPR Arena](https://www.raprai.com/arena) leaderboard. |
 | 🔌 **RAPR inside your editor** | RAPR is an MCP server: from Claude Code, Codex, Antigravity, Grok, Cursor or Windsurf, ask another AI to review your changes, answer a question or join a bake-off, run a **relay** (one AI plans, another builds, another reviews and gets it fixed), or ask "what needs me today?" for your brief. Runs on your computer, with or without the app installed; your files stay untouched until you allow edits or merge. [Set it up](#use-rapr-inside-your-coding-agent-mcp) |
 | 🐧 **Monthly recap** | Your month as a shareable card: your AI crew and its MVP, streaks, bake-offs, and what running AIs locally saved you. Worked out on your computer. |
+| 📊 **Usage ribbon** | Each AI's 5-hour and weekly plan usage as the AI itself reports it (the numbers on its own usage page), or the money spent on an API key. Above the message box in the app and above the Claude Code prompt. [See it](#usage-ribbon) |
 | 🧭 **Smart routing** | Choose "Auto" and RAPR picks the AI for each task: free local models for easy work, the strongest coding agent for hard work, skipping any AI that's over budget. |
 | 📱 **Phone control** | Telegram bot, WhatsApp (scan a QR code, no Business API), Discord and Slack. Start sessions, send tasks, approve actions, get your brief and hand items off with `/do`, get files back. |
 | 🖥️ **Parallel sessions** | Many sessions at once, each with its own AI, folder and history. Resume any past conversation. |
@@ -162,13 +163,13 @@ A slim ribbon shows how much of each AI's plan you've used, **as the AI itself r
 
 | AI | What the ribbon shows | Where RAPR reads it |
 |---|---|---|
-| Claude | 5-hour and weekly plan usage (as on claude.ai's usage page), exact tokens and cost | the `rate_limit_event` and result every `claude` run prints |
+| Claude | 5-hour and weekly plan usage (as on claude.ai's usage page) and exact tokens; on an API key, money spent instead | the `rate_limit_event` and result every `claude` run prints |
 | Codex | 5-hour and weekly plan usage (as Codex's `/status` shows), exact tokens | the `token_count` events Codex writes to `~/.codex/sessions` (so Codex used on its own counts too) |
 | Others | time, tasks and tokens (estimated where the AI doesn't report them, marked `~`) | RAPR's own counters |
 
 5-hour and weekly windows belong to subscriptions (Claude Pro/Max, ChatGPT plans). An AI used with an **API key** has none, so the ribbon never shows them for it: it shows an **API key** tag and the money spent instead. RAPR tells them apart from what each AI says about its sign-in (Claude's `apiKeySource`, Codex's `~/.codex/auth.json`). On a plan, the dollar figure Claude reports is a list price you aren't billed, so it isn't shown as spending.
 
-In the app it sits above the message box; click it for every AI, × hides it, and the **Usage** panel brings it back. In Claude Code it sits above the prompt, with Claude's numbers taken straight from Claude Code (as [ponytail](https://github.com/DietrichGebert/ponytail) does) plus this session's cost and what RAPR ran for you today. Add it once (needs Claude Code 2.1.290 or later, in the terminal or the desktop app):
+In the app it sits above the message box; click it for every AI, × hides it, and the **Usage** panel brings it back. In Claude Code it sits above the prompt, with Claude's numbers taken straight from Claude Code (as [ponytail](https://github.com/DietrichGebert/ponytail) does: plan windows on a subscription, this session's cost on an API key) and what RAPR ran for you today. Add it once (needs Claude Code 2.1.290 or later, in the terminal or the desktop app):
 
 ```
 /plugin marketplace add rawalrahul/raprai
