@@ -129,7 +129,8 @@ def test_run_agent_runs_claude_in_stream_mode_and_keeps_its_numbers(monkeypatch,
     assert mcp.run_agent("claude", "hello", str(tmp_path)) == "hi there"
     assert "stream-json" in seen["cmd"] and "--verbose" in seen["cmd"]
     today = mcp_usage.load()["today"]
-    assert today["tokens"] == 24605 and today["estimated"] == 0 and today["cost_usd"] == 0.092
+    # On a plan (it reported plan windows) Claude's cost is a list price: not counted as spent.
+    assert today["tokens"] == 24605 and today["estimated"] == 0 and today["cost_usd"] == 0
     assert mcp_usage.limits()["claude"]["windows"][0]["pct"] == 61.0
 
 
@@ -138,7 +139,7 @@ def test_the_usage_tool_shows_plan_usage_first(monkeypatch, tmp_path):
     mcp_usage.set_limits("claude", "Claude", [{"key": "five_hour", "label": "5h", "pct": 61.0,
                                                "resets_at": 4102444800}], "test")
     text = mcp.Server(out=None).call_tool("usage", {})["content"][0]["text"]
-    assert text.startswith("Plan usage, as each AI reports it:\n- Claude: 5h 61% (resets in")
+    assert text.startswith("Plan usage (subscriptions), as each AI reports it:\n- Claude: 5h 61% (resets in")
 
 
 def test_the_app_shows_the_plan_share_not_an_estimate(monkeypatch, tmp_path):
@@ -151,3 +152,63 @@ def test_the_app_shows_the_plan_share_not_an_estimate(monkeypatch, tmp_path):
     data = json.loads(asyncio.run(usage_routes.get_usage()).body)
     claude = data["ais"]["claude"]
     assert claude["pct_used"] == 88.0 and claude["source"] == "plan" and len(claude["limits"]) == 2
+
+
+# --- Plan or API key: never mixed ------------------------------------------------------------
+
+def test_claude_says_plan_or_api_key_in_its_init_line(monkeypatch):
+    for k in mcp_usage.CLAUDE_API_ENV:
+        monkeypatch.delenv(k, raising=False)
+    assert mcp_usage.claude_mode({"apiKeySource": "none"}) == mcp_usage.PLAN
+    assert mcp_usage.claude_mode({"apiKeySource": "ANTHROPIC_API_KEY"}) == mcp_usage.API
+    assert mcp_usage.claude_mode({}) is None
+    assert mcp_usage.claude_mode({"apiKeySource": "none"}, {"CLAUDE_CODE_USE_BEDROCK": "1"}) == mcp_usage.API
+
+
+def test_switching_claude_to_an_api_key_drops_its_plan_windows(monkeypatch):
+    for k in mcp_usage.CLAUDE_API_ENV:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(mcp_usage.time, "time", lambda: 1793500000)
+    mcp_usage.claude_stream_result(CLAUDE_STREAM)
+    assert "claude" in mcp_usage.limits()
+    api_run = "\n".join([json.dumps({"type": "system", "subtype": "init", "apiKeySource": "ANTHROPIC_API_KEY"}),
+                         json.dumps({"type": "result", "result": "ok", "total_cost_usd": 0.5, "usage": {"output_tokens": 10}})])
+    mcp_usage.claude_stream_result(api_run)
+    assert "claude" not in mcp_usage.limits() and mcp_usage.billing("claude") == mcp_usage.API
+
+
+def test_money_counts_only_on_an_api_key():
+    mcp_usage.set_billing("claude", "Claude", mcp_usage.PLAN, "test")
+    mcp_usage.record("claude", 5, tokens=100, cost_usd=0.9, name="Claude Code")      # a list price
+    mcp_usage.set_billing("codex", "Codex", mcp_usage.API, "test")
+    mcp_usage.record("codex", 5, tokens=100, cost_usd=0.25, name="Codex")
+    today = mcp_usage.load()["today"]
+    assert today["agents"]["claude"]["cost_usd"] == 0 and today["agents"]["codex"]["cost_usd"] == 0.25
+    text = mcp_usage.summary()
+    assert "On an API key (billed per token, no 5-hour or weekly limits):\n- Codex: $0.25 today" in text
+
+
+def test_codex_on_an_api_key_shows_no_windows(tmp_path, monkeypatch):
+    home = tmp_path / "codex"
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    _rollout(home)                                   # an older ChatGPT session left windows behind
+    (home / "auth.json").write_text(json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": "sk-x", "tokens": None}))
+    mcp_usage.refresh_codex_limits(0)
+    assert "codex" not in mcp_usage.limits() and mcp_usage.billing("codex") == mcp_usage.API
+    (home / "auth.json").write_text(json.dumps({"tokens": {"id_token": "x"}, "OPENAI_API_KEY": None}))
+    mcp_usage.refresh_codex_limits(0)
+    assert mcp_usage.limits()["codex"]["windows"][0]["pct"] == 12.0
+
+
+def test_the_app_shows_no_plan_or_cap_for_an_api_key(monkeypatch, tmp_path):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "none"))
+    monkeypatch.delenv("USAGE_CAP_MIN_CLAUDE", raising=False)
+    monkeypatch.delenv("USAGE_CAP_MIN_DEFAULT", raising=False)
+    import asyncio
+    from helm.web_routes import usage_routes
+    mcp_usage.set_limits("claude", "Claude", [{"key": "five_hour", "label": "5h", "pct": 61.0, "resets_at": 4102444800}], "t")
+    plan = json.loads(asyncio.run(usage_routes.get_usage()).body)["ais"]["claude"]
+    assert plan["billing"] == "plan" and plan["cost_is_spent"] is False and plan["limits"]
+    mcp_usage.set_billing("claude", "Claude", mcp_usage.API, "t")
+    api = json.loads(asyncio.run(usage_routes.get_usage()).body)["ais"]["claude"]
+    assert api["billing"] == "api" and api["limits"] == [] and api["pct_used"] is None and api["cap_min"] is None

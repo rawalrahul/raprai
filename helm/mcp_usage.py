@@ -21,6 +21,16 @@ ribbon shows the same numbers as the AI's own usage page:
   - Codex: the `token_count` events Codex writes to its session files in ~/.codex/sessions
     (the 5-hour and weekly windows, as Codex's /status shows them).
 
+Plan windows exist only on a subscription (Claude Pro/Max, ChatGPT Plus/Pro...). An AI used
+with an API key is billed per token and has no 5-hour or weekly limit, so RAPR keeps each AI's
+billing ("billing": plan or api) and never shows plan windows for an API account, nor an API
+price as money spent on a plan (Claude's total_cost_usd is a list price, not a bill, there):
+
+  - Claude: the `apiKeySource` of its stream-json init line ("none" is a claude.ai sign-in),
+    and Bedrock / Vertex / Foundry settings, which are API billing.
+  - Codex: ~/.codex/auth.json says whether it signed in with ChatGPT or an API key (only the
+    kind of sign-in is read, never the key).
+
 Token counts are exact where the AI reports them (Claude's result, Codex's session file)
 and estimated from text length otherwise; "estimated" counts how many tokens were guessed.
 """
@@ -59,7 +69,8 @@ def _empty_bucket() -> dict:
 
 def _empty() -> dict:
     return {"version": VERSION, "day": _today(), "updated": 0.0,
-            "today": _empty_bucket(), "total": _empty_bucket(), "last": None, "limits": {}}
+            "today": _empty_bucket(), "total": _empty_bucket(), "last": None, "limits": {},
+            "billing": {}}
 
 
 def load() -> dict:
@@ -73,8 +84,9 @@ def load() -> dict:
     for key in ("today", "total"):
         if not isinstance(data.get(key), dict):
             data[key] = _empty_bucket()
-    if not isinstance(data.get("limits"), dict):
-        data["limits"] = {}
+    for key in ("limits", "billing"):
+        if not isinstance(data.get(key), dict):
+            data[key] = {}
     if data.get("day") != _today():
         data["day"] = _today()
         data["today"] = _empty_bucket()
@@ -117,8 +129,11 @@ def record(agent: str, seconds: float, prompt: str = "", reply: str = "", ok: bo
     with _lock:
         try:
             data = load()
-            _add(data["today"], agent, name, seconds, tokens, estimated, cost_usd, ok)
-            _add(data["total"], agent, name, seconds, tokens, estimated, cost_usd, ok)
+            # Money only where it is spent: on an API key. A plan's run has a list price
+            # (Claude reports one) that nobody is billed.
+            spent = cost_usd if billing(agent, data) == API else None
+            _add(data["today"], agent, name, seconds, tokens, estimated, spent, ok)
+            _add(data["total"], agent, name, seconds, tokens, estimated, spent, ok)
             data["last"] = {"agent": agent, "name": name, "seconds": round(seconds, 1),
                             "tokens": tokens, "estimated": estimated, "ok": ok, "at": time.time()}
             _write(data)
@@ -144,8 +159,35 @@ def _label(key: str, minutes: Optional[float] = None) -> str:
     return WINDOW_LABELS.get(key, key.replace("_", " "))
 
 
+PLAN, API = "plan", "api"
+
+
+def set_billing(agent: str, name: str, mode: str, source: str) -> None:
+    """How the AI is paid for: PLAN (a subscription, with 5-hour and weekly windows) or API
+    (per token, no windows). Switching to API drops the plan windows kept for it."""
+    with _lock:
+        try:
+            data = load()
+            old = (data["billing"].get(agent) or {}).get("mode")
+            if old == mode and (mode == PLAN or agent not in data["limits"]):
+                return
+            data["billing"][agent] = {"name": name, "mode": mode, "source": source, "at": time.time()}
+            if mode == API:
+                data["limits"].pop(agent, None)
+            _write(data)
+        except OSError:
+            logger.warning("Couldn't save %s's billing", agent, exc_info=True)
+
+
+def billing(agent: str, data: Optional[dict] = None) -> Optional[str]:
+    """PLAN, API, or None when the AI hasn't said."""
+    data = data or load()
+    return (data.get("billing", {}).get(agent) or {}).get("mode")
+
+
 def set_limits(agent: str, name: str, windows: list[dict], source: str) -> None:
-    """Keep an AI's plan windows: [{key, label, pct, resets_at}] (pct 0-100, resets_at unix)."""
+    """Keep an AI's plan windows: [{key, label, pct, resets_at}] (pct 0-100, resets_at unix).
+    Only a subscription has them, so this also marks the AI as on a plan."""
     windows = [w for w in windows if isinstance(w.get("pct"), (int, float))]
     if not windows:
         return
@@ -153,17 +195,21 @@ def set_limits(agent: str, name: str, windows: list[dict], source: str) -> None:
         try:
             data = load()
             data["limits"][agent] = {"name": name, "windows": windows, "source": source, "at": time.time()}
+            data["billing"][agent] = {"name": name, "mode": PLAN, "source": source, "at": time.time()}
             _write(data)
         except OSError:
             logger.warning("Couldn't save %s's plan limits", agent, exc_info=True)
 
 
 def limits(data: Optional[dict] = None) -> dict:
-    """Every AI's plan windows; a window whose reset time has passed reads 0% (it started over)."""
+    """Every AI's plan windows; a window whose reset time has passed reads 0% (it started over).
+    An AI on an API key has none, whatever was kept from before."""
     data = data or load()
     now = time.time()
     out = {}
     for agent, lim in (data.get("limits") or {}).items():
+        if billing(agent, data) == API:
+            continue
         wins = []
         for w in lim.get("windows") or []:
             w = dict(w)
@@ -190,6 +236,27 @@ def claude_windows(event: dict) -> list[dict]:
         found[kind] = info
     return [{"key": k, "label": _label(k), "pct": round(float(w["utilization"]) * 100, 1),
              "resets_at": w.get("resetsAt")} for k, w in found.items()]
+
+
+CLAUDE_API_ENV = ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
+
+
+def claude_mode(init: dict, env: Optional[dict] = None) -> Optional[str]:
+    """PLAN or API from Claude's stream-json init line: `apiKeySource` is "none" when it is
+    signed in to claude.ai, else names the key (ANTHROPIC_API_KEY, apiKeyHelper...)."""
+    env = os.environ if env is None else env
+    if any(str(env.get(k, "")).strip() not in ("", "0", "false") for k in CLAUDE_API_ENV):
+        return API
+    src = init.get("apiKeySource") if isinstance(init, dict) else None
+    if not isinstance(src, str):
+        return None
+    return PLAN if src == "none" else API
+
+
+def note_claude_init(event: dict) -> None:
+    mode = claude_mode(event)
+    if mode:
+        set_billing("claude", "Claude", mode, "claude init apiKeySource")
 
 
 def note_claude_event(event: dict) -> None:
@@ -269,6 +336,27 @@ def codex_session_reading(path: Path) -> tuple[Optional[dict], Optional[int]]:
     return rate, tokens
 
 
+def codex_mode() -> Optional[str]:
+    """PLAN when Codex is signed in with ChatGPT, API with an API key, from ~/.codex/auth.json.
+    Only which kind of sign-in it holds is looked at."""
+    try:
+        auth = json.loads((codex_home() / "auth.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(auth, dict):
+        return None
+    mode = str(auth.get("auth_mode") or "").lower()
+    if mode in ("chatgpt", "chatgptauthtokens"):
+        return PLAN
+    if mode in ("apikey", "api_key", "api"):
+        return API
+    if auth.get("tokens"):
+        return PLAN
+    if auth.get("OPENAI_API_KEY"):
+        return API
+    return None
+
+
 _codex_checked = [0.0]
 
 
@@ -277,6 +365,11 @@ def refresh_codex_limits(every: float = 30.0) -> None:
     if time.monotonic() - _codex_checked[0] < every:
         return
     _codex_checked[0] = time.monotonic()
+    mode = codex_mode()
+    if mode:
+        set_billing("codex", "Codex", mode, "codex auth.json")
+    if mode == API:
+        return              # an API key has no 5-hour or weekly windows
     for f in _newest_rollouts():
         try:
             rate, _ = codex_session_reading(f)
@@ -293,7 +386,7 @@ def codex_run_tokens(since: float) -> Optional[int]:
         try:
             if f.stat().st_mtime >= since:
                 rate, tokens = codex_session_reading(f)
-                if rate:
+                if rate and codex_mode() != API:
                     set_limits("codex", "Codex", codex_windows(rate, f.stat().st_mtime), "codex session file")
                 return tokens
         except OSError:
@@ -315,7 +408,9 @@ def claude_stream_result(raw: str) -> tuple[Optional[str], Optional[int], Option
             continue
         if not isinstance(ev, dict):
             continue
-        if ev.get("type") == "rate_limit_event":
+        if ev.get("type") == "system" and ev.get("subtype") == "init":
+            note_claude_init(ev)
+        elif ev.get("type") == "rate_limit_event":
             note_claude_event(ev)
         elif ev.get("type") == "result":
             result = line
@@ -357,7 +452,7 @@ def _bucket_line(b: dict) -> str:
     line = (f"{calls} call{'s' if calls != 1 else ''}, {fmt_seconds(b.get('seconds', 0))} of AI time, "
             f"{approx}{fmt_tokens(b.get('tokens', 0))} tokens")
     if b.get("cost_usd"):
-        line += f", ${b['cost_usd']:.2f}"
+        line += f", ${b['cost_usd']:.2f} spent on API keys"
     if b.get("failed"):
         line += f", {b['failed']} failed"
     return line
@@ -387,7 +482,14 @@ def summary(data: Optional[dict] = None) -> str:
     lines = []
     plan = limits_lines(data)
     if plan:
-        lines += ["Plan usage, as each AI reports it:"] + plan
+        lines += ["Plan usage (subscriptions), as each AI reports it:"] + plan
+    api = [(k, b) for k, b in (data.get("billing") or {}).items() if b.get("mode") == API]
+    if api:
+        lines.append("On an API key (billed per token, no 5-hour or weekly limits):")
+        for k, b in api:
+            a = today.get("agents", {}).get(k) or {}
+            lines.append(f"- {b.get('name') or k}: ${a.get('cost_usd', 0):.2f} today through RAPR"
+                         + (f", {fmt_tokens(a.get('tokens', 0))} tokens" if a.get("tokens") else ""))
     if not total.get("calls"):
         lines.append("RAPR usage: no AI has been run through RAPR yet.")
         return "\n".join(lines)

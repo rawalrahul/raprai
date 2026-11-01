@@ -35,7 +35,8 @@ function _ribbonAiParts(a){
   parts.push(a.cap_min && !planned ? `${_ribbonFmtMin(a.used_min)} / ${_ribbonFmtMin(a.cap_min)}` : _ribbonFmtMin(a.used_min));
   parts.push(`${a.tasks} task${a.tasks === 1 ? '' : 's'}`);
   parts.push(`${a.tokens_source === 'actual' ? '' : '~'}${_ribbonFmtTok(a.total_tokens)} tok`);
-  if(a.cost_usd >= 0.005) parts.push('$' + a.cost_usd.toFixed(2));
+  // Money only where it's spent: an API key. On a plan the reported cost is a list price.
+  if(a.cost_is_spent !== false && a.cost_usd >= 0.005) parts.push('$' + a.cost_usd.toFixed(2) + (a.billing === 'api' ? ' spent' : ''));
   return parts;
 }
 
@@ -65,6 +66,12 @@ function _ribbonGauge(a){
     }).join('');
   }
   const pct = a.pct_used, level = _ribbonLevel(pct, a.budget);
+  if(a.billing === 'api'){
+    const tag = `<span class="ur-tag" title="${escHtml(a.label)} uses an API key: billed per token, with no 5-hour or weekly limits">API key</span>`;
+    if(pct == null) return tag;
+    return tag + _ribbonMeter(pct, level) +
+      `<span class="ur-pct ${level}" title="Time used against the cap you set (USAGE_CAP_MIN_${escHtml(String(a.label).toUpperCase())})">≈${pct.toFixed(0)}%</span>`;
+  }
   const tip = pct == null ? 'No cap set' : `Estimated: time used against the cap in .env (USAGE_CAP_MIN_${String(a.label).toUpperCase()})`;
   return _ribbonMeter(pct, level) +
     `<span class="ur-pct ${level}" title="${escHtml(tip)}">${pct == null ? 'no cap' : '≈' + pct.toFixed(0) + '%'}</span>`;
@@ -116,7 +123,7 @@ function renderUsageRibbon(){
         `${x.failed ? ' · ' + x.failed + ' failed' : ''}</span></div>`);
     });
     details = `<div class="ur-details">${rows.join('') || '<div class="ur-dim">Nothing yet</div>'}` +
-      `<div class="ur-foot ur-dim">5h / week: your plan, as each AI reports it · ≈ estimated against your cap · ~ tokens estimated from text length · RAPR's own counters reset in ${escHtml(d.reset_eta || '?')}</div></div>`;
+      `<div class="ur-foot ur-dim">5h / week: your subscription, as each AI reports it (an API key has none: its row shows money spent) · ≈ estimated against your cap · ~ tokens estimated from text length · RAPR's own counters reset in ${escHtml(d.reset_eta || '?')}</div></div>`;
   }
 
   el.innerHTML =

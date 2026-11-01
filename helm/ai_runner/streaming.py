@@ -224,7 +224,9 @@ def run_claude_stream(cmd: list, cwd: str, sess: dict,
             if not isinstance(ev, dict):
                 continue
             etype = ev.get("type")
-            if etype == "rate_limit_event":
+            if etype == "system" and ev.get("subtype") == "init":
+                _note_usage(ev, "claude")   # plan or API key: apiKeySource
+            elif etype == "rate_limit_event":
                 _note_usage(ev, "claude")   # the plan's 5-hour and weekly usage, for the ribbon
             elif etype == "result":
                 result_line = line  # same shape as --output-format json
@@ -279,9 +281,12 @@ def _note_usage(ev: dict, ai: str) -> None:
     try:
         from helm import mcp_usage
         if ai == "claude":
-            mcp_usage.note_claude_event(ev)
+            if ev.get("type") == "system":
+                mcp_usage.note_claude_init(ev)
+            else:
+                mcp_usage.note_claude_event(ev)
         elif ai == "codex":
-            if isinstance(ev.get("rate_limits"), dict):
+            if isinstance(ev.get("rate_limits"), dict) and mcp_usage.codex_mode() != mcp_usage.API:
                 mcp_usage.set_limits("codex", "Codex", mcp_usage.codex_windows(ev["rate_limits"]), "codex --json")
             else:
                 mcp_usage.refresh_codex_limits(0)

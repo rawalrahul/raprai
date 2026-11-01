@@ -29,8 +29,9 @@ const BAND = {
   props: { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 160, scroll: { offset: 0, bodyRows: 6 }, view: {} },
 } as const
 
-function engine(on: On, file: string | null, rateLimits: { kind: string; percentUsed: number; resetsAt?: string }[] = []) {
-  mock.env(on, { HOME: '/home/me' })
+function engine(on: On, file: string | null, rateLimits: { kind: string; percentUsed: number; resetsAt?: string }[] = [],
+                env: Record<string, string> = {}) {
+  mock.env(on, { HOME: '/home/me', ...env })
   mock.clock(on, { now: NOW })
   mock.store(on)
   on('command.register', () => ({ value: { command: 'rapr-usage' } }))
@@ -57,7 +58,8 @@ test("Claude's plan usage comes from Claude Code itself, the others' from RAPR's
     expect((await ui.find({ type: 'Text', text: /^week 88%/ }))?.text).toBe('week 88%')
     expect((await ui.find({ type: 'Text', text: /^5h 12%/ }))?.text).toBe('5h 12%')
     expect((await ui.find({ type: 'Text', text: /^week 0%/ }))?.text).toBe('week 0%')
-    expect((await ui.find({ type: 'Text', text: /session/ }))?.text).toBe('session $1.23')
+    // On a plan the session's cost is a list price nobody pays: not shown.
+    expect(await ui.find({ type: 'Text', text: /\$1\.23/ })).toBeUndefined()
     expect((await ui.find({ type: 'Text', text: /RAPR today/ }))?.text).toBe('RAPR today 3 calls · 4m 10s')
     await ui.unmount()
   }
@@ -83,4 +85,25 @@ test('nothing shows before any AI has reported usage', async ($, on) => {
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect((await ui.find({ type: 'Text' }))?.text).toBe('engine')
   await ui.unmount()
+})
+
+const apiFile = () => {
+  const u = JSON.parse(usage(day(NOW)))
+  u.today.agents.codex.cost_usd = 0.5
+  u.limits.claude = { name: 'Claude', source: 'old', at: 1, windows: [{ key: 'five_hour', label: '5h', pct: 77, resets_at: IN_2H }] }
+  u.billing = { codex: { name: 'Codex', mode: 'api', source: 'codex auth.json', at: 1 } }
+  return JSON.stringify(u)
+}
+
+test('an API key shows money spent, never 5-hour or weekly windows', async ($, on) => {
+  engine(on, apiFile(), [], { ANTHROPIC_API_KEY: 'sk-test' })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...BAND, surface })
+    expect(await ui.find({ type: 'Text', text: /^5h/ })).toBeUndefined()      // neither Claude's old window nor Codex's
+    expect(await ui.find({ type: 'Text', text: /^week/ })).toBeUndefined()
+    expect((await ui.find({ type: 'Text', text: /Claude API key/ }))?.text).toBe('Claude API key · session $1.23')
+    expect((await ui.find({ type: 'Text', text: /Codex API key/ }))?.text).toBe('Codex API key · $0.50 today')
+    await ui.unmount()
+  }
 })

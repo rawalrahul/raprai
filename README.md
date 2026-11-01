@@ -166,6 +166,8 @@ A slim ribbon shows how much of each AI's plan you've used, **as the AI itself r
 | Codex | 5-hour and weekly plan usage (as Codex's `/status` shows), exact tokens | the `token_count` events Codex writes to `~/.codex/sessions` (so Codex used on its own counts too) |
 | Others | time, tasks and tokens (estimated where the AI doesn't report them, marked `~`) | RAPR's own counters |
 
+5-hour and weekly windows belong to subscriptions (Claude Pro/Max, ChatGPT plans). An AI used with an **API key** has none, so the ribbon never shows them for it: it shows an **API key** tag and the money spent instead. RAPR tells them apart from what each AI says about its sign-in (Claude's `apiKeySource`, Codex's `~/.codex/auth.json`). On a plan, the dollar figure Claude reports is a list price you aren't billed, so it isn't shown as spending.
+
 In the app it sits above the message box; click it for every AI, × hides it, and the **Usage** panel brings it back. In Claude Code it sits above the prompt, with Claude's numbers taken straight from Claude Code (as [ponytail](https://github.com/DietrichGebert/ponytail) does) plus this session's cost and what RAPR ran for you today. Add it once (needs Claude Code 2.1.290 or later, in the terminal or the desktop app):
 
 ```

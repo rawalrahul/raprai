@@ -1,6 +1,8 @@
 // RAPR's usage ribbon in Claude Code: a band above the prompt with
-//   - your Claude plan's 5-hour and weekly usage and this session's cost, exactly as Claude
-//     Code counts them ($.session.usage(): the numbers of claude.ai's usage page and /cost),
+//   - on a Claude plan, its 5-hour and weekly usage exactly as Claude Code counts it
+//     ($.session.usage(): the numbers of claude.ai's usage page); on an API key, which has no
+//     such windows, this session's cost (/cost) instead. Never both: a plan's cost is a list
+//     price nobody is billed, and an API key has no 5-hour or weekly limit,
 //   - the other AIs' plan usage as they report it (Codex's 5-hour and weekly windows), and
 //   - what the AIs RAPR ran for you (the `rapr` MCP server) did today.
 // The last two come from ~/.config/rapr/mcp-usage.json, which helm/mcp_usage.py writes.
@@ -12,8 +14,8 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Bucket, Live, Usage, View, Window } from '../types'
 
-const NO_LIVE: Live = { claude: [], cost: null }
-const view = atom({ plugin: 'rapr-usage', key: 'view' } as const, { usage: null, live: NO_LIVE, details: false } as View, { shape: 'view-2' })
+const NO_LIVE: Live = { claude: [], cost: null, claudeMode: null }
+const view = atom({ plugin: 'rapr-usage', key: 'view' } as const, { usage: null, live: NO_LIVE, details: false } as View, { shape: 'view-3' })
 const HIDDEN = 'hidden'           // $.store key, kept across sessions
 const REFRESH_MS = 20_000         // relays and bake-offs finish while you're idle
 
@@ -45,7 +47,23 @@ async function live($: EngineInterface): Promise<Live> {
     pct: r.percentUsed,
     resets_at: r.resetsAt ? Date.parse(r.resetsAt) / 1000 : null,
   }))
-  return { claude, cost: u.cost?.usd ?? null }
+  let claudeMode: Live['claudeMode'] = claude.length ? 'plan' : null
+  if (!claudeMode) {
+    const flags = [
+      await $.env.get('ANTHROPIC_API_KEY'),
+      await $.env.get('CLAUDE_CODE_USE_BEDROCK'),
+      await $.env.get('CLAUDE_CODE_USE_VERTEX'),
+      await $.env.get('CLAUDE_CODE_USE_FOUNDRY'),
+    ]
+    if (flags.some(f => f !== undefined && !['', '0', 'false'].includes(f.trim()))) claudeMode = 'api'
+  }
+  return { claude, cost: u.cost?.usd ?? null, claudeMode }
+}
+
+// Plan or API key: what Claude Code says now, else what RAPR last saw.
+export function modeOf(v: View, agent: string): 'plan' | 'api' | null {
+  if (agent === 'claude' && v.live.claudeMode) return v.live.claudeMode
+  return v.usage?.billing?.[agent]?.mode ?? null
 }
 
 async function readFile($: EngineInterface): Promise<Usage | null> {
@@ -92,9 +110,11 @@ export function plans(v: View, nowSeconds: number): { agent: string; name: strin
   const out: { agent: string; name: string; windows: Window[] }[] = []
   const fileClaude = v.usage?.limits?.claude?.windows ?? []
   const claude = v.live.claude.length ? v.live.claude : fileClaude
-  if (claude.length) out.push({ agent: 'claude', name: 'Claude', windows: claude })
+  if (claude.length && modeOf(v, 'claude') !== 'api') out.push({ agent: 'claude', name: 'Claude', windows: claude })
   for (const [agent, lim] of Object.entries(v.usage?.limits ?? {})) {
-    if (agent !== 'claude' && lim.windows.length) out.push({ agent, name: lim.name || agent, windows: lim.windows })
+    if (agent !== 'claude' && lim.windows.length && modeOf(v, agent) !== 'api') {
+      out.push({ agent, name: lim.name || agent, windows: lim.windows })
+    }
   }
   return out.map(p => ({ ...p, windows: p.windows.map(w => current(w, nowSeconds)) }))
 }
@@ -174,12 +194,16 @@ export const register: Register = on => {
     const nowSeconds = (await $.clock.now()) / 1000
     const planned = plans(v, nowSeconds)
     const today = v.usage?.today ?? EMPTY
-    if (!planned.length && today.calls === 0) return next(e)
-
     const { Box, Text, Button } = $.ui.resolve(e)
     const width = e.surface === 'terminal' ? e.props.bodyColumns : undefined
     const colour = (pct: number) => (pct >= 90 ? 'error' : pct >= 70 ? 'warning' : undefined)
-    const cost = v.live.cost !== null ? `session $${v.live.cost.toFixed(2)}` : ''
+    // Money only on an API key; on a plan the session's cost is a list price nobody pays.
+    const cost = modeOf(v, 'claude') === 'api' && v.live.cost !== null ? `Claude API key · session $${v.live.cost.toFixed(2)}` : ''
+    // Other AIs on an API key: what RAPR spent on them today, no windows.
+    const apis = Object.entries(v.usage?.billing ?? {})
+      .filter(([agent, b]) => agent !== 'claude' && b.mode === 'api')
+      .map(([agent, b]) => `${b.name || agent} API key · $${(today.agents[agent]?.cost_usd ?? 0).toFixed(2)} today`)
+    if (!planned.length && today.calls === 0 && !cost && !apis.length) return next(e)
     const rapr = today.calls ? `RAPR today ${plural(today.calls, 'call')} · ${fmtSeconds(today.seconds)}` : ''
     const toggle = (
       <Button
@@ -216,6 +240,7 @@ export const register: Register = on => {
           <Text color="claude" bold>RAPR</Text>
           {planned.map(p => plan(p, false))}
           {cost ? <Text dimColor>{cost}</Text> : null}
+          {apis.map(t => <Text key={t} dimColor>{t}</Text>)}
           {rapr ? <Text dimColor wrap="truncate-end">{rapr}</Text> : null}
           {toggle}
           {hide}
@@ -228,11 +253,13 @@ export const register: Register = on => {
       <Box flexDirection="column" width={width}>
         <Box gap={1}>
           <Text color="claude" bold>RAPR</Text>
-          <Text dimColor>plan usage, as each AI reports it{cost ? `; this ${cost}` : ''}</Text>
+          <Text dimColor>plans as each AI reports them; API keys have no 5h or weekly limit</Text>
           {toggle}
           {hide}
         </Box>
         {planned.map(p => plan(p, true))}
+        {cost ? <Text>{cost}</Text> : null}
+        {apis.map(t => <Text key={t}>{t}</Text>)}
         {today.calls ? <Text>RAPR today {bucketText(today)}</Text> : null}
         {rows.map(([key, a]) => (
           <Box key={key} gap={1}>

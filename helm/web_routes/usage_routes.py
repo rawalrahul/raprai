@@ -207,12 +207,19 @@ async def get_usage():
             tokens_out = 0
             tok_source = "estimate"
 
-        # Usage cap from environment
+        # Plan (subscription: 5-hour and weekly windows) or API key (per token, no windows).
+        mode = ((mcp.get("billing") or {}).get(key) or {}).get("mode")
+
+        # Usage cap from environment. Its default (300 minutes for Claude, Codex, Gemini)
+        # stands in for a plan's 5-hour window, which an API key doesn't have: there only a
+        # cap you set yourself counts.
         cap_min = usage_cap_minutes(key)
+        if mode == "api" and not _explicit_cap(key):
+            cap_min = None
 
         # Percentage from CLI or estimate
         pct_used = None
-        if exact.get("pct_used") is not None:
+        if exact.get("pct_used") is not None and mode != "api":
             pct_used = float(exact["pct_used"])
         elif cap_min:
             pct_used = min(100.0, (used_min / cap_min) * 100.0)
@@ -240,6 +247,9 @@ async def get_usage():
             "est_tokens": total_tokens,  # backward compat for dashboard
             "cost_usd": round(cost_usd, 4),
             "last_used": last_used,
+            "billing": mode,
+            # On a plan, Claude's reported cost is a list price nobody is billed.
+            "cost_is_spent": mode != "plan",
             "source": "plan" if windows else exact.get("source", "estimate"),
             "limits": windows,
             "budget": budget,
@@ -268,6 +278,11 @@ async def get_usage():
         "budget_enabled": _budget_config().get("enabled", True),
         "mcp": mcp,
     })
+
+
+def _explicit_cap(key: str) -> bool:
+    return bool(os.environ.get(f"USAGE_CAP_MIN_{key.upper()}", "").strip()
+                or os.environ.get("USAGE_CAP_MIN_DEFAULT", "").strip())
 
 
 def _mcp_usage() -> dict:

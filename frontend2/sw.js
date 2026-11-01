@@ -1,5 +1,5 @@
 // RAPR AI Service Worker — enables PWA install + offline shell
-const CACHE_NAME = 'rapr-ai-v15';
+const CACHE_NAME = 'rapr-ai-v16';
 
 // Cache the app shell (CSS, JS) on install
 self.addEventListener('install', (event) => {

@@ -32,10 +32,14 @@ export type Usage = {
   total: Bucket
   last: { agent: string; name: string; seconds: number; tokens: number; ok: boolean; at: number } | null
   limits?: { [agent: string]: Limits }
+  // How each AI is paid for: a plan (5-hour and weekly windows) or an API key (per token, none).
+  billing?: { [agent: string]: { name: string; mode: 'plan' | 'api'; source: string; at: number } }
 }
 
 // What the band draws: the file, plus Claude Code's own figures for this session.
-export type Live = { claude: Window[]; cost: number | null }
+// claudeMode: 'plan' when Claude Code reports plan windows, 'api' when it runs on an API key
+// (ANTHROPIC_API_KEY, Bedrock, Vertex, Foundry), null when it can't tell yet.
+export type Live = { claude: Window[]; cost: number | null; claudeMode: 'plan' | 'api' | null }
 
 export type View = { usage: Usage | null; live: Live; details: boolean }
 
