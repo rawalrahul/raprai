@@ -166,27 +166,38 @@ def check_budget(ai_key: str) -> dict:
 # Usage Dashboard endpoint
 # ---------------------------------------------------------------------------
 
+# AIs that run on this computer: no plan, no bill, no limit to show.
+_LOCAL_AIS = {"ollama", "local_ai", "claude_ollama", "codex_ollama", "interpreter"}
+
+
 @router.get("/api/usage")
-async def get_usage():
-    """Full usage stats for all AIs — powers the dashboard."""
+async def get_usage(live: int = 0):
+    """Full usage stats for all AIs — powers the dashboard and the usage ribbon.
+
+    live=1 asks each AI's own service for its usage now (helm/usage_readers.py) and waits
+    for the answers; otherwise the last answers are used and refreshed in the background."""
     usage_reset_if_needed()
 
-    # Gather all known AI keys
+    # The AIs set up here (Claude Code and the integrations that loaded), and any with usage.
     ai_keys = set(_st.usage_stats.keys())
-    ai_keys.update(_BUDGET_AI_KEYS)
+    ai_keys.add("claude")
+    ai_keys.update(_st.integrations.keys())
     ai_keys.discard("shell")  # exclude shell from dashboard
 
     period_remaining = max(0, int((_st.usage_period_start + USAGE_PERIOD_SECONDS) - time.time()))
     reset_eta = fmt_reset_eta()
 
+    import asyncio
+    await asyncio.to_thread(_refresh_live, bool(live))
     mcp = _mcp_usage()
     plan = mcp.get("limits") or {}
+    readings = mcp.get("live") or {}
     ai_keys.update(plan)
+    ai_keys.update(k for k, r in readings.items() if r.get("mode"))   # e.g. an API key's AI
 
     ais = {}
     for key in sorted(ai_keys):
         st = _st.usage_stats.get(key, {})
-        exact = _st.usage_exact.get(key, {})
         budget = check_budget(key)
 
         used_min = float(st.get("seconds", 0.0)) / 60.0
@@ -210,19 +221,10 @@ async def get_usage():
         # Plan (subscription: 5-hour and weekly windows) or API key (per token, no windows).
         mode = ((mcp.get("billing") or {}).get(key) or {}).get("mode")
 
-        # Usage cap from environment. Its default (300 minutes for Claude, Codex, Gemini)
-        # stands in for a plan's 5-hour window, which an API key doesn't have: there only a
-        # cap you set yourself counts.
-        cap_min = usage_cap_minutes(key)
-        if mode == "api" and not _explicit_cap(key):
-            cap_min = None
-
-        # Percentage from CLI or estimate
-        pct_used = None
-        if exact.get("pct_used") is not None and mode != "api":
-            pct_used = float(exact["pct_used"])
-        elif cap_min:
-            pct_used = min(100.0, (used_min / cap_min) * 100.0)
+        # Only a cap you set yourself (USAGE_CAP_MIN_<AI>): the old default of 300 minutes
+        # looked like a plan's 5-hour window and wasn't one. Real windows come from the AI.
+        cap_min = usage_cap_minutes(key) if _explicit_cap(key) else None
+        pct_used = min(100.0, (used_min / cap_min) * 100.0) if cap_min else None
 
         cost_usd = float(st.get("cost_usd", 0.0))
 
@@ -250,8 +252,14 @@ async def get_usage():
             "billing": mode,
             # On a plan, Claude's reported cost is a list price nobody is billed.
             "cost_is_spent": mode != "plan",
-            "source": "plan" if windows else exact.get("source", "estimate"),
+            "source": "plan" if windows else ("cap" if cap_min else "none"),
             "limits": windows,
+            "plan": (plan.get(key) or {}).get("plan") or (readings.get(key) or {}).get("plan") or "",
+            "as_of": (plan.get(key) or {}).get("at"),
+            # Why there are no windows, in the AI's words (not signed in, API key...).
+            "note": (readings.get(key) or {}).get("note")
+                    or ("Runs on your computer: no plan or usage limit." if key in _LOCAL_AIS else ""),
+            "local": key in _LOCAL_AIS,
             "budget": budget,
         }
 
@@ -285,10 +293,19 @@ def _explicit_cap(key: str) -> bool:
                 or os.environ.get("USAGE_CAP_MIN_DEFAULT", "").strip())
 
 
+def _refresh_live(now: bool) -> None:
+    """Each AI's usage from its own service: now (waiting for it), or every two minutes in
+    the background, giving a quick answer a moment to land."""
+    from helm import mcp_usage
+    if now:
+        mcp_usage.refresh_live(max_age=0, wait=25)
+    else:
+        mcp_usage.refresh_live(max_age=120, wait=1.5)
+
+
 def _mcp_usage() -> dict:
     """What AIs run through `rapr mcp` (from Claude Code, Codex...) did: helm/mcp_usage.py."""
     from helm import mcp_usage
-    mcp_usage.refresh_codex_limits()        # Codex used on its own counts too
     data = mcp_usage.load()
     data["limits"] = mcp_usage.limits(data)   # a window past its reset reads 0%
     return data

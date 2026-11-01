@@ -412,19 +412,22 @@ Check it with `grok mcp doctor rapr`. Grok also picks up servers you added to Cl
 
 ### Usage ribbon
 
-RAPR keeps each AI's plan usage exactly as the AI reports it, in `~/.config/rapr/mcp-usage.json` (or the file named by `RAPR_MCP_USAGE_FILE`):
+RAPR asks each AI's own service for its usage, live, the way the AI's own usage page does. Nothing is estimated and no tokens are spent (`helm/usage_readers.py`):
 
-- **Claude**: every run (`claude -p --output-format stream-json`) prints a `rate_limit_event` with your plan's 5-hour and weekly windows, the numbers on claude.ai's usage page, and a result with exact tokens and cost. RAPR keeps both, from the app and from `rapr mcp`.
-- **Codex**: Codex writes `token_count` events with its 5-hour and weekly windows (what `/status` shows) to its session files in `~/.codex/sessions` (or `$CODEX_HOME`). RAPR reads the newest one, so Codex used on its own counts too, and takes each run's exact tokens from it.
-- **Other AIs** report no plan usage: the ribbon shows RAPR's own counters for them (time and tasks, and tokens estimated from text length, marked `~`, where the AI gives none). The app's "≈%" against `USAGE_CAP_MIN_<AI>` is that estimate.
+- **Claude**: claude.ai's usage service (`api.anthropic.com/api/oauth/usage`, what Claude Code's `/usage` shows), with Claude Code's own sign-in from `~/.claude/.credentials.json` (on a Mac, the keychain) or `CLAUDE_CODE_OAUTH_TOKEN`: the 5-hour and weekly windows, and weekly Opus/Sonnet where your plan has them.
+- **Codex**: `codex app-server`, which the Codex IDE extension uses: `account/read` says ChatGPT plan or API key, `account/rateLimits/read` gives the windows (what `/status` shows). RAPR never touches Codex's sign-in.
+- **Gemini**: with a Google sign-in, each model's daily quota from Google's Code Assist service (what `/stats` shows), with Gemini CLI's sign-in in `~/.gemini`.
+- **Local models** have no limit. **Other AIs** have no usage service to ask: the ribbon lists them and shows RAPR's own counters (tasks, time, tokens, marked `~` where estimated).
 
-**Plan or API key.** Only a subscription has 5-hour and weekly windows. RAPR keeps how each AI is paid for and never mixes the two: Claude's stream-json init line says `apiKeySource: "none"` when it's signed in to claude.ai and names the key otherwise (Bedrock, Vertex and Foundry count as API too); Codex's `~/.codex/auth.json` says whether it signed in with ChatGPT or an API key (RAPR reads only which, never the key). On an API key the ribbon drops any windows kept from before, shows **API key** and the money spent, and uses no default "5-hour" cap: only a `USAGE_CAP_MIN_<AI>` you set yourself. On a plan, Claude's `total_cost_usd` is a list price nobody is billed, so it isn't counted as money spent.
+A sign-in is only read, never refreshed (that would replace the AI's own and could sign it out); if it has expired, the ribbon says so until the AI renews it the next time it runs. Each answer goes only to that AI's own service. Readings are refreshed every two minutes while the app is open, and at once when you open the ribbon or the Usage panel; they are kept in `~/.config/rapr/mcp-usage.json` (or the file named by `RAPR_MCP_USAGE_FILE`) for the Claude Code band. `RAPR_USAGE_READERS=0` turns the asking off. Between readings, each Claude run's `rate_limit_event` and each Codex run's session file update the numbers too.
+
+**Plan or API key.** Only a subscription has 5-hour and weekly windows. RAPR keeps how each AI is paid for and never mixes the two: Claude: a claude.ai sign-in is a plan, `ANTHROPIC_API_KEY` without one (or Bedrock, Vertex, Foundry) is API; Codex: its app-server's `account/read`; Gemini: the sign-in type in `~/.gemini/settings.json`. On an API key the ribbon drops any windows kept from before and shows **API key** and the money spent. There is no made-up cap for anyone: only a `USAGE_CAP_MIN_<AI>` you set yourself is shown, as "of your cap". On a plan, Claude's `total_cost_usd` is a list price nobody is billed, so it isn't counted as money spent.
 
 A window whose reset time has passed shows 0% until the AI reports again. Three things show it:
 
 - **In Claude Code**, a band above the prompt. Add it with `/plugin marketplace add rawalrahul/raprai`, then `/plugin install rapr-usage@raprai`. Claude's windows and this session's cost come straight from Claude Code (`$.session.usage()`); Codex's and what RAPR ran today come from the file. `/rapr-usage` hides or shows it; `/rapr-usage details` adds reset times and a row per AI. It needs Claude Code 2.1.290 or later and does not show in the VS Code chat panel or `claude -p`.
 - **In any MCP client**, the `usage` tool answers with the same numbers as text.
-- **In the RAPR app**, the ribbon above the message box, and the Usage panel.
+- **In the RAPR app**, the ribbon above the message box once you're in a session (click it for every AI, asked live), and the Usage panel.
 
 ### Cursor, Windsurf and other MCP clients
 

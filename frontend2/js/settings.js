@@ -648,58 +648,29 @@ function loadGeneratedFiles(){
 function loadUsageDashboard(){
   const el = document.getElementById('usage-dashboard');
   if(!el) return;
-  el.innerHTML = '<div class="sb-empty" style="opacity:.5">Loading...</div>';
-  fetch('/api/usage').then(r=>r.json()).then(data=>{
+  el.innerHTML = '<div class="sb-empty" style="opacity:.5">Asking each AI for its usage…</div>';
+  // live=1: each AI's own service, now (helm/usage_readers.py), not RAPR's estimates.
+  fetch('/api/usage?live=1').then(r=>r.json()).then(data=>{
     let html = '';
-    // Period info
-    html += `<div class="usage-period">Reset in: <strong>${data.reset_eta || '?'}</strong></div>`;
-    // Per-AI cards
+    // Per-AI cards: the AI's real usage (plan windows, API key spend, local, or why none),
+    // then RAPR's own counters. Same pieces as the usage ribbon (usage_ribbon.js).
     const ais = data.ais || {};
-    const aiKeys = Object.keys(ais);
+    const aiKeys = typeof _ribbonOrder === 'function' ? _ribbonOrder(ais) : Object.keys(ais);
     if(!aiKeys.length){
-      html += '<div class="sb-empty">No usage recorded yet</div>';
+      html += '<div class="sb-empty">No AI set up yet</div>';
     } else {
       aiKeys.forEach(key=>{
         const a = ais[key];
-        const pct = a.pct_used != null ? a.pct_used : 0;
-        const capText = a.cap_min ? `/ ${a.cap_min}m` : '';
-        const src = (a.source||'').endsWith('_cli') ? 'CLI' : 'EST';
-        const budgetOk = a.budget && a.budget.allowed !== false;
-        const budgetWarn = a.budget && a.budget.warn;
-        const barColor = !budgetOk ? '#ef4444' : budgetWarn ? '#f59e0b' : '';
-        // Token display: prefer actual counts, fall back to estimate
-        const tokSource = a.tokens_source || 'estimate';
-        const isActual = tokSource === 'actual';
-        const tokBadge = isActual ? 'ACTUAL' : 'EST';
-        const tokBadgeClass = isActual ? 'usage-actual-badge' : 'usage-est-badge';
-        const tokIn = a.tokens_in || 0;
-        const tokOut = a.tokens_out || 0;
-        const tokTotal = isActual ? (tokIn + tokOut) : (a.total_tokens || a.est_tokens || 0);
-        const tokDetail = isActual
-          ? `${tokIn.toLocaleString()} in / ${tokOut.toLocaleString()} out`
-          : `~${tokTotal.toLocaleString()} (char÷4)`;
-        html += `<div class="usage-ai-card${!budgetOk ? ' usage-blocked' : ''}">
+        const blocked = a.budget && a.budget.allowed === false;
+        const counters = _ribbonCounters(a);
+        html += `<div class="usage-ai-card${blocked ? ' usage-blocked' : ''}">
           <div class="usage-ai-header">
-            <span class="usage-ai-name">${a.label}</span>
-            <span class="usage-ai-src">${src}</span>
+            <span class="usage-ai-name">${escHtml(a.label)}</span>
+            ${a.plan ? `<span class="usage-ai-src">${escHtml(a.plan)}</span>` : ''}
           </div>
-          <div class="usage-ai-stats">
-            <span>${a.used_min.toFixed(1)}m ${capText}</span>
-            <span>${a.tasks} task${a.tasks!==1?'s':''}</span>
-          </div>
-          <div class="usage-token-line">
-            <span class="${tokBadgeClass}">${tokBadge}</span>
-            <span>${tokTotal.toLocaleString()} tok</span>
-            <span class="usage-tok-detail">${tokDetail}</span>
-          </div>
-          <div class="usage-bar-wrap">
-            <div class="usage-bar-fill" style="width:${Math.min(100,pct)}%${barColor?';background:'+barColor:''}"></div>
-          </div>
-          <div class="usage-pct-line">
-            <span>${a.pct_used != null ? a.pct_used.toFixed(1)+'%' : 'No cap'}</span>
-            ${!budgetOk ? '<span class="usage-blocked-badge">BLOCKED</span>' : ''}
-            ${budgetWarn && budgetOk ? '<span class="usage-warn-badge">WARNING</span>' : ''}
-          </div>
+          <div class="usage-ribbon usage-ribbon-inline">${_ribbonUsage(a, true)}</div>
+          ${counters.length ? `<div class="usage-token-line"><span>${escHtml(counters.join(' · '))}</span></div>` : ''}
+          ${blocked ? '<div class="usage-pct-line"><span class="usage-blocked-badge">BUDGET REACHED</span></div>' : ''}
         </div>`;
       });
     }
