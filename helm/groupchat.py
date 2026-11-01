@@ -64,7 +64,6 @@ MIN_PROMPT_TOKENS = 2000
 CHARS_PER_TOKEN = 4
 ARGV_MAX_CHARS_WINDOWS = 7000  # cmd.exe caps a whole command line at 8191 chars
 ARGV_MAX_CHARS_POSIX = 100_000 # Linux caps one argument at 128 KiB
-STDIN_PROMPT_CHARS = 6000      # Claude gets prompts longer than this over stdin
 SUMMARY_KEEP_RECENT = 20       # messages never folded into the summary
 SUMMARY_BATCH = 10             # fold once this many more have piled up…
 SUMMARY_MIN_FOLD = 4           # …or once at least this many no longer fit a prompt
@@ -450,24 +449,12 @@ def _extract_text(raw: str) -> str:
     return raw
 
 
-def use_stdin_if_long(sess: dict, cmd: list, stdin_text: Optional[str],
-                      prompt: str) -> tuple[list, Optional[str]]:
-    """Move a long prompt from Claude's command line (`-p <prompt>`) to stdin:
-    `claude -p` reads its prompt from stdin when none is given, and the command
-    line has a hard length limit (8191 chars through cmd.exe on Windows)."""
-    if (sess.get("ai") == "claude" and stdin_text is None and len(prompt) > STDIN_PROMPT_CHARS
-            and len(cmd) >= 2 and cmd[-1] == prompt and cmd[-2] == "-p"):
-        return cmd[:-1], prompt
-    return cmd, stdin_text
-
-
 def _run_member_blocking(group: dict, member: dict, prompt: str) -> str:
     from helm.council.runner import _build_cmd_for_session
     from helm.subprocess_utils import hidden_kwargs
 
     sess = _runtime_session(member)
     cmd, stdin_text, extra_env = _build_cmd_for_session(sess, prompt)
-    cmd, stdin_text = use_stdin_if_long(sess, cmd, stdin_text, prompt)
     cwd = sess.get("cwd") or _st.last_cwd
     if not os.path.isdir(cwd):
         cwd = os.path.expanduser("~")
@@ -674,7 +661,7 @@ def _summariser(group: dict) -> Optional[dict]:
 
 
 def _summarise_blocking(group: dict, msgs: list[dict]) -> str:
-    from helm.council.runner import _build_cmd_for_session, _run_subprocess_blocking
+    from helm.council.runner import _build_cmd_for_session, _run_subprocess_blocking, failed
     member = _summariser(group)
     if not member:
         return ""
@@ -682,7 +669,6 @@ def _summarise_blocking(group: dict, msgs: list[dict]) -> str:
     try:
         sess = _runtime_session(member)
         cmd, stdin_text, extra_env = _build_cmd_for_session(sess, prompt)
-        cmd, stdin_text = use_stdin_if_long(sess, cmd, stdin_text, prompt)
         cwd = sess.get("cwd") or _st.last_cwd
         if not os.path.isdir(cwd):
             cwd = os.path.expanduser("~")
@@ -691,7 +677,7 @@ def _summarise_blocking(group: dict, msgs: list[dict]) -> str:
         logger.warning("groupchat: summary by %s failed: %s", member.get("name"), exc)
         return ""
     out = (out or "").strip()
-    if not out or out.startswith(("(error", "(timed out", "(no output")) or PASS_RE.match(out):
+    if not out or failed(out) or PASS_RE.match(out):
         return ""
     return _shorten(out, SUMMARY_MAX_CHARS)
 

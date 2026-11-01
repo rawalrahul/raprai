@@ -237,6 +237,7 @@ def _analyze_claude_cli(frames: list[Path]) -> list:
     result = subprocess.run(
         [bin_, "--dangerously-skip-permissions", "--output-format", "json",
          "-p", f"{frame_refs}\n\n{_PROMPT}"],
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         encoding="utf-8",

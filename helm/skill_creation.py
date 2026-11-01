@@ -294,10 +294,9 @@ def _build_skill_gen_cmd(generator_ai: str, prompt_text: str) -> tuple[list[str]
     import sys
 
     if generator_ai == "claude":
-        return (
-            ["claude", "-p", prompt_text, "--output-format", "text"],
-            None,  # prompt is on the command line
-        )
+        # The prompt over stdin: it holds the error output, which can pass the
+        # command-line limit on Windows.
+        return (["claude", "-p", "--output-format", "text"], prompt_text)
 
     if generator_ai == "gemini":
         _ext = ".cmd" if sys.platform == "win32" else ""
@@ -442,9 +441,12 @@ def generate_skill(prompt: str, ai: str, error_output: str = "",
         env.update(_st.integrations.get(gen_ai, {}).get("process_env", {}))
 
         try:
+            # The full path: on Windows `claude`/`codex` are .cmd files, which only start by path.
+            cmd = [shutil.which(cmd[0]) or cmd[0], *cmd[1:]]
             result = sp.run(
                 cmd,
-                input=stdin_text,
+                # Never RAPR's own stdin: an AI that reads it would wait on it.
+                **({"input": stdin_text} if stdin_text is not None else {"stdin": sp.DEVNULL}),
                 capture_output=True, text=True, timeout=180,
                 env=env,
             )

@@ -70,10 +70,23 @@ VERDICT: CHANGES NEEDED
 The task:
 
 {task}
-{plan}{tests}
+{plan}{previous}{tests}
 The changes:
 
 {diff}
+"""
+
+# Round 2 on: the reviewer checks its own earlier findings rather than starting over.
+PREVIOUS_REVIEW = """
+This is a second look. Your previous review:
+
+{review}
+
+What {fixer} said it fixed or left as it is:
+
+{reply}
+
+Check whether each of your findings is fixed. Where {fixer} disagreed, decide whether it's right. Raise new problems only if they're real.
 """
 
 FIX_PROMPT = """A reviewer ({reviewer}) checked the changes in this project for the task below and found problems. Fix the ones that are real, directly in the files. If you disagree with a finding, leave the code as it is and say why. Do not commit.
@@ -83,7 +96,7 @@ When you're done, summarise what you fixed and what you left as it is.
 The task:
 
 {task}
-
+{plan}
 The review:
 
 {review}
@@ -100,6 +113,16 @@ def verdict(review: str) -> Optional[bool]:
 
 def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + f"\n… ({len(text) - limit:,} more characters cut)"
+
+
+def _diff_for_review(r: "Relay") -> str:
+    """The change, cut to DIFF_LIMIT; when cut, with every changed file named so the
+    reviewer knows what to read."""
+    if len(r.diff) <= DIFF_LIMIT:
+        return r.diff
+    names = "\n".join(f"- {n}" for n in r.files[:200]) + ("\n- …" if len(r.files) > 200 else "")
+    return (_clip(r.diff, DIFF_LIMIT) + "\n\nThe diff is too long to show in full. Every changed file "
+            f"({len(r.files)}), so you can read the ones that were cut:\n{names}")
 
 
 @dataclass
@@ -213,6 +236,7 @@ def _test(r: Relay) -> None:
     point = r.workspace.snapshot()
     try:
         out = subprocess.run(r.test_command, shell=True, cwd=r.workspace.cwd, capture_output=True,
+                             stdin=subprocess.DEVNULL,   # not ours: in `rapr mcp` that's the client's stream
                              text=True, encoding="utf-8", errors="replace", timeout=TEST_TIMEOUT)
         r.tests_passed = out.returncode == 0
         r.test_output = _clip((out.stdout + out.stderr).strip()[-4000:], 4000)
@@ -242,6 +266,7 @@ def _run(r: Relay, runner: Runner, ws) -> None:
         raise RuntimeError(f"{r.executor} didn't change any files ({detail})")
     _test(r)
 
+    previous = ""
     for rnd in range(r.fix_rounds + 1):
         r.stage = f"{r.reviewer} is reviewing" + (f" (round {rnd + 1})" if rnd else "")
         tests = ""
@@ -250,17 +275,20 @@ def _run(r: Relay, runner: Runner, ws) -> None:
                      f"{r.test_output}\n")
         step = _ask(r, runner, "review", r.reviewer, REVIEW_PROMPT.format(
             executor=r.executor if rnd == 0 else f"{r.executor}, then {r.fixer}",
-            task=r.task, plan=plan, tests=tests, diff=_clip(r.diff, DIFF_LIMIT)))
+            task=r.task, plan=plan, previous=previous, tests=tests, diff=_diff_for_review(r)))
         if step.error:
             raise RuntimeError(f"{r.reviewer} couldn't review: {step.error}")
         r.approved = verdict(step.output)
         if r.approved is not False or rnd == r.fix_rounds:
             return
+        review = _clip(step.output, TEXT_LIMIT)
         r.stage = f"{r.fixer} is fixing what {r.reviewer} found" + (f" (round {rnd + 1})" if rnd else "")
-        _ask(r, runner, "fix", r.fixer,
-             FIX_PROMPT.format(reviewer=r.reviewer, task=r.task, review=_clip(step.output, TEXT_LIMIT)))
+        fix = _ask(r, runner, "fix", r.fixer,
+                   FIX_PROMPT.format(reviewer=r.reviewer, task=r.task, plan=plan, review=review))
         r.diff, r.files = ws.diff()
         _test(r)
+        reply = fix.output.strip() or (f"(no reply: {fix.error})" if fix.error else "(no reply)")
+        previous = PREVIOUS_REVIEW.format(review=review, fixer=r.fixer, reply=_clip(reply, TEXT_LIMIT // 4))
 
 
 def stop(r: Relay) -> str:

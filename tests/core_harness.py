@@ -65,9 +65,12 @@ class Rapr:
         """What the stand-in *ai* prints next time (and every time after)."""
         (self.fake_dir / f"{ai}.json").write_text(json.dumps({"text": text, "exit": exit}))
 
-    def claude_reply(self, text, input_tokens=None, output_tokens=None, cost=None, is_error=False):
+    def claude_reply(self, text, input_tokens=None, output_tokens=None, cost=None, is_error=False,
+                     session_id=None):
         """Claude Code's --output-format json result."""
         data = {"type": "result", "result": text, "is_error": is_error}
+        if session_id:
+            data["session_id"] = session_id
         if input_tokens is not None:
             data["usage"] = {"input_tokens": input_tokens, "output_tokens": output_tokens}
         if cost is not None:

@@ -45,6 +45,9 @@ class Attempt:
     model: Optional[str] = None
     lines_added: int = 0
     lines_removed: int = 0
+    # What the attempt's diff is taken against: HEAD, or (carry_uncommitted) a git tree of
+    # HEAD plus the work that wasn't committed when the copy was made.
+    base: str = "HEAD"
 
     def as_dict(self) -> dict:
         return {"ai": self.ai, "model": self.model, "files_changed": self.files_changed,
@@ -85,9 +88,33 @@ def is_git_repo(path: str) -> bool:
         return False
 
 
+def _carry_uncommitted(src: str, dest: str) -> str:
+    """Bring src's uncommitted work (staged, unstaged and new files) into the fresh copy
+    dest, and return a git tree of it: the starting point the attempt is compared with."""
+    top = _git(src, "rev-parse", "--show-toplevel").strip()
+    patch = subprocess.run(["git", "diff", "HEAD", "--binary"], cwd=top, capture_output=True, timeout=120)
+    if patch.returncode != 0:
+        raise RuntimeError(f"git diff: {patch.stderr.decode(errors='replace').strip()[:300]}")
+    if patch.stdout.strip():
+        r = subprocess.run(["git", "apply", "--whitespace=nowarn", "-"], cwd=dest, input=patch.stdout,
+                           capture_output=True, timeout=120)
+        if r.returncode != 0:
+            raise RuntimeError("couldn't bring your uncommitted changes into the copy: "
+                               + r.stderr.decode(errors="replace").strip()[:300])
+    for name in _git(top, "ls-files", "--others", "--exclude-standard").splitlines():
+        s, d = Path(top, name), Path(dest, name)
+        if s.is_file():
+            d.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(s, d)
+    _git(dest, "add", "-A")
+    return _git(dest, "write-tree").strip()
+
+
 def create(repo: str, task: str, ais: list[str], test_command: Optional[str] = None,
-           root: Optional[str] = None) -> BakeOff:
-    """Make one copy of the project per AI. `root` is where copies go (default: a temp folder)."""
+           root: Optional[str] = None, carry_uncommitted: bool = False) -> BakeOff:
+    """Make one copy of the project per AI. `root` is where copies go (default: a temp folder).
+    carry_uncommitted: in a git repo, each copy also gets the work not committed yet (as the
+    project looks now, not as HEAD), and merge applies an attempt on top of that work."""
     src = Path(repo).resolve()
     if not src.is_dir():
         raise ValueError(f"{repo} is not a folder")
@@ -98,15 +125,22 @@ def create(repo: str, task: str, ais: list[str], test_command: Optional[str] = N
     base.mkdir(parents=True, exist_ok=True)
     git = is_git_repo(str(src))
     bo = BakeOff(id=bid, repo=str(src), task=task, is_git=git, test_command=test_command)
-    for i, ai in enumerate(ais, 1):
-        dest = base / f"{i}-{ai}"
-        if git:
-            branch = f"bakeoff/{bid}-{i}-{ai}"
-            _git(str(src), "worktree", "add", "-q", "-b", branch, str(dest), "HEAD")
-            bo.attempts.append(Attempt(ai=ai, path=str(dest), branch=branch))
-        else:
-            shutil.copytree(src, dest, ignore=shutil.ignore_patterns(".git", "node_modules", "__pycache__"))
-            bo.attempts.append(Attempt(ai=ai, path=str(dest)))
+    try:
+        for i, ai in enumerate(ais, 1):
+            dest = base / f"{i}-{ai}"
+            if git:
+                branch = f"bakeoff/{bid}-{i}-{ai}"
+                _git(str(src), "worktree", "add", "-q", "-b", branch, str(dest), "HEAD")
+                bo.attempts.append(Attempt(ai=ai, path=str(dest), branch=branch))
+                if carry_uncommitted:
+                    bo.attempts[-1].base = _carry_uncommitted(str(src), str(dest))
+            else:
+                shutil.copytree(src, dest, ignore=shutil.ignore_patterns(".git", "node_modules", "__pycache__"))
+                bo.attempts.append(Attempt(ai=ai, path=str(dest)))
+    except Exception:
+        cleanup(bo)   # don't leave the copies (and branches) made so far
+        shutil.rmtree(base, ignore_errors=True)
+        raise
     return bo
 
 
@@ -145,12 +179,12 @@ def _collect(bo: BakeOff, a: Attempt, before: dict) -> None:
         _git(a.path, "add", "-A")
         # Bytes, not text: text mode turns \r\n into \n, and the patch then no longer
         # applies to files with Windows line endings.
-        out = subprocess.run(["git", "diff", "--cached", "HEAD"], cwd=a.path, capture_output=True, timeout=120)
+        out = subprocess.run(["git", "diff", "--cached", a.base], cwd=a.path, capture_output=True, timeout=120)
         if out.returncode != 0:
             raise RuntimeError(f"git diff: {out.stderr.decode(errors='replace').strip()[:300]}")
         a.patch = out.stdout
         a.diff = out.stdout.decode("utf-8", "replace")
-        names = _git(a.path, "diff", "--cached", "--name-only", "HEAD").split()
+        names = _git(a.path, "diff", "--cached", "--name-only", a.base).split()
         a.files_changed = len(names)
         for line in a.diff.splitlines():
             if line.startswith("+") and not line.startswith("+++"):
@@ -164,8 +198,12 @@ def _collect(bo: BakeOff, a: Attempt, before: dict) -> None:
         a.files_changed = len(changed)
         a.diff = "\n".join(f"changed: {k}" for k in sorted(changed))
     if bo.test_command and not a.error:
-        r = subprocess.run(bo.test_command, shell=True, cwd=a.path, capture_output=True, text=True, timeout=900)
-        a.tests_passed = r.returncode == 0
+        try:
+            r = subprocess.run(bo.test_command, shell=True, cwd=a.path, capture_output=True, text=True,
+                               stdin=subprocess.DEVNULL, timeout=900)   # never RAPR's own stdin
+            a.tests_passed = r.returncode == 0
+        except subprocess.TimeoutExpired:   # a hung test fails this attempt, not the bake-off
+            a.tests_passed = False
 
 
 def merge(bo: BakeOff, index: int) -> int:
@@ -175,7 +213,10 @@ def merge(bo: BakeOff, index: int) -> int:
     a = bo.attempts[index]
     if bo.is_git:
         if a.patch.strip():
-            r = subprocess.run(["git", "apply", "--index", "-"], cwd=bo.repo,
+            # On top of uncommitted work, the patch matches the files, not the index: apply it
+            # to the files only (so it's not staged).
+            staged = ["--index"] if a.base == "HEAD" else []
+            r = subprocess.run(["git", "apply", *staged, "-"], cwd=bo.repo,
                                input=a.patch, capture_output=True, timeout=120)
             if r.returncode != 0:
                 raise RuntimeError(f"could not apply {a.ai}'s changes: "

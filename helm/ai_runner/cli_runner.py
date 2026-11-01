@@ -4,6 +4,7 @@ helm/ai_runner/cli_runner.py — run a message through a command-line AI
 """
 
 import asyncio
+import os
 
 import helm.state as _st
 from helm.broadcast import push_message, push_thinking
@@ -15,6 +16,46 @@ from helm.skills import detect_skill
 from .helpers import _clean_output
 from .prompt import enrich_prompt
 from .streaming import activity_emitter
+
+# These AIs answer one message at a time and remember nothing, so RAPR puts the recent
+# conversation in front of each message, as much as fits history_budget. Kept: the last
+# HISTORY_KEEP exchanges (helm/memory.py reads them too).
+HISTORY_KEEP = 10
+HISTORY_Q_CHARS, HISTORY_A_CHARS = 4000, 6000        # stored per exchange
+NEWEST_Q, NEWEST_A = 1500, 2500                      # shown for the latest exchange
+OLDER_Q, OLDER_A = 400, 600                          # …and for older ones
+
+
+def _cut(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[:limit] + " …"
+
+
+def history_budget(use_stdin: bool) -> int:
+    """Characters of conversation to put in front of the message. A prompt on the command
+    line has to stay short: cmd.exe caps the whole line at 8191 chars."""
+    if use_stdin:
+        return 16000
+    return 2500 if os.name == "nt" else 8000
+
+
+def history_block(hist: list[dict], budget: int) -> str:
+    """The recent exchanges, newest kept fullest, within budget chars. Empty if none fit."""
+    parts: list[str] = []
+    used = 0
+    for i, h in enumerate(reversed(hist)):
+        q_max, a_max = (NEWEST_Q, NEWEST_A) if i == 0 else (OLDER_Q, OLDER_A)
+        part = f"User: {_cut(h.get('q', ''), q_max)}\nAssistant: {_cut(h.get('a', ''), a_max)}\n\n"
+        if used + len(part) > budget:
+            if i == 0 and budget > 200:   # at least the last exchange, cut to fit
+                parts.append(_cut(part, budget - 2) + "\n\n")
+            break
+        parts.append(part)
+        used += len(part)
+    if not parts:
+        return ""
+    skipped = len(hist) - len(parts)
+    head = "[Prior conversation in this session" + (f"; {skipped} earlier exchanges not shown" if skipped else "") + "]\n"
+    return head + "".join(reversed(parts)) + "[Current request]\n"
 
 
 async def run_cli_ai(ai: str, sess: dict, text: str, safe_text: str, cwd: str,
@@ -35,12 +76,7 @@ async def run_cli_ai(ai: str, sess: dict, text: str, safe_text: str, cwd: str,
     # Pseudo-history for single-turn AIs: inject prior exchanges as context
     _hist = sess.get("_integration_history", [])
     if _hist:
-        hist_block = "[Prior conversation in this session]\n"
-        # Keep last 3 exchanges to avoid prompt bloat
-        for h in _hist[-3:]:
-            hist_block += f"User: {h['q'][:200]}\nAssistant: {h['a'][:300]}\n\n"
-        hist_block += "[Current request]\n"
-        enriched_text = hist_block + enriched_text
+        enriched_text = history_block(_hist, history_budget(use_stdin)) + enriched_text
 
     # ── MCP tool strategy ──────────────────────────────────────────────
     #
@@ -189,12 +225,11 @@ async def run_cli_ai(ai: str, sess: dict, text: str, safe_text: str, cwd: str,
         if "_integration_history" not in sess:
             sess["_integration_history"] = []
         sess["_integration_history"].append({
-            "q": text[:500],
-            "a": output[:500],
+            "q": text[:HISTORY_Q_CHARS],
+            "a": output[:HISTORY_A_CHARS],
         })
-        # Cap history at 10 exchanges
-        if len(sess["_integration_history"]) > 10:
-            sess["_integration_history"] = sess["_integration_history"][-10:]
+        if len(sess["_integration_history"]) > HISTORY_KEEP:
+            sess["_integration_history"] = sess["_integration_history"][-HISTORY_KEEP:]
         if not skill_matched and _is_coherent_task(text) and not sess.get("read_only"):
             asyncio.create_task(
                 asyncio.to_thread(auto_create_skill_template, text, ai, output)

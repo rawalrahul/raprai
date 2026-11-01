@@ -13,10 +13,22 @@ _ANSI_ESC_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 import json as _json
 
 
+# What _run_subprocess_blocking returns when the AI didn't answer.
+FAILED_PREFIXES = ("(timed out)", "(error:", "(no output)")
+
+
+def failed(reply: str) -> bool:
+    """True when a reply from _run_subprocess_blocking says the AI failed."""
+    return (reply or "").lstrip().startswith(FAILED_PREFIXES)
+
+
 def _extract_text(raw: str) -> str:
-    """Extract plain text from Claude CLI JSON envelope if present, else return raw."""
+    """Extract plain text from Claude CLI JSON envelope if present, else return raw.
+    An envelope that reports an error (no credit, max turns…) becomes "(error: …)"."""
     try:
         obj = _json.loads(raw)
+        if isinstance(obj, dict) and obj.get("is_error"):
+            return f"(error: {obj.get('result') or obj.get('subtype') or 'the AI reported an error'})"
         if isinstance(obj, dict) and "result" in obj:
             return str(obj["result"])
     except (TypeError, ValueError):
@@ -31,8 +43,9 @@ def _build_cmd_for_session(sess: dict, prompt: str) -> tuple[list, str | None, d
 
     if ai == "claude":
         from helm.ai_runner.claude import build_claude_cmd
-        cmd = build_claude_cmd(prompt, has_history=False, model=model)
-        return cmd, None, {}
+        from helm.ai_runner.claude import prompt_via_stdin
+        cmd, stdin_text = prompt_via_stdin(build_claude_cmd(prompt, has_history=False, model=model))
+        return cmd, stdin_text, {}
 
     if ai and ai in _st.integrations:
         info = _st.integrations[ai]
@@ -61,7 +74,9 @@ def _run_subprocess_blocking(cmd: list, cwd: str, stdin_text: str | None,
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE if stdin_text else None,
+            # Never the parent's stdin: in `rapr mcp` that is the MCP client's message
+            # stream, and an AI that reads stdin (Claude Code does) would eat it.
+            stdin=subprocess.PIPE if stdin_text else subprocess.DEVNULL,
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -73,7 +88,7 @@ def _run_subprocess_blocking(cmd: list, cwd: str, stdin_text: str | None,
         if on_start:
             on_start(proc)
         try:
-            stdout, _ = proc.communicate(input=stdin_text, timeout=timeout)
+            stdout, stderr = proc.communicate(input=stdin_text, timeout=timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.communicate()
@@ -82,6 +97,9 @@ def _run_subprocess_blocking(cmd: list, cwd: str, stdin_text: str | None,
             dummy["proc"] = None
 
         stdout = _ANSI_ESC_RE.sub('', stdout).strip()
+        if not stdout and proc.returncode:
+            err = _ANSI_ESC_RE.sub('', stderr or '').strip()
+            return f"(error: {err[-500:] or f'exit code {proc.returncode}'})"
         return _extract_text(stdout) or "(no output)"
     except FileNotFoundError:
         return f"(error: '{cmd[0]}' not found in PATH)"
