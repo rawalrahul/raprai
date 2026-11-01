@@ -92,3 +92,22 @@ def test_a_session_still_in_another_group_is_kept(client, monkeypatch):
     client.post("/api/groups", json={"member_session_ids": [sid]})
     client.delete(f"/api/groups/{g1['id']}")
     assert sid in _st.sessions
+
+
+def test_pin_unpin_and_context_endpoints(client):
+    g = client.post("/api/groups", json={"member_ais": ["gemini"]}).json()["group"]
+    assert "context" in g
+    group = gc.groups[g["id"]]
+    gc.append_message(group, gc.make_message("user", "deadline is Friday"))
+    mid = group["messages"][0]["id"]
+    base = f"/api/groups/{g['id']}"
+    r = client.post(base + "/pins", json={"message_id": mid})
+    assert r.status_code == 200 and r.json()["pinned"][0]["content"] == "deadline is Friday"
+    assert client.post(base + "/pins", json={"message_id": "gm-x"}).status_code == 400
+    ctx = client.get(base + "/context").json()
+    assert ctx["context"]["pinned"] == 1 and ctx["summary"] == ""
+    assert client.delete(base + "/pins/" + mid).json()["pinned"] == []
+    client.post(base + "/pins", json={"message_id": mid})
+    client.delete(base + "/messages")
+    got = client.get(base).json()["group"]
+    assert got["messages"] == [] and got["pinned"] == []

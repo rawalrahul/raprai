@@ -327,7 +327,9 @@ Codex and Gemini call the apps in their own settings directly, including RAPR's 
 
 Open **👥 Group Chats** in the header (or the sidebar section), pick any of your open AI sessions, and chat with all of them at once.
 
-- Each message gets up to 3 rounds and 10 replies. Members answer one at a time and see the whole conversation, so they build on each other instead of repeating.
+- Each message gets up to 3 rounds and 10 replies. Members answer one at a time and read each other's replies, so they build on each other instead of repeating.
+- Long chats: every reply shows the AI the most recent messages (the newest in full, older ones shortened) plus a summary of everything older, sized to fit that AI. Once the chat gets long, one of the members writes the summary in the background. The pill in the group header shows how full the AIs' context is and how many messages are summarised; click it to read the summary.
+- **Pin** a message (hover it) to keep it in front of every AI however long the chat gets, for example a requirement or a decision. Pins appear under the group's header; up to 10. **Clear** removes messages, pins and summary.
 - `@Name` (full name, name without spaces, or first word) or `@all` picks who answers; a member can pull another in the same way. A member with nothing to add replies `(pass)` and stays quiet.
 - A new message or **Stop** ends the replies in progress. Groups are saved, and a member keeps answering from its saved AI/model/folder even after its session is closed.
 - The same group can be used from the web UI, Telegram and WhatsApp at once; every app that's in the group sees every message.
