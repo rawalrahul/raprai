@@ -1,16 +1,19 @@
-// RAPR's usage ribbon in Claude Code: a band above the prompt with what the AIs RAPR ran
-// for you (through the `rapr` MCP server) did today: calls, AI time and estimated tokens,
-// per AI, and the last run. The numbers come from ~/.config/rapr/mcp-usage.json, which
-// helm/mcp_usage.py writes after every run; this band only reads it.
+// RAPR's usage ribbon in Claude Code: a band above the prompt with
+//   - your Claude plan's 5-hour and weekly usage and this session's cost, exactly as Claude
+//     Code counts them ($.session.usage(): the numbers of claude.ai's usage page and /cost),
+//   - the other AIs' plan usage as they report it (Codex's 5-hour and weekly windows), and
+//   - what the AIs RAPR ran for you (the `rapr` MCP server) did today.
+// The last two come from ~/.config/rapr/mcp-usage.json, which helm/mcp_usage.py writes.
 //
 // /rapr-usage           show or hide the band
 // /rapr-usage details   one line, or a row per AI
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Bucket, Usage, View } from '../types'
+import type { Bucket, Live, Usage, View, Window } from '../types'
 
-const view = atom({ plugin: 'rapr-usage', key: 'view' } as const, { usage: null, details: false } as View)
+const NO_LIVE: Live = { claude: [], cost: null }
+const view = atom({ plugin: 'rapr-usage', key: 'view' } as const, { usage: null, live: NO_LIVE, details: false } as View, { shape: 'view-2' })
 const HIDDEN = 'hidden'           // $.store key, kept across sessions
 const REFRESH_MS = 20_000         // relays and bake-offs finish while you're idle
 
@@ -30,19 +33,70 @@ function localDay(ms: number): string {
   return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`
 }
 
-async function refresh($: EngineInterface): Promise<void> {
-  let usage: Usage | null = null
+const LABELS: { [kind: string]: string } = { five_hour: '5h', seven_day: 'week', spend_limit: 'spend' }
+
+// Claude Code's own figures: the plan windows the last API response reported, and /cost.
+async function live($: EngineInterface): Promise<Live> {
+  const u = await $.session.usage().catch(() => undefined)
+  if (!u) return NO_LIVE
+  const claude: Window[] = u.rateLimits.map(r => ({
+    key: r.kind,
+    label: LABELS[r.kind] ?? r.kind.replace(/_/g, ' '),
+    pct: r.percentUsed,
+    resets_at: r.resetsAt ? Date.parse(r.resetsAt) / 1000 : null,
+  }))
+  return { claude, cost: u.cost?.usd ?? null }
+}
+
+async function readFile($: EngineInterface): Promise<Usage | null> {
   try {
     const parsed = JSON.parse(await $.fs.read(await usageFile($))) as Usage
-    if (parsed && parsed.version === 1 && parsed.today && parsed.total) usage = parsed
+    if (parsed && parsed.version === 1 && parsed.today && parsed.total) return parsed
   } catch {
-    usage = null            // no file yet: RAPR hasn't run an AI on this computer
+    // no file yet: RAPR hasn't run an AI on this computer
   }
+  return null
+}
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+
+async function refresh($: EngineInterface): Promise<void> {
+  let usage = await readFile($)
+  const now = await $.clock.now()
   // The file's "today" is the day of its last write; past midnight it is yesterday's.
-  if (usage && usage.day !== localDay(await $.clock.now())) usage = { ...usage, today: EMPTY }
+  if (usage && usage.day !== localDay(now)) usage = { ...usage, today: EMPTY }
+  const fresh = await live($)
   const before = await read($, view)
-  if (before.usage?.updated === usage?.updated && before.usage?.day === usage?.day) return
-  await update($, view, v => ({ ...v, usage }))
+  if (same(before.usage, usage) && same(before.live, fresh)) return
+  await update($, view, v => ({ ...v, usage, live: fresh }))
+}
+
+// A window past its reset time has started over.
+export function current(w: Window, nowSeconds: number): Window {
+  return w.resets_at && w.resets_at < nowSeconds ? { ...w, pct: 0 } : w
+}
+
+export function windowsText(name: string, windows: Window[]): string {
+  return `${name} ${windows.map(w => `${w.label} ${Math.round(w.pct)}%`).join(' · ')}`
+}
+
+export function resetText(w: Window, nowSeconds: number): string {
+  if (!w.resets_at) return ''
+  const s = Math.max(0, w.resets_at - nowSeconds)
+  const h = Math.floor(s / 3600)
+  return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : `${h}h ${Math.floor((s % 3600) / 60)}m`
+}
+
+// Every AI's plan windows: Claude's from Claude Code itself, the others' from the file.
+export function plans(v: View, nowSeconds: number): { agent: string; name: string; windows: Window[] }[] {
+  const out: { agent: string; name: string; windows: Window[] }[] = []
+  const fileClaude = v.usage?.limits?.claude?.windows ?? []
+  const claude = v.live.claude.length ? v.live.claude : fileClaude
+  if (claude.length) out.push({ agent: 'claude', name: 'Claude', windows: claude })
+  for (const [agent, lim] of Object.entries(v.usage?.limits ?? {})) {
+    if (agent !== 'claude' && lim.windows.length) out.push({ agent, name: lim.name || agent, windows: lim.windows })
+  }
+  return out.map(p => ({ ...p, windows: p.windows.map(w => current(w, nowSeconds)) }))
 }
 
 export function fmtSeconds(s: number): string {
@@ -63,7 +117,8 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 export function bucketText(b: Omit<Bucket, 'agents'>): string {
   const failed = b.failed ? `, ${b.failed} failed` : ''
-  return `${plural(b.calls, 'call')} · ${fmtSeconds(b.seconds)} · ~${fmtTokens(b.tokens)} tok${failed}`
+  const cost = b.cost_usd && b.cost_usd >= 0.005 ? ` · $${b.cost_usd.toFixed(2)}` : ''
+  return `${plural(b.calls, 'call')} · ${fmtSeconds(b.seconds)} · ${b.estimated ? '~' : ''}${fmtTokens(b.tokens)} tok${cost}${failed}`
 }
 
 // "Codex 3 · 4m 10s   Claude 2 · 1m 05s", busiest first.
@@ -114,21 +169,23 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const { usage, details } = await read($, view)
-    if (e.props.hasSurvey || !usage || usage.today.calls === 0 || (await $.store.get(HIDDEN))) return next(e)
+    const v = await read($, view)
+    if (e.props.hasSurvey || (await $.store.get(HIDDEN))) return next(e)
+    const nowSeconds = (await $.clock.now()) / 1000
+    const planned = plans(v, nowSeconds)
+    const today = v.usage?.today ?? EMPTY
+    if (!planned.length && today.calls === 0) return next(e)
 
     const { Box, Text, Button } = $.ui.resolve(e)
     const width = e.surface === 'terminal' ? e.props.bodyColumns : undefined
-    const today = usage.today
-    const last = usage.last
-    const lastText = last
-      ? `last: ${last.name} ${fmtSeconds(last.seconds)}${last.ok ? '' : ' (failed)'}`
-      : ''
+    const colour = (pct: number) => (pct >= 90 ? 'error' : pct >= 70 ? 'warning' : undefined)
+    const cost = v.live.cost !== null ? `session $${v.live.cost.toFixed(2)}` : ''
+    const rapr = today.calls ? `RAPR today ${plural(today.calls, 'call')} · ${fmtSeconds(today.seconds)}` : ''
     const toggle = (
       <Button
         key="details"
-        label={details ? 'Less' : 'Per AI'}
-        onPress={() => update($, view, v => ({ ...v, details: !v.details }))}
+        label={v.details ? 'Less' : 'More'}
+        onPress={() => update($, view, x => ({ ...x, details: !x.details }))}
       />
     )
     const hide = (
@@ -142,16 +199,24 @@ export const register: Register = on => {
         }}
       />
     )
-
-    if (!details) {
-      return (
-        <Box width={width} gap={1}>
-          <Text color="claude" bold>RAPR</Text>
-          <Text>today {bucketText(today)}</Text>
-          <Text dimColor wrap="truncate-end">
-            {agentsText(today)}
-            {lastText ? `   ${lastText}` : ''}
+    const plan = (p: { name: string; windows: Window[] }, withResets: boolean) => (
+      <Box key={p.name} gap={1}>
+        <Text bold>{p.name}</Text>
+        {p.windows.map(w => (
+          <Text key={w.key} color={colour(w.pct)}>
+            {w.label} {Math.round(w.pct)}%{withResets && w.resets_at ? ` (resets in ${resetText(w, nowSeconds)})` : ''}
           </Text>
+        ))}
+      </Box>
+    )
+
+    if (!v.details) {
+      return (
+        <Box width={width} gap={2}>
+          <Text color="claude" bold>RAPR</Text>
+          {planned.map(p => plan(p, false))}
+          {cost ? <Text dimColor>{cost}</Text> : null}
+          {rapr ? <Text dimColor wrap="truncate-end">{rapr}</Text> : null}
           {toggle}
           {hide}
         </Box>
@@ -163,20 +228,19 @@ export const register: Register = on => {
       <Box flexDirection="column" width={width}>
         <Box gap={1}>
           <Text color="claude" bold>RAPR</Text>
-          <Text>today {bucketText(today)}</Text>
+          <Text dimColor>plan usage, as each AI reports it{cost ? `; this ${cost}` : ''}</Text>
           {toggle}
           {hide}
         </Box>
+        {planned.map(p => plan(p, true))}
+        {today.calls ? <Text>RAPR today {bucketText(today)}</Text> : null}
         {rows.map(([key, a]) => (
           <Box key={key} gap={1}>
             <Text>  {a.name || key}</Text>
             <Text dimColor>{bucketText(a)}</Text>
           </Box>
         ))}
-        <Text dimColor>
-          {'  '}all time {bucketText(usage.total)}
-          {lastText ? `   ${lastText}` : ''}   (~ tokens estimated from text length)
-        </Text>
+        {v.usage && v.usage.total.calls ? <Text dimColor>RAPR all time {bucketText(v.usage.total)}</Text> : null}
       </Box>
     )
   })

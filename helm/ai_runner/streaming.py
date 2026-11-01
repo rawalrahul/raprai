@@ -224,7 +224,9 @@ def run_claude_stream(cmd: list, cwd: str, sess: dict,
             if not isinstance(ev, dict):
                 continue
             etype = ev.get("type")
-            if etype == "result":
+            if etype == "rate_limit_event":
+                _note_usage(ev, "claude")   # the plan's 5-hour and weekly usage, for the ribbon
+            elif etype == "result":
                 result_line = line  # same shape as --output-format json
             elif etype == "assistant":
                 for block in (ev.get("message", {}).get("content") or []):
@@ -271,6 +273,21 @@ def run_claude_stream(cmd: list, cwd: str, sess: dict,
 # ---------------------------------------------------------------------------
 # Generic JSONL streaming for CLIs that take the prompt via stdin (Codex, Gemini)
 # ---------------------------------------------------------------------------
+
+def _note_usage(ev: dict, ai: str) -> None:
+    """Keep the plan usage an AI reported (helm/mcp_usage.py): the usage ribbon shows it."""
+    try:
+        from helm import mcp_usage
+        if ai == "claude":
+            mcp_usage.note_claude_event(ev)
+        elif ai == "codex":
+            if isinstance(ev.get("rate_limits"), dict):
+                mcp_usage.set_limits("codex", "Codex", mcp_usage.codex_windows(ev["rate_limits"]), "codex --json")
+            else:
+                mcp_usage.refresh_codex_limits(0)
+    except Exception:
+        logger.debug("Couldn't keep %s's plan usage", ai, exc_info=True)
+
 
 def _stream_cli(scmd, cwd, sess, stdin_text, extra_env, timeout, on_event, tag="cli"):
     """Run `scmd`, feed `stdin_text`, read stdout JSONL, call on_event(dict) per line.
@@ -413,6 +430,8 @@ def run_codex_stream(cmd, cwd, sess, emit, stdin_text=None, extra_env=None, time
         m = ev.get("msg")
         if isinstance(m, dict):
             mt = m.get("type") or ""
+            if mt == "token_count":
+                _note_usage(m, "codex")
             if mt == "agent_message" and m.get("message"):
                 texts.append(str(m["message"]))
             elif mt == "task_complete":
@@ -431,6 +450,7 @@ def run_codex_stream(cmd, cwd, sess, emit, stdin_text=None, extra_env=None, time
                 _step("Tool " + _shorten(m.get("tool") or ""))
 
     _stream_cli(scmd, cwd, sess, stdin_text, extra_env, timeout, on_event, tag="codex")
+    _note_usage({}, "codex")    # newer Codex keeps its plan usage in its session file only
     final = texts[-1].strip() if texts else ""
     if not final:
         raise StreamUnavailable("no agent_message in codex stream")

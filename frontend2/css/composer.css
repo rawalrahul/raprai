@@ -164,6 +164,8 @@ html .input-bar #send[data-mode="voice-on"] { background: var(--accent) !importa
 .usage-ribbon .ur-meter.over > span { background: #ef4444; }
 .usage-ribbon .ur-pct.warn { color: #f59e0b; }
 .usage-ribbon .ur-pct.over, .usage-ribbon .ur-flag.over { color: #ef4444; font-weight: 600; }
+.usage-ribbon .ur-win { display: inline-flex; align-items: center; gap: 4px; margin-right: 4px; }
+.usage-ribbon .ur-wl { opacity: .7; }
 .usage-ribbon .ur-mcp { flex: none; padding-left: 8px; border-left: 1px solid var(--border-subtle); opacity: .85; }
 .usage-ribbon .ur-chev { flex: none; width: 10px; text-align: center; opacity: .6; }
 .usage-ribbon .ur-close {

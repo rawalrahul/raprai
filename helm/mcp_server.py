@@ -65,7 +65,7 @@ INSTRUCTIONS = (
     "a few minutes while the other AI works: second_opinion and ask_agent answer within a minute, "
     "with the reply or an id to wait on with agent_status. While a relay, team or bake-off runs, its status "
     "tool gives a short progress report; the plan, reviews and diffs come once it has finished. "
-    "usage tells how much the AIs have done today (calls, time, estimated tokens)."
+    "usage tells each AI's plan usage (5-hour and weekly, as the AI reports it) and what RAPR ran today."
 )
 
 
@@ -206,6 +206,15 @@ def run_agent(agent: str, prompt: str, cwd: str, model: Optional[str] = None, *,
         raise ToolError(str(exc)) from exc
     if edits and agent == "claude":
         cmd[1:1] = ["--permission-mode", "acceptEdits"]
+    streamed = False
+    if agent == "claude":
+        # stream-json carries what json leaves out: the plan's 5-hour and weekly usage
+        # (rate_limit_event), for the usage ribbon. Its result line is the same JSON.
+        try:
+            from helm.ai_runner.streaming import to_stream_cmd
+            cmd, streamed = to_stream_cmd(cmd), True
+        except Exception:
+            logger.debug("Couldn't switch Claude to stream-json", exc_info=True)
     request_id = getattr(_request, "id", None)
     started: list = []
 
@@ -215,15 +224,24 @@ def run_agent(agent: str, prompt: str, cwd: str, model: Optional[str] = None, *,
             _live[id(proc)] = (proc, request_id)
         if on_start:
             on_start(proc)
-    began = time.monotonic()
+    began, began_at = time.monotonic(), time.time()
     reply = ""
+    tokens = cost = None
     try:
         reply = _run_subprocess_blocking(cmd, cwd, stdin_text, extra_env, on_start=track, timeout=timeout)
+        if streamed:
+            from helm import mcp_usage
+            from helm.council.runner import _extract_text
+            result, tokens, cost = mcp_usage.claude_stream_result(reply)
+            if result is not None:
+                reply = _extract_text(result) or "(no output)"
+            elif reply.lstrip().startswith("{"):
+                reply = "(error: Claude stopped before it answered)"
     finally:
         with _live_lock:
             for proc in started:
                 _live.pop(id(proc), None)
-        _record_usage(agent, time.monotonic() - began, prompt, reply)
+        _record_usage(agent, time.monotonic() - began, prompt, reply, began_at, tokens, cost)
     if reply.strip() == "(no output)":
         return ""   # it may still have done its work (edited files); callers judge an empty reply
     if failed(reply):
@@ -233,14 +251,21 @@ def run_agent(agent: str, prompt: str, cwd: str, model: Optional[str] = None, *,
     return reply
 
 
-def _record_usage(agent: str, seconds: float, prompt: str, reply: str) -> None:
-    """Count the run for the usage ribbon (helm/mcp_usage.py). Never fails the tool."""
+def _record_usage(agent: str, seconds: float, prompt: str, reply: str, began_at: float = 0.0,
+                  tokens: Optional[int] = None, cost: Optional[float] = None) -> None:
+    """Count the run for the usage ribbon (helm/mcp_usage.py), with the AI's own token count
+    where it gives one (Claude's result, Codex's session file). Never fails the tool."""
     try:
         from helm import mcp_usage
         from helm.council.runner import failed
         ok = bool(reply) and not failed(reply)
-        name = (_agents_cache[1] or {}).get(agent) or agent
-        mcp_usage.record(agent, seconds, prompt, reply if ok else "", ok=ok, name=name)
+        import helm.state as _st
+        name = ((_agents_cache[1] or {}).get(agent) or ("Claude Code" if agent == "claude" else None)
+                or (_st.integrations.get(agent) or {}).get("name") or agent)
+        if agent == "codex" and tokens is None and began_at:
+            tokens = mcp_usage.codex_run_tokens(began_at)
+        mcp_usage.record(agent, seconds, prompt, reply if ok else "", ok=ok, name=name,
+                         tokens=tokens, cost_usd=cost)
     except Exception:
         logger.debug("Couldn't record usage", exc_info=True)
 
@@ -1148,8 +1173,9 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
         "annotations": {"readOnlyHint": True},
     }, tool_latest_brief),
     "usage": ({
-        "description": "How much the AIs RAPR ran for you have done: calls, AI time and estimated tokens "
-                       "today, per AI, and in total. Read-only and instant.",
+        "description": "Plan usage as each AI reports it (Claude's and Codex's 5-hour and weekly windows, "
+                       "the same as their own usage pages), and what the AIs RAPR ran for you did: calls, "
+                       "AI time, tokens and cost today, per AI, and in total. Read-only and instant.",
         "inputSchema": {"type": "object", "properties": {}},
         "annotations": {"readOnlyHint": True},
     }, tool_usage),

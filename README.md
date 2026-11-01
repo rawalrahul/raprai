@@ -148,7 +148,7 @@ Then ask in plain words: *"get a second opinion from Codex on my changes"*, *"pl
 | `start_bakeoff`, `bakeoff_status`, `merge_bakeoff`, `discard_bakeoff` | A bake-off from your editor: 2 to 4 AIs, each in its own copy of the project; merge the one you like. |
 | `list_agents` | The AIs installed and signed in on this computer. |
 | `latest_brief` | What needs you, from your latest brief in the RAPR app (needs the app). |
-| `usage` | How much the AIs RAPR ran for you have done: calls, AI time and estimated tokens, today and in total, per AI. |
+| `usage` | Each AI's plan usage as it reports it (Claude's and Codex's 5-hour and weekly windows), and what the AIs RAPR ran for you did today: calls, time, tokens, cost. |
 
 The other AI works in a temporary copy of your project, so your files only change if you allow edits or merge a relay or bake-off. Nothing is hosted, and the RAPR app doesn't need to be open, or even installed. More in the [full guide](docs/guide.md#use-rapr-from-your-coding-agent-mcp).
 
@@ -156,18 +156,24 @@ RAPR only offers the AIs you can actually use: their command-line tool is instal
 
 ### Usage ribbon
 
-<img src="docs/assets/usage-ribbon-open.png" width="620" alt="RAPR's usage ribbon above the message box: Claude 21% of its 5-hour cap, 14 tasks, 69.5k tokens, $0.84; opened, a row for each AI, including the ones run from your editors through MCP">
+<img src="docs/assets/usage-ribbon-open.png" width="620" alt="RAPR's usage ribbon above the message box: Claude 5h 66%, week 89% of the plan; Codex 5h 12%, week 41%; opened, a row for each AI, including the ones run from your editors through MCP">
 
-In the app, a slim ribbon above the message box shows how much the AI you're talking to has used this period (time against its cap, tasks, tokens, cost) and what AIs run from your editors did today. Click it for a row per AI; × hides it, and the **Usage** panel brings it back.
+A slim ribbon shows how much of each AI's plan you've used, **as the AI itself reports it**, so it matches the AI's own usage page:
 
-In Claude Code, the same ribbon sits above the prompt and shows what the AIs RAPR ran for you did today. Add it once (needs Claude Code 2.1.290 or later, in the terminal or the desktop app):
+| AI | What the ribbon shows | Where RAPR reads it |
+|---|---|---|
+| Claude | 5-hour and weekly plan usage (as on claude.ai's usage page), exact tokens and cost | the `rate_limit_event` and result every `claude` run prints |
+| Codex | 5-hour and weekly plan usage (as Codex's `/status` shows), exact tokens | the `token_count` events Codex writes to `~/.codex/sessions` (so Codex used on its own counts too) |
+| Others | time, tasks and tokens (estimated where the AI doesn't report them, marked `~`) | RAPR's own counters |
+
+In the app it sits above the message box; click it for every AI, × hides it, and the **Usage** panel brings it back. In Claude Code it sits above the prompt, with Claude's numbers taken straight from Claude Code (as [ponytail](https://github.com/DietrichGebert/ponytail) does) plus this session's cost and what RAPR ran for you today. Add it once (needs Claude Code 2.1.290 or later, in the terminal or the desktop app):
 
 ```
 /plugin marketplace add rawalrahul/raprai
 /plugin install rapr-usage@raprai
 ```
 
-`/rapr-usage` hides or shows it, `/rapr-usage details` gives a row per AI. Other MCP clients (Codex, Cursor, Antigravity...) can ask for the `usage` tool. The numbers are kept in `~/.config/rapr/mcp-usage.json`, on your computer; tokens are estimated from text length.
+`/rapr-usage` hides or shows it, `/rapr-usage details` adds reset times and a row per AI. Other MCP clients (Codex, Cursor, Antigravity...) can ask for the `usage` tool. Everything stays on your computer, in `~/.config/rapr/mcp-usage.json`.
 
 ### GitHub Copilot
 

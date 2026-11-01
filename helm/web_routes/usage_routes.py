@@ -179,6 +179,10 @@ async def get_usage():
     period_remaining = max(0, int((_st.usage_period_start + USAGE_PERIOD_SECONDS) - time.time()))
     reset_eta = fmt_reset_eta()
 
+    mcp = _mcp_usage()
+    plan = mcp.get("limits") or {}
+    ai_keys.update(plan)
+
     ais = {}
     for key in sorted(ai_keys):
         st = _st.usage_stats.get(key, {})
@@ -215,6 +219,12 @@ async def get_usage():
 
         cost_usd = float(st.get("cost_usd", 0.0))
 
+        # The plan's own windows, as the AI reported them (Claude's 5-hour and weekly usage...),
+        # beat any estimate: the share shown is the fullest window.
+        windows = (plan.get(key) or {}).get("windows") or []
+        if windows:
+            pct_used = max(float(w.get("pct") or 0) for w in windows)
+
         ais[key] = {
             "label": usage_ai_label(key),
             "tasks": tasks,
@@ -230,7 +240,8 @@ async def get_usage():
             "est_tokens": total_tokens,  # backward compat for dashboard
             "cost_usd": round(cost_usd, 4),
             "last_used": last_used,
-            "source": exact.get("source", "estimate"),
+            "source": "plan" if windows else exact.get("source", "estimate"),
+            "limits": windows,
             "budget": budget,
         }
 
@@ -255,14 +266,17 @@ async def get_usage():
         "period_remaining_sec": period_remaining,
         "reset_eta": reset_eta,
         "budget_enabled": _budget_config().get("enabled", True),
-        "mcp": _mcp_usage(),
+        "mcp": mcp,
     })
 
 
 def _mcp_usage() -> dict:
     """What AIs run through `rapr mcp` (from Claude Code, Codex...) did: helm/mcp_usage.py."""
     from helm import mcp_usage
-    return mcp_usage.load()
+    mcp_usage.refresh_codex_limits()        # Codex used on its own counts too
+    data = mcp_usage.load()
+    data["limits"] = mcp_usage.limits(data)   # a window past its reset reads 0%
+    return data
 
 
 # ---------------------------------------------------------------------------

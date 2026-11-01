@@ -31,7 +31,8 @@ function _ribbonLevel(pct, budget){
 // One AI as "Codex 4% · 12m/300m · 8 tasks · ~32k tok · $0.12"
 function _ribbonAiParts(a){
   const parts = [];
-  parts.push(a.cap_min ? `${_ribbonFmtMin(a.used_min)} / ${_ribbonFmtMin(a.cap_min)}` : _ribbonFmtMin(a.used_min));
+  const planned = (a.limits || []).length;
+  parts.push(a.cap_min && !planned ? `${_ribbonFmtMin(a.used_min)} / ${_ribbonFmtMin(a.cap_min)}` : _ribbonFmtMin(a.used_min));
   parts.push(`${a.tasks} task${a.tasks === 1 ? '' : 's'}`);
   parts.push(`${a.tokens_source === 'actual' ? '' : '~'}${_ribbonFmtTok(a.total_tokens)} tok`);
   if(a.cost_usd >= 0.005) parts.push('$' + a.cost_usd.toFixed(2));
@@ -43,6 +44,32 @@ function _ribbonMeter(pct, level){
   return `<span class="ur-meter ${level}" aria-hidden="true"><span style="width:${w}%"></span></span>`;
 }
 
+function _ribbonResetText(at){
+  if(!at) return '';
+  const s = Math.max(0, at - Date.now() / 1000);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  const when = new Date(at * 1000).toLocaleString([], {weekday: 'short', hour: 'numeric', minute: '2-digit'});
+  return `resets in ${h >= 24 ? Math.floor(h / 24) + 'd ' + (h % 24) + 'h' : h + 'h ' + m + 'm'} (${when})`;
+}
+
+// The share used: the plan's own windows when the AI reported them (Claude's 5h and week,
+// Codex's), else RAPR's estimate against the cap in .env.
+function _ribbonGauge(a){
+  const wins = a.limits || [];
+  if(wins.length){
+    return wins.map(w => {
+      const level = w.pct >= 90 ? 'over' : w.pct >= 70 ? 'warn' : '';
+      const tip = `${a.label} ${w.label}: ${w.pct.toFixed(0)}% of your plan used, as ${a.label} reports it. ${_ribbonResetText(w.resets_at)}`;
+      return `<span class="ur-win" title="${escHtml(tip)}"><span class="ur-wl">${escHtml(w.label)}</span>` +
+        _ribbonMeter(w.pct, level) + `<span class="ur-pct ${level}">${w.pct.toFixed(0)}%</span></span>`;
+    }).join('');
+  }
+  const pct = a.pct_used, level = _ribbonLevel(pct, a.budget);
+  const tip = pct == null ? 'No cap set' : `Estimated: time used against the cap in .env (USAGE_CAP_MIN_${String(a.label).toUpperCase()})`;
+  return _ribbonMeter(pct, level) +
+    `<span class="ur-pct ${level}" title="${escHtml(tip)}">${pct == null ? 'no cap' : '≈' + pct.toFixed(0) + '%'}</span>`;
+}
+
 function renderUsageRibbon(){
   const el = document.getElementById('usage-ribbon');
   if(!el) return;
@@ -51,7 +78,7 @@ function renderUsageRibbon(){
   if(hidden || !d){ el.hidden = true; return; }
 
   const ais = d.ais || {};
-  const used = Object.keys(ais).filter(k => (ais[k].tasks || 0) > 0);
+  const used = Object.keys(ais).filter(k => (ais[k].tasks || 0) > 0 || (ais[k].limits || []).length);
   const mcp = d.mcp || {};
   const mcpToday = (mcp.today || {});
   if(!used.length && !(mcpToday.calls > 0) && !_focusedAi){ el.hidden = true; return; }
@@ -63,11 +90,7 @@ function renderUsageRibbon(){
 
   let main = '';
   if(a){
-    const pct = a.pct_used, level = _ribbonLevel(pct, a.budget);
-    const src = (a.source || '').endsWith('_cli') ? 'from the CLI' : 'estimated';
-    main = `<span class="ur-ai">${escHtml(a.label)}</span>` +
-      _ribbonMeter(pct, level) +
-      `<span class="ur-pct ${level}" title="${pct == null ? 'No cap set' : 'Share of the cap used (' + src + ')'}">${pct == null ? 'no cap' : pct.toFixed(0) + '%'}</span>` +
+    main = `<span class="ur-ai">${escHtml(a.label)}</span>` + _ribbonGauge(a) +
       _ribbonAiParts(a).map(p => `<span class="ur-sep">·</span><span>${escHtml(p)}</span>`).join('') +
       (a.budget && a.budget.allowed === false ? '<span class="ur-flag over">budget reached</span>' : '');
   } else {
@@ -81,19 +104,19 @@ function renderUsageRibbon(){
   let details = '';
   if(_ribbonOpen){
     const rows = used.sort((x, y) => ais[y].used_min - ais[x].used_min).map(k => {
-      const x = ais[k], level = _ribbonLevel(x.pct_used, x.budget);
-      return `<div class="ur-row"><span class="ur-ai">${escHtml(x.label)}</span>${_ribbonMeter(x.pct_used, level)}` +
-        `<span class="ur-pct ${level}">${x.pct_used == null ? 'no cap' : x.pct_used.toFixed(0) + '%'}</span>` +
+      const x = ais[k];
+      return `<div class="ur-row"><span class="ur-ai">${escHtml(x.label)}</span>${_ribbonGauge(x)}` +
         `<span class="ur-dim">${escHtml(_ribbonAiParts(x).join(' · '))}</span></div>`;
     });
     const mcpAgents = Object.entries(mcpToday.agents || {}).sort((x, y) => (y[1].seconds || 0) - (x[1].seconds || 0));
     mcpAgents.forEach(([k, x]) => {
       rows.push(`<div class="ur-row"><span class="ur-ai">${escHtml(x.name || k)}</span><span class="ur-tag">editor</span>` +
-        `<span class="ur-dim">${x.calls} call${x.calls === 1 ? '' : 's'} · ${_ribbonFmtMin((x.seconds || 0) / 60)} · ~${_ribbonFmtTok(x.tokens)} tok` +
+        `<span class="ur-dim">${x.calls} call${x.calls === 1 ? '' : 's'} · ${_ribbonFmtMin((x.seconds || 0) / 60)} · ${x.estimated ? '~' : ''}${_ribbonFmtTok(x.tokens)} tok` +
+        `${x.cost_usd >= 0.005 ? ' · $' + x.cost_usd.toFixed(2) : ''}` +
         `${x.failed ? ' · ' + x.failed + ' failed' : ''}</span></div>`);
     });
     details = `<div class="ur-details">${rows.join('') || '<div class="ur-dim">Nothing yet</div>'}` +
-      `<div class="ur-foot ur-dim">Resets in ${escHtml(d.reset_eta || '?')} · ~ means estimated from text length</div></div>`;
+      `<div class="ur-foot ur-dim">5h / week: your plan, as each AI reports it · ≈ estimated against your cap · ~ tokens estimated from text length · RAPR's own counters reset in ${escHtml(d.reset_eta || '?')}</div></div>`;
   }
 
   el.innerHTML =

@@ -412,13 +412,17 @@ Check it with `grok mcp doctor rapr`. Grok also picks up servers you added to Cl
 
 ### Usage ribbon
 
-Every AI that `rapr mcp` runs is counted in `~/.config/rapr/mcp-usage.json` (or the file named by `RAPR_MCP_USAGE_FILE`): calls, AI time, estimated tokens and failures, today (from local midnight) and in total. Three things read it:
+RAPR keeps each AI's plan usage exactly as the AI reports it, in `~/.config/rapr/mcp-usage.json` (or the file named by `RAPR_MCP_USAGE_FILE`):
 
-- **In Claude Code**, a band above the prompt. Add it with `/plugin marketplace add rawalrahul/raprai`, then `/plugin install rapr-usage@raprai`. `/rapr-usage` hides or shows it; `/rapr-usage details` gives a row per AI. It shows once RAPR has run an AI today. It needs Claude Code 2.1.290 or later and does not show in the VS Code chat panel or `claude -p`.
+- **Claude**: every run (`claude -p --output-format stream-json`) prints a `rate_limit_event` with your plan's 5-hour and weekly windows, the numbers on claude.ai's usage page, and a result with exact tokens and cost. RAPR keeps both, from the app and from `rapr mcp`.
+- **Codex**: Codex writes `token_count` events with its 5-hour and weekly windows (what `/status` shows) to its session files in `~/.codex/sessions` (or `$CODEX_HOME`). RAPR reads the newest one, so Codex used on its own counts too, and takes each run's exact tokens from it.
+- **Other AIs** report no plan usage: the ribbon shows RAPR's own counters for them (time and tasks, and tokens estimated from text length, marked `~`, where the AI gives none). The app's "≈%" against `USAGE_CAP_MIN_<AI>` is that estimate.
+
+A window whose reset time has passed shows 0% until the AI reports again. Three things show it:
+
+- **In Claude Code**, a band above the prompt. Add it with `/plugin marketplace add rawalrahul/raprai`, then `/plugin install rapr-usage@raprai`. Claude's windows and this session's cost come straight from Claude Code (`$.session.usage()`); Codex's and what RAPR ran today come from the file. `/rapr-usage` hides or shows it; `/rapr-usage details` adds reset times and a row per AI. It needs Claude Code 2.1.290 or later and does not show in the VS Code chat panel or `claude -p`.
 - **In any MCP client**, the `usage` tool answers with the same numbers as text.
-- **In the RAPR app**, the ribbon above the message box shows them as "editors" next to the app's own usage, and the Usage panel lists them per AI.
-
-Tokens are estimated as text length divided by 4, since not every command-line tool reports them.
+- **In the RAPR app**, the ribbon above the message box, and the Usage panel.
 
 ### Cursor, Windsurf and other MCP clients
 
