@@ -255,7 +255,14 @@ async def get_usage():
         "period_remaining_sec": period_remaining,
         "reset_eta": reset_eta,
         "budget_enabled": _budget_config().get("enabled", True),
+        "mcp": _mcp_usage(),
     })
+
+
+def _mcp_usage() -> dict:
+    """What AIs run through `rapr mcp` (from Claude Code, Codex...) did: helm/mcp_usage.py."""
+    from helm import mcp_usage
+    return mcp_usage.load()
 
 
 # ---------------------------------------------------------------------------

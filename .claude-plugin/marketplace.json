@@ -1,0 +1,11 @@
+{
+  "name": "raprai",
+  "owner": { "name": "Rahul Rawal" },
+  "plugins": [
+    {
+      "name": "rapr-usage",
+      "source": "./claude-code-plugin",
+      "description": "RAPR's usage ribbon above the Claude Code prompt."
+    }
+  ]
+}

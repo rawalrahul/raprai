@@ -410,6 +410,16 @@ grok mcp add rapr -- rapr mcp
 
 Check it with `grok mcp doctor rapr`. Grok also picks up servers you added to Claude Code with `--scope user`, so if you did that already, there's nothing to do.
 
+### Usage ribbon
+
+Every AI that `rapr mcp` runs is counted in `~/.config/rapr/mcp-usage.json` (or the file named by `RAPR_MCP_USAGE_FILE`): calls, AI time, estimated tokens and failures, today (from local midnight) and in total. Three things read it:
+
+- **In Claude Code**, a band above the prompt. Add it with `/plugin marketplace add rawalrahul/raprai`, then `/plugin install rapr-usage@raprai`. `/rapr-usage` hides or shows it; `/rapr-usage details` gives a row per AI. It shows once RAPR has run an AI today. It needs Claude Code 2.1.290 or later and does not show in the VS Code chat panel or `claude -p`.
+- **In any MCP client**, the `usage` tool answers with the same numbers as text.
+- **In the RAPR app**, the ribbon above the message box shows them as "editors" next to the app's own usage, and the Usage panel lists them per AI.
+
+Tokens are estimated as text length divided by 4, since not every command-line tool reports them.
+
 ### Cursor, Windsurf and other MCP clients
 
 Add a server with the command `rapr` and the argument `mcp` (on Windows: command `cmd`, arguments `/c rapr mcp`). For example, in Cursor's `~/.cursor/mcp.json`:

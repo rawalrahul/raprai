@@ -715,6 +715,22 @@ function loadUsageDashboard(){
         </div>`;
       });
     }
+    // Through `rapr mcp`, from Claude Code, Codex, Cursor… (helm/mcp_usage.py)
+    const mcpToday = (data.mcp && data.mcp.today) || {};
+    const mcpAgents = Object.entries(mcpToday.agents || {});
+    if(mcpAgents.length){
+      html += '<div class="usage-section-title">From your editors today (MCP)</div>';
+      mcpAgents.forEach(([k, a])=>{
+        html += `<div class="usage-sess-row">
+          <span class="usage-sess-name">${escHtml(a.name || k)}</span>
+          <span>${a.calls} calls</span>
+          <span>${(a.seconds/60).toFixed(1)}m</span>
+        </div>`;
+      });
+    }
+    if(typeof usageRibbonHidden === 'function' && usageRibbonHidden()){
+      html += '<button class="sb-add-btn" style="width:100%;margin-top:8px" onclick="showUsageRibbon();loadUsageDashboard()">Show the usage ribbon above the message box</button>';
+    }
     el.innerHTML = html;
   }).catch(()=>{ el.innerHTML='<div class="sb-empty">Failed to load usage data</div>'; });
 }

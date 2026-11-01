@@ -148,10 +148,26 @@ Then ask in plain words: *"get a second opinion from Codex on my changes"*, *"pl
 | `start_bakeoff`, `bakeoff_status`, `merge_bakeoff`, `discard_bakeoff` | A bake-off from your editor: 2 to 4 AIs, each in its own copy of the project; merge the one you like. |
 | `list_agents` | The AIs installed and signed in on this computer. |
 | `latest_brief` | What needs you, from your latest brief in the RAPR app (needs the app). |
+| `usage` | How much the AIs RAPR ran for you have done: calls, AI time and estimated tokens, today and in total, per AI. |
 
 The other AI works in a temporary copy of your project, so your files only change if you allow edits or merge a relay or bake-off. Nothing is hosted, and the RAPR app doesn't need to be open, or even installed. More in the [full guide](docs/guide.md#use-rapr-from-your-coding-agent-mcp).
 
 RAPR only offers the AIs you can actually use: their command-line tool is installed (or came with their VS Code, Cursor or Windsurf extension), you're signed in where RAPR can check (Claude Code, Codex, Grok, Kiro), and a local model server like Ollama or LM Studio is running. Ask for `list_agents` to see them; it also says which installed AI still needs signing in, and how.
+
+### Usage ribbon
+
+<img src="docs/assets/usage-ribbon-open.png" width="620" alt="RAPR's usage ribbon above the message box: Claude 21% of its 5-hour cap, 14 tasks, 69.5k tokens, $0.84; opened, a row for each AI, including the ones run from your editors through MCP">
+
+In the app, a slim ribbon above the message box shows how much the AI you're talking to has used this period (time against its cap, tasks, tokens, cost) and what AIs run from your editors did today. Click it for a row per AI; × hides it, and the **Usage** panel brings it back.
+
+In Claude Code, the same ribbon sits above the prompt and shows what the AIs RAPR ran for you did today. Add it once (needs Claude Code 2.1.290 or later, in the terminal or the desktop app):
+
+```
+/plugin marketplace add rawalrahul/raprai
+/plugin install rapr-usage@raprai
+```
+
+`/rapr-usage` hides or shows it, `/rapr-usage details` gives a row per AI. Other MCP clients (Codex, Cursor, Antigravity...) can ask for the `usage` tool. The numbers are kept in `~/.config/rapr/mcp-usage.json`, on your computer; tokens are estimated from text length.
 
 ### GitHub Copilot
 

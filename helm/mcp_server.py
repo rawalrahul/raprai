@@ -64,7 +64,8 @@ INSTRUCTIONS = (
     "compare them. Call list_agents first to see which AIs are available. Each call can take "
     "a few minutes while the other AI works: second_opinion and ask_agent answer within a minute, "
     "with the reply or an id to wait on with agent_status. While a relay, team or bake-off runs, its status "
-    "tool gives a short progress report; the plan, reviews and diffs come once it has finished."
+    "tool gives a short progress report; the plan, reviews and diffs come once it has finished. "
+    "usage tells how much the AIs have done today (calls, time, estimated tokens)."
 )
 
 
@@ -214,12 +215,15 @@ def run_agent(agent: str, prompt: str, cwd: str, model: Optional[str] = None, *,
             _live[id(proc)] = (proc, request_id)
         if on_start:
             on_start(proc)
+    began = time.monotonic()
+    reply = ""
     try:
         reply = _run_subprocess_blocking(cmd, cwd, stdin_text, extra_env, on_start=track, timeout=timeout)
     finally:
         with _live_lock:
             for proc in started:
                 _live.pop(id(proc), None)
+        _record_usage(agent, time.monotonic() - began, prompt, reply)
     if reply.strip() == "(no output)":
         return ""   # it may still have done its work (edited files); callers judge an empty reply
     if failed(reply):
@@ -227,6 +231,18 @@ def run_agent(agent: str, prompt: str, cwd: str, model: Optional[str] = None, *,
             raise ToolError(f"{agent} didn't finish within {timeout // 60} minutes")
         raise ToolError(f"{agent} didn't answer: {reply.strip()[1:-1] if reply.endswith(')') else reply.strip()}")
     return reply
+
+
+def _record_usage(agent: str, seconds: float, prompt: str, reply: str) -> None:
+    """Count the run for the usage ribbon (helm/mcp_usage.py). Never fails the tool."""
+    try:
+        from helm import mcp_usage
+        from helm.council.runner import failed
+        ok = bool(reply) and not failed(reply)
+        name = (_agents_cache[1] or {}).get(agent) or agent
+        mcp_usage.record(agent, seconds, prompt, reply if ok else "", ok=ok, name=name)
+    except Exception:
+        logger.debug("Couldn't record usage", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -501,6 +517,12 @@ def tool_latest_brief(args: dict, ctx: "Server") -> str:
                 "now'. The other tools here work without the app.")
     return brief.text(latest, how_to_act=False) + (
         "\n\nTo act on an item, open RAPR (Needs you) or reply /do <number> on Telegram or WhatsApp.")
+
+
+def tool_usage(args: dict, ctx: "Server") -> str:
+    """The usage ribbon as text, for clients without RAPR's Claude Code band."""
+    from helm import mcp_usage
+    return mcp_usage.summary()
 
 
 # ---------------------------------------------------------------------------
@@ -1125,6 +1147,12 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
         "inputSchema": {"type": "object", "properties": {}},
         "annotations": {"readOnlyHint": True},
     }, tool_latest_brief),
+    "usage": ({
+        "description": "How much the AIs RAPR ran for you have done: calls, AI time and estimated tokens "
+                       "today, per AI, and in total. Read-only and instant.",
+        "inputSchema": {"type": "object", "properties": {}},
+        "annotations": {"readOnlyHint": True},
+    }, tool_usage),
     "second_opinion": ({
         "description": "Have a different AI review the current code changes (uncommitted work, or the last "
                        "commit if there is none) and report bugs and risks. It works in a temporary copy, so "
