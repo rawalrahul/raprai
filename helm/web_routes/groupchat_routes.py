@@ -140,7 +140,7 @@ async def get_group(group_id: str):
     g = gc.groups.get(group_id)
     if not g:
         return _err("Group not found", 404)
-    return JSONResponse({"group": gc._public(g)})
+    return JSONResponse({"group": gc.client_view(g)})
 
 
 @router.post("/api/groups")
@@ -155,7 +155,7 @@ async def create_group(req: CreateGroupRequest):
     await push_state()   # sessions started for the group show up in the sidebar
     gc.save_groups()
     await gc.broadcast_group(group)
-    return JSONResponse({"group": gc._public(group)})
+    return JSONResponse({"group": gc.client_view(group)})
 
 
 @router.patch("/api/groups/{group_id}")
@@ -194,7 +194,7 @@ async def update_group(group_id: str, req: UpdateGroupRequest):
         g["members"] = new_members
     gc.save_groups()
     await gc.broadcast_group(g)
-    return JSONResponse({"group": gc._public(g)})
+    return JSONResponse({"group": gc.client_view(g)})
 
 
 @router.delete("/api/groups/{group_id}")
@@ -244,10 +244,52 @@ async def clear_group(group_id: str):
     if not g:
         return _err("Group not found", 404)
     await gc.stop_group(g)
-    g["messages"] = []
+    gc.clear_messages(g)
     gc.save_groups()
     await gc.broadcast_group(g)
     return JSONResponse({"ok": True})
+
+
+class PinRequest(BaseModel):
+    message_id: str
+
+
+@router.post("/api/groups/{group_id}/pins")
+async def pin_group_message(group_id: str, req: PinRequest):
+    """Pin a message: every member sees it in every reply from now on."""
+    gc.load_groups()
+    g = gc.groups.get(group_id)
+    if not g:
+        return _err("Group not found", 404)
+    err = gc.pin_message(g, req.message_id)
+    if err:
+        return _err(err)
+    gc.save_groups()
+    await gc.broadcast_group(g)
+    return JSONResponse({"pinned": g.get("pinned", [])})
+
+
+@router.delete("/api/groups/{group_id}/pins/{message_id}")
+async def unpin_group_message(group_id: str, message_id: str):
+    gc.load_groups()
+    g = gc.groups.get(group_id)
+    if not g:
+        return _err("Group not found", 404)
+    gc.unpin_message(g, message_id)
+    gc.save_groups()
+    await gc.broadcast_group(g)
+    return JSONResponse({"pinned": g.get("pinned", [])})
+
+
+@router.get("/api/groups/{group_id}/context")
+async def group_context(group_id: str):
+    """What the members currently see: summary, pins, and how full their prompts are."""
+    gc.load_groups()
+    g = gc.groups.get(group_id)
+    if not g:
+        return _err("Group not found", 404)
+    return JSONResponse({"context": gc.context_info(g), "summary": g.get("summary", ""),
+                         "pinned": g.get("pinned", [])})
 
 
 class CrewGroupRequest(BaseModel):
@@ -288,4 +330,4 @@ async def create_group_from_crew(req: CrewGroupRequest):
     _remember_started_sessions(group, sessions)
     gc.save_groups()
     await gc.broadcast_group(group)
-    return JSONResponse({"group": gc._public(group)})
+    return JSONResponse({"group": gc.client_view(group)})

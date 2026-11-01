@@ -169,6 +169,13 @@ function groupOnStatus(d) {
   renderGroupList();
 }
 
+function groupOnContext(d) {
+  if (groupState.active && groupState.active.id === d.group_id) {
+    groupState.active.context = d.context;
+    _renderContextMeter();
+  }
+}
+
 // ── Rendering: sidebar section ──────────────────────────────────────────────
 
 function renderGroupSidebar() {
@@ -236,13 +243,31 @@ function _scrollGroup(force) {
   if (force || dist < 200) setTimeout(() => { list.scrollTop = list.scrollHeight; }, 0);
 }
 
+function _isPinned(group, id) {
+  return (group?.pinned || []).some(p => p.id === id);
+}
+
+function _pinButton(group, m) {
+  const pinned = _isPinned(group, m.id);
+  const b = _g('button', 'group-msg-copy group-msg-pin' + (pinned ? ' pinned' : ''), pinned ? 'Unpin' : 'Pin');
+  b.type = 'button';
+  b.title = pinned ? 'Stop showing this to every AI'
+                   : 'Every AI in the group will always see this, however long the chat gets';
+  b.addEventListener('click', () => togglePin(group.id, m.id, !pinned));
+  return b;
+}
+
 function _buildGroupMessage(group, m) {
   if (m.role === 'user') {
     const wrap = _g('div', 'group-msg group-msg-user');
+    if (_isPinned(group, m.id)) wrap.classList.add('is-pinned');
     const bubble = _g('div', 'group-bubble group-bubble-user');
     bubble.appendChild(_mentionText(m.content || '', group));
     wrap.appendChild(bubble);
-    wrap.appendChild(_g('div', 'group-msg-time', _gTime(m.timestamp)));
+    const meta = _g('div', 'group-msg-meta');
+    meta.appendChild(_pinButton(group, m));
+    meta.appendChild(_g('span', 'group-msg-time', _gTime(m.timestamp)));
+    wrap.appendChild(meta);
     return wrap;
   }
   if (m.role === 'system') return _g('div', 'group-msg-system', m.content || '');
@@ -250,6 +275,7 @@ function _buildGroupMessage(group, m) {
   const member = _gMember(group, m.author);
   const color = (member && member.color) || m.author_color || '#6b7280';
   const wrap = _g('div', 'group-msg group-msg-member');
+  if (_isPinned(group, m.id)) wrap.classList.add('is-pinned');
   const av = _g('span', 'group-msg-avatar', (member && member.emoji) || m.author_emoji || '🤖');
   av.style.borderColor = color;
   const col = _g('div', 'group-msg-col');
@@ -272,6 +298,7 @@ function _buildGroupMessage(group, m) {
   copy.addEventListener('click', () => {
     navigator.clipboard?.writeText(m.content || '').then(() => _gToast('success', 'Copied'));
   });
+  head.appendChild(_pinButton(group, m));
   head.appendChild(copy);
   col.appendChild(head);
   col.appendChild(bubble);
@@ -370,6 +397,11 @@ function renderGroupConversation(scrollToEnd) {
   const sub = _g('span', 'group-conv-sub', (g.members || []).map(m => m.name).join(' · '));
   left.appendChild(sub);
   header.appendChild(left);
+  const meter = _g('button', 'group-context');
+  meter.type = 'button';
+  meter.id = 'group-context';
+  meter.addEventListener('click', () => openGroupContext(g.id));
+  header.appendChild(meter);
   const actions = _g('div', 'group-conv-actions');
   const stop = _g('button', 'council-btn-stop', 'Stop');
   stop.id = 'group-stop-btn';
@@ -390,6 +422,24 @@ function renderGroupConversation(scrollToEnd) {
   header.appendChild(actions);
   pane.appendChild(header);
   if (g.about) pane.appendChild(_g('div', 'group-about', g.about));
+  if ((g.pinned || []).length) {
+    const strip = _g('div', 'group-pins');
+    strip.appendChild(_g('span', 'group-pins-label', '📌 Pinned'));
+    g.pinned.forEach(p => {
+      const chip = _g('span', 'group-pin');
+      const txt = (p.content || '').replace(/\s+/g, ' ');
+      chip.appendChild(_g('span', 'group-pin-text', (p.who ? p.who + ': ' : '') + txt.slice(0, 80) + (txt.length > 80 ? '…' : '')));
+      chip.title = p.content || '';
+      const x = _g('button', 'group-pin-x', '✕');
+      x.type = 'button';
+      x.title = 'Unpin';
+      x.setAttribute('aria-label', 'Unpin');
+      x.addEventListener('click', () => togglePin(g.id, p.id, false));
+      chip.appendChild(x);
+      strip.appendChild(chip);
+    });
+    pane.appendChild(strip);
+  }
 
   // Kelvin team: one penguin per member, showing who's replying.
   const team = _g('div', 'group-kelvins');
@@ -453,9 +503,73 @@ function renderGroupConversation(scrollToEnd) {
 
   _renderTyping();
   _renderGroupHeaderState();
+  _renderContextMeter();
   if (scrollToEnd) _scrollGroup(true);
   else list.scrollTop = prevScroll;
   if (hadFocus || scrollToEnd) ta.focus();
+}
+
+/** Header pill: how full the tightest member's prompt is, and what was summarised. */
+function _renderContextMeter() {
+  const el = document.getElementById('group-context');
+  const c = groupState.active && groupState.active.context;
+  if (!el) return;
+  while (el.firstChild) el.removeChild(el.firstChild);
+  if (!c || !c.messages) { el.hidden = true; return; }
+  el.hidden = false;
+  const pct = Math.max(0, Math.min(100, c.pct || 0));
+  const bar = _g('span', 'group-context-bar');
+  const fill = _g('span', 'group-context-fill');
+  fill.style.width = pct + '%';
+  if (pct >= 90) fill.classList.add('hot');
+  else if (pct >= 70) fill.classList.add('warm');
+  bar.appendChild(fill);
+  el.appendChild(bar);
+  const bits = [pct + '%'];
+  if (c.summarising) bits.push('summarising…');
+  else if (c.has_summary) bits.push(c.summarised + ' summarised');
+  if (c.hidden) bits.push(c.hidden + ' not shown');
+  if (c.pinned) bits.push('📌 ' + c.pinned);
+  el.appendChild(_g('span', 'group-context-text', bits.join(' · ')));
+  el.title = 'Context the AIs see: about ' + (c.tokens || 0).toLocaleString() + ' of ' +
+    (c.budget || 0).toLocaleString() + ' tokens for the tightest member. ' +
+    (c.shown || 0) + ' recent messages are shown' +
+    (c.has_summary ? ', ' + c.summarised + ' older ones are in a summary' : '') +
+    (c.hidden ? ', ' + c.hidden + ' don\'t fit yet' : '') + '. Click to see the summary and pins.';
+}
+
+async function openGroupContext(id) {
+  let d;
+  try { d = await _gFetch('/api/groups/' + encodeURIComponent(id) + '/context'); }
+  catch (err) { _gToast('error', err.message); return; }
+  document.getElementById('group-context-modal')?.remove();
+  const overlay = _g('div', 'modal-overlay open');
+  overlay.id = 'group-context-modal';
+  overlay.style.zIndex = '1300';
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  const content = _g('div', 'modal-content');
+  content.style.maxWidth = '560px';
+  const head = _g('div', 'modal-header');
+  head.appendChild(_g('h3', null, 'What the AIs see'));
+  const x = _g('button', 'modal-close', '✕');
+  x.addEventListener('click', () => overlay.remove());
+  head.appendChild(x);
+  content.appendChild(head);
+  const body = _g('div', 'modal-body group-context-body');
+  const c = d.context || {};
+  body.appendChild(_g('p', 'group-context-note',
+    'Each reply shows an AI the pinned messages, a summary of older messages, and the most recent ' +
+    'messages that fit its budget (about ' + (c.budget || 0).toLocaleString() + ' tokens for the tightest member; ' +
+    (c.pct || 0) + '% used).'));
+  body.appendChild(_g('label', 'council-modal-label', 'Pinned (' + (d.pinned || []).length + ')'));
+  if (!(d.pinned || []).length) body.appendChild(_g('div', 'group-context-empty', 'Nothing pinned. Use “Pin” on a message to keep it in view.'));
+  (d.pinned || []).forEach(p => body.appendChild(_g('div', 'group-context-pin', (p.who ? p.who + ': ' : '') + (p.content || ''))));
+  body.appendChild(_g('label', 'council-modal-label', 'Summary of older messages' + (c.summarised ? ' (' + c.summarised + ')' : '')));
+  body.appendChild(_g('div', d.summary ? 'group-context-summary' : 'group-context-empty',
+    d.summary || 'No summary yet. Older messages are summarised once the chat gets long.'));
+  content.appendChild(body);
+  overlay.appendChild(content);
+  document.body.appendChild(overlay);
 }
 
 // ── Actions ─────────────────────────────────────────────────────────────────
@@ -475,6 +589,22 @@ async function sendGroupMessage() {
     inp.value = text;
     _gToast('error', 'Could not send: ' + err.message);
   }
+}
+
+async function togglePin(id, messageId, pin) {
+  const base = '/api/groups/' + encodeURIComponent(id) + '/pins';
+  try {
+    const d = pin
+      ? await _gFetch(base, { method: 'POST', body: JSON.stringify({ message_id: messageId }) })
+      : await _gFetch(base + '/' + encodeURIComponent(messageId), { method: 'DELETE' });
+    // Show it now; the group_updated broadcast that follows brings the rest.
+    const g = groupState.active;
+    if (g && g.id === id) {
+      g.pinned = d.pinned || [];
+      if (g.context) g.context.pinned = g.pinned.length;
+      renderGroupConversation(false);
+    }
+  } catch (err) { _gToast('error', err.message); }
 }
 
 async function stopGroup(id) {

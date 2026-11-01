@@ -214,6 +214,7 @@ function connect(){
     else if(d.type==='agent_run_waiting_input' && typeof handleAgentRunWaitingInput==='function') handleAgentRunWaitingInput(d);
     else if(d.type==='group_message' && typeof groupOnMessage==='function') groupOnMessage(d);
     else if(d.type==='group_status' && typeof groupOnStatus==='function') groupOnStatus(d);
+    else if(d.type==='group_context' && typeof groupOnContext==='function') groupOnContext(d);
     else if(d.type==='group_updated' && typeof groupOnUpdated==='function') groupOnUpdated(d);
     else if(d.type==='group_deleted' && typeof groupOnDeleted==='function') groupOnDeleted(d);
     else if(d.type==='group_open' && typeof groupOpenFromServer==='function') groupOpenFromServer(d);
