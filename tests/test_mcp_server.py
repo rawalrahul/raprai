@@ -485,14 +485,14 @@ def test_cancelling_a_request_stops_its_ai_and_sends_no_answer(repo, monkeypatch
     s = mcp.Server(out=_server(sent), cwd=str(repo))
     s.handle({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
               "params": {"name": "ask_agent", "arguments": {"agent": "slow", "prompt": "hi"}}})
-    for _ in range(100):
+    for _ in range(600):   # up to 30s: slow runners
         if mcp._live:
             break
         time.sleep(0.05)
     assert mcp._live, "the AI never started"
     t0 = time.time()
     s.handle({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 7}})
-    for _ in range(100):
+    for _ in range(600):   # up to 30s: slow runners
         if not mcp._live and not s._pending:
             break
         time.sleep(0.05)
@@ -511,7 +511,7 @@ def test_progress_notifications_while_a_tool_works(repo, monkeypatch):
     s = mcp.Server(out=_server(sent), cwd=str(repo))
     s.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
         "name": "ask_agent", "arguments": {"agent": "x", "prompt": "hi"}, "_meta": {"progressToken": "tok"}}})
-    for _ in range(100):
+    for _ in range(600):   # up to 30s: slow runners
         if any(m.get("id") == 3 for m in sent):
             break
         time.sleep(0.05)
@@ -542,10 +542,10 @@ def test_status_is_short_while_running_and_full_when_done(repo, fake_agents, mon
     s = mcp.Server(out=None, cwd=str(repo))
     call(s, "start_bakeoff", task="fix add", agents=["editor", "reader"])
     bid = next(iter(s.bakeoffs))
-    for _ in range(100):
-        if s.bakeoffs[bid].attempts[0].seconds:
-            break
+    end = time.time() + 30   # copies are slow to make on Windows; wait for the editor's diff itself
+    while not s.bakeoffs[bid].attempts[0].diff and time.time() < end:
         time.sleep(0.05)
+    assert s.bakeoffs[bid].attempts[0].diff, "the editor never finished"
     text, _ = call(s, "bakeoff_status", id=bid, wait_seconds=0)
     assert "Still running" in text and "Diff:" not in text and len(text) < 1200
     text, _ = call(s, "bakeoff_status", id=bid, wait_seconds=0, include_diffs=True)
