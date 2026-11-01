@@ -47,6 +47,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(gc, "groups", {})
     monkeypatch.setattr(gc, "_loaded", True)
     monkeypatch.setattr(gc, "_store_path", lambda: tmp_path / "group_chats.json")
+    # Same prompt budget on every OS (Windows' command line is much shorter).
+    monkeypatch.setattr(gc, "ARGV_MAX_CHARS_WINDOWS", gc.ARGV_MAX_CHARS_POSIX)
     events = []
 
     async def fake_broadcast(ev):
