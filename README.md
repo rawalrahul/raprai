@@ -148,10 +148,34 @@ Then ask in plain words: *"get a second opinion from Codex on my changes"*, *"pl
 | `start_bakeoff`, `bakeoff_status`, `merge_bakeoff`, `discard_bakeoff` | A bake-off from your editor: 2 to 4 AIs, each in its own copy of the project; merge the one you like. |
 | `list_agents` | The AIs installed and signed in on this computer. |
 | `latest_brief` | What needs you, from your latest brief in the RAPR app (needs the app). |
+| `usage` | Each AI's plan usage as it reports it (Claude's and Codex's 5-hour and weekly windows), and what the AIs RAPR ran for you did today: calls, time, tokens, cost. |
 
 The other AI works in a temporary copy of your project, so your files only change if you allow edits or merge a relay or bake-off. Nothing is hosted, and the RAPR app doesn't need to be open, or even installed. More in the [full guide](docs/guide.md#use-rapr-from-your-coding-agent-mcp).
 
 RAPR only offers the AIs you can actually use: their command-line tool is installed (or came with their VS Code, Cursor or Windsurf extension), you're signed in where RAPR can check (Claude Code, Codex, Grok, Kiro), and a local model server like Ollama or LM Studio is running. Ask for `list_agents` to see them; it also says which installed AI still needs signing in, and how.
+
+### Usage ribbon
+
+<img src="docs/assets/usage-ribbon-open.png" width="620" alt="RAPR's usage ribbon above the message box: Claude 5h 66%, week 89% of the plan; Codex 5h 12%, week 41%; opened, a row for each AI, including the ones run from your editors through MCP">
+
+A slim ribbon shows how much of each AI's plan you've used, **as the AI itself reports it**, so it matches the AI's own usage page:
+
+| AI | What the ribbon shows | Where RAPR reads it |
+|---|---|---|
+| Claude | 5-hour and weekly plan usage (as on claude.ai's usage page), exact tokens and cost | the `rate_limit_event` and result every `claude` run prints |
+| Codex | 5-hour and weekly plan usage (as Codex's `/status` shows), exact tokens | the `token_count` events Codex writes to `~/.codex/sessions` (so Codex used on its own counts too) |
+| Others | time, tasks and tokens (estimated where the AI doesn't report them, marked `~`) | RAPR's own counters |
+
+5-hour and weekly windows belong to subscriptions (Claude Pro/Max, ChatGPT plans). An AI used with an **API key** has none, so the ribbon never shows them for it: it shows an **API key** tag and the money spent instead. RAPR tells them apart from what each AI says about its sign-in (Claude's `apiKeySource`, Codex's `~/.codex/auth.json`). On a plan, the dollar figure Claude reports is a list price you aren't billed, so it isn't shown as spending.
+
+In the app it sits above the message box; click it for every AI, × hides it, and the **Usage** panel brings it back. In Claude Code it sits above the prompt, with Claude's numbers taken straight from Claude Code (as [ponytail](https://github.com/DietrichGebert/ponytail) does) plus this session's cost and what RAPR ran for you today. Add it once (needs Claude Code 2.1.290 or later, in the terminal or the desktop app):
+
+```
+/plugin marketplace add rawalrahul/raprai
+/plugin install rapr-usage@raprai
+```
+
+`/rapr-usage` hides or shows it, `/rapr-usage details` adds reset times and a row per AI. Other MCP clients (Codex, Cursor, Antigravity...) can ask for the `usage` tool. Everything stays on your computer, in `~/.config/rapr/mcp-usage.json`.
 
 ### GitHub Copilot
 

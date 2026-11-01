@@ -410,6 +410,22 @@ grok mcp add rapr -- rapr mcp
 
 Check it with `grok mcp doctor rapr`. Grok also picks up servers you added to Claude Code with `--scope user`, so if you did that already, there's nothing to do.
 
+### Usage ribbon
+
+RAPR keeps each AI's plan usage exactly as the AI reports it, in `~/.config/rapr/mcp-usage.json` (or the file named by `RAPR_MCP_USAGE_FILE`):
+
+- **Claude**: every run (`claude -p --output-format stream-json`) prints a `rate_limit_event` with your plan's 5-hour and weekly windows, the numbers on claude.ai's usage page, and a result with exact tokens and cost. RAPR keeps both, from the app and from `rapr mcp`.
+- **Codex**: Codex writes `token_count` events with its 5-hour and weekly windows (what `/status` shows) to its session files in `~/.codex/sessions` (or `$CODEX_HOME`). RAPR reads the newest one, so Codex used on its own counts too, and takes each run's exact tokens from it.
+- **Other AIs** report no plan usage: the ribbon shows RAPR's own counters for them (time and tasks, and tokens estimated from text length, marked `~`, where the AI gives none). The app's "≈%" against `USAGE_CAP_MIN_<AI>` is that estimate.
+
+**Plan or API key.** Only a subscription has 5-hour and weekly windows. RAPR keeps how each AI is paid for and never mixes the two: Claude's stream-json init line says `apiKeySource: "none"` when it's signed in to claude.ai and names the key otherwise (Bedrock, Vertex and Foundry count as API too); Codex's `~/.codex/auth.json` says whether it signed in with ChatGPT or an API key (RAPR reads only which, never the key). On an API key the ribbon drops any windows kept from before, shows **API key** and the money spent, and uses no default "5-hour" cap: only a `USAGE_CAP_MIN_<AI>` you set yourself. On a plan, Claude's `total_cost_usd` is a list price nobody is billed, so it isn't counted as money spent.
+
+A window whose reset time has passed shows 0% until the AI reports again. Three things show it:
+
+- **In Claude Code**, a band above the prompt. Add it with `/plugin marketplace add rawalrahul/raprai`, then `/plugin install rapr-usage@raprai`. Claude's windows and this session's cost come straight from Claude Code (`$.session.usage()`); Codex's and what RAPR ran today come from the file. `/rapr-usage` hides or shows it; `/rapr-usage details` adds reset times and a row per AI. It needs Claude Code 2.1.290 or later and does not show in the VS Code chat panel or `claude -p`.
+- **In any MCP client**, the `usage` tool answers with the same numbers as text.
+- **In the RAPR app**, the ribbon above the message box, and the Usage panel.
+
 ### Cursor, Windsurf and other MCP clients
 
 Add a server with the command `rapr` and the argument `mcp` (on Windows: command `cmd`, arguments `/c rapr mcp`). For example, in Cursor's `~/.cursor/mcp.json`:

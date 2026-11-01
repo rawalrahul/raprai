@@ -179,6 +179,10 @@ async def get_usage():
     period_remaining = max(0, int((_st.usage_period_start + USAGE_PERIOD_SECONDS) - time.time()))
     reset_eta = fmt_reset_eta()
 
+    mcp = _mcp_usage()
+    plan = mcp.get("limits") or {}
+    ai_keys.update(plan)
+
     ais = {}
     for key in sorted(ai_keys):
         st = _st.usage_stats.get(key, {})
@@ -203,17 +207,30 @@ async def get_usage():
             tokens_out = 0
             tok_source = "estimate"
 
-        # Usage cap from environment
+        # Plan (subscription: 5-hour and weekly windows) or API key (per token, no windows).
+        mode = ((mcp.get("billing") or {}).get(key) or {}).get("mode")
+
+        # Usage cap from environment. Its default (300 minutes for Claude, Codex, Gemini)
+        # stands in for a plan's 5-hour window, which an API key doesn't have: there only a
+        # cap you set yourself counts.
         cap_min = usage_cap_minutes(key)
+        if mode == "api" and not _explicit_cap(key):
+            cap_min = None
 
         # Percentage from CLI or estimate
         pct_used = None
-        if exact.get("pct_used") is not None:
+        if exact.get("pct_used") is not None and mode != "api":
             pct_used = float(exact["pct_used"])
         elif cap_min:
             pct_used = min(100.0, (used_min / cap_min) * 100.0)
 
         cost_usd = float(st.get("cost_usd", 0.0))
+
+        # The plan's own windows, as the AI reported them (Claude's 5-hour and weekly usage...),
+        # beat any estimate: the share shown is the fullest window.
+        windows = (plan.get(key) or {}).get("windows") or []
+        if windows:
+            pct_used = max(float(w.get("pct") or 0) for w in windows)
 
         ais[key] = {
             "label": usage_ai_label(key),
@@ -230,7 +247,11 @@ async def get_usage():
             "est_tokens": total_tokens,  # backward compat for dashboard
             "cost_usd": round(cost_usd, 4),
             "last_used": last_used,
-            "source": exact.get("source", "estimate"),
+            "billing": mode,
+            # On a plan, Claude's reported cost is a list price nobody is billed.
+            "cost_is_spent": mode != "plan",
+            "source": "plan" if windows else exact.get("source", "estimate"),
+            "limits": windows,
             "budget": budget,
         }
 
@@ -255,7 +276,22 @@ async def get_usage():
         "period_remaining_sec": period_remaining,
         "reset_eta": reset_eta,
         "budget_enabled": _budget_config().get("enabled", True),
+        "mcp": mcp,
     })
+
+
+def _explicit_cap(key: str) -> bool:
+    return bool(os.environ.get(f"USAGE_CAP_MIN_{key.upper()}", "").strip()
+                or os.environ.get("USAGE_CAP_MIN_DEFAULT", "").strip())
+
+
+def _mcp_usage() -> dict:
+    """What AIs run through `rapr mcp` (from Claude Code, Codex...) did: helm/mcp_usage.py."""
+    from helm import mcp_usage
+    mcp_usage.refresh_codex_limits()        # Codex used on its own counts too
+    data = mcp_usage.load()
+    data["limits"] = mcp_usage.limits(data)   # a window past its reset reads 0%
+    return data
 
 
 # ---------------------------------------------------------------------------
