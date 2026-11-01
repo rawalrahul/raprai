@@ -132,7 +132,7 @@ def test_bakeoff_status_answers_inside_codex_tool_timeout(tmp_path, monkeypatch)
                                                      sleep=lambda sec: clock.__setitem__(0, clock[0] + sec)))
     s = mcp.Server(out=None, cwd=str(tmp_path))
     s.bakeoffs["b1"] = SimpleNamespace(id="b1", status="running", task="fix add", test_command=None,
-                                       attempts=[SimpleNamespace(ai="codex", seconds=0)])
+                                       attempts=[SimpleNamespace(ai="codex", seconds=0, done=False)])
     for asked in ({}, {"wait_seconds": 240}):
         clock[0] = 0.0
         text, err = call(s, "bakeoff_status", id="b1", **asked)
@@ -531,6 +531,9 @@ def test_status_is_short_while_running_and_full_when_done(repo, fake_agents, mon
     real_create = bakeoff.create
     monkeypatch.setattr(bakeoff, "create", lambda r, t, a, **kw: real_create(r, t, a, root=str(tmp_path / "w"), **kw))
     monkeypatch.setattr(mcp, "_save", lambda b: None)
+    # Windows' clock is coarse: a quick attempt can take "0 seconds". It's still finished.
+    import types
+    monkeypatch.setattr(bakeoff, "time", types.SimpleNamespace(time=lambda: 1000.0))
     gate = threading.Event()
 
     def run(agent, prompt, cwd, model=None, **kw):
@@ -543,9 +546,10 @@ def test_status_is_short_while_running_and_full_when_done(repo, fake_agents, mon
     call(s, "start_bakeoff", task="fix add", agents=["editor", "reader"])
     bid = next(iter(s.bakeoffs))
     end = time.time() + 30   # copies are slow to make on Windows; wait for the editor's diff itself
-    while not s.bakeoffs[bid].attempts[0].diff and time.time() < end:
+    while not s.bakeoffs[bid].attempts[0].done and time.time() < end:
         time.sleep(0.05)
-    assert s.bakeoffs[bid].attempts[0].diff, "the editor never finished"
+    assert s.bakeoffs[bid].attempts[0].done, "the editor never finished"
+    assert s.bakeoffs[bid].attempts[0].seconds == 0
     text, _ = call(s, "bakeoff_status", id=bid, wait_seconds=0)
     assert "Still running" in text and "Diff:" not in text and len(text) < 1200
     text, _ = call(s, "bakeoff_status", id=bid, wait_seconds=0, include_diffs=True)
@@ -598,3 +602,57 @@ def test_bakeoff_works_on_and_merges_onto_uncommitted_work(repo, monkeypatch, tm
     assert not err and "on top of your own uncommitted work" in text
     app = (repo / "app.py").read_text()
     assert "return a + b" in app and "def sub" in app and (repo / "notes.md").exists()
+
+
+# ── Answering within the client's time limit (Codex: 60s) ───────────────────
+
+def test_a_slow_ask_answers_with_an_id_and_agent_status_brings_the_reply(repo, monkeypatch):
+    import threading
+    monkeypatch.setattr(mcp, "ANSWER_WAIT", 0.2)
+    monkeypatch.setattr(mcp, "agents", lambda: {"slow": "Slow"})
+    gate = threading.Event()
+    monkeypatch.setattr(mcp, "run_agent", lambda *a, **k: gate.wait(10) and "the answer")
+    (repo / "app.py").write_text("def add(a, b):\n    return a * b\n")   # something to review
+    s = mcp.Server(out=None, cwd=str(repo))
+    t0 = time.time()
+    text, err = call(s, "second_opinion", agent="slow")
+    assert not err and "still working" in text and time.time() - t0 < 5
+    jid = text.split("id '", 1)[1].split("'")[0]
+    text, err = call(s, "agent_status", id=jid, wait_seconds=0)
+    assert not err and "still working" in text
+    gate.set()
+    text, err = call(s, "agent_status", id=jid, wait_seconds=10)
+    assert not err and "Second opinion from slow" in text and "the answer" in text
+    text, err = call(s, "agent_status", id=jid)               # given once, then gone
+    assert err and "already given" in text
+
+
+def test_a_quick_ask_answers_directly_and_errors_stay_errors(repo, monkeypatch):
+    monkeypatch.setattr(mcp, "agents", lambda: {"x": "X"})
+
+    def boom(*a, **k):
+        raise mcp.ToolError("x didn't answer: not logged in")
+    monkeypatch.setattr(mcp, "run_agent", boom)
+    s = mcp.Server(out=None, cwd=str(repo))
+    text, err = call(s, "ask_agent", agent="x", prompt="hi")
+    assert err and "not logged in" in text and not s.jobs
+
+
+def test_cancel_agent_stops_a_running_ask(repo, monkeypatch):
+    import helm.council.runner as runner
+    monkeypatch.setattr(mcp, "ANSWER_WAIT", 0.2)
+    monkeypatch.setattr(mcp, "agents", lambda: {"slow": "Slow"})
+    monkeypatch.setattr(runner, "_build_cmd_for_session",
+                        lambda sess, prompt: ([sys.executable, "-c", "import time; time.sleep(60)"], None, {}))
+    s = mcp.Server(out=None, cwd=str(repo))
+    text, _ = call(s, "ask_agent", agent="slow", prompt="hi")
+    jid = text.split("id '", 1)[1].split("'")[0]
+    for _ in range(600):
+        if mcp._live:
+            break
+        time.sleep(0.05)
+    t0 = time.time()
+    text, err = call(s, "cancel_agent", id=jid)
+    assert not err and "Stopped slow's question" in text and time.time() - t0 < 10
+    assert not mcp._live and jid not in s.jobs
+    assert "rapr-mcp" not in subprocess.run(["git", "worktree", "list"], cwd=repo, capture_output=True, text=True).stdout

@@ -148,7 +148,8 @@ function _attemptCard(bid, index, a, status, isWinner, redraw) {
   if (isWinner) card.style.borderColor = '#f5c451';
   card.appendChild(_el('strong', null, (isWinner ? '🏆 ' : '') + a.ai));
   const stats = [
-    a.error ? 'failed' : (a.seconds ? a.seconds.toFixed(0) + 's' : 'working…'),
+    // done, not seconds: a quick attempt can take "0s" (Windows' clock is coarse).
+    a.error ? 'failed' : ((a.done || status !== 'running') ? (a.seconds || 0).toFixed(0) + 's' : 'working…'),
     a.files_changed + ' file' + (a.files_changed === 1 ? '' : 's') + ' changed',
     a.lines_added || a.lines_removed ? '+' + a.lines_added + ' −' + a.lines_removed : '',
     a.tests_passed === true ? '✅ tests pass' : a.tests_passed === false ? '❌ tests fail' : '',

@@ -45,6 +45,7 @@ class Attempt:
     model: Optional[str] = None
     lines_added: int = 0
     lines_removed: int = 0
+    done: bool = False                  # finished and collected (seconds can be 0 on Windows)
     # What the attempt's diff is taken against: HEAD, or (carry_uncommitted) a git tree of
     # HEAD plus the work that wasn't committed when the copy was made.
     base: str = "HEAD"
@@ -52,7 +53,7 @@ class Attempt:
     def as_dict(self) -> dict:
         return {"ai": self.ai, "model": self.model, "files_changed": self.files_changed,
                 "lines_added": self.lines_added, "lines_removed": self.lines_removed,
-                "seconds": round(self.seconds, 1), "tests_passed": self.tests_passed, "error": self.error,
+                "seconds": round(self.seconds, 1), "done": self.done, "tests_passed": self.tests_passed, "error": self.error,
                 "output": self.output[:4000], "diff": self.diff[:20000]}
 
 
@@ -144,12 +145,21 @@ def create(repo: str, task: str, ais: list[str], test_command: Optional[str] = N
     return bo
 
 
-def _snapshot(path: str, git: bool) -> dict[str, bytes]:
-    """File contents for a plain copy (used when not a git repo)."""
+def _snapshot(path: str, git: bool) -> dict[str, str]:
+    """A fingerprint of each file in a plain copy (used when not a git repo): enough to see
+    what changed without holding the whole project in memory."""
+    import hashlib
     out = {}
     for p in Path(path).rglob("*"):
         if p.is_file():
-            out[str(p.relative_to(path))] = p.read_bytes()
+            h = hashlib.sha1()
+            try:
+                with open(p, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        h.update(chunk)
+            except OSError:
+                continue
+            out[str(p.relative_to(path))] = h.hexdigest()
     return out
 
 
@@ -166,7 +176,10 @@ async def run(bo: BakeOff, runner: Runner, prompt_prefix: str = "") -> BakeOff:
         except Exception as exc:
             a.error = str(exc)
         a.seconds = time.time() - t0
-        _collect(bo, a, before)
+        try:
+            _collect(bo, a, before)
+        finally:
+            a.done = True
 
     await asyncio.gather(*(one(a) for a in bo.attempts))
     if bo.status == "running":   # not discarded meanwhile
