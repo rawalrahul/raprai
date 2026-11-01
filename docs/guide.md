@@ -428,13 +428,15 @@ Ask in plain words: *"get a second opinion from Codex on my changes"*, *"ask Ant
 | `ask_agent` | Sends any question or task to another AI and returns its reply. |
 | `start_relay`, `relay_status`, `merge_relay`, `discard_relay` | One task down a line of AIs: a planner, an executor, a reviewer and a fixer, each any AI you like (see below). |
 | `start_team`, `team_status`, `merge_team`, `discard_team` | One plan split into parts, each part done by a different AI at the same time while you do your own; then merged (see below). |
-| `start_bakeoff`, `bakeoff_status`, `merge_bakeoff`, `discard_bakeoff` | The same bake-off as in the app: 2 to 4 AIs, each in its own copy of the project. Merge the one you like (staged, not committed). |
+| `start_bakeoff`, `bakeoff_status`, `merge_bakeoff`, `discard_bakeoff` | The same bake-off as in the app: 2 to 4 AIs, each in its own copy of the project as it is now (your uncommitted work included). Merge the one you like: it goes into your files on top of your own work, not committed. |
 | `list_agents` | The AIs that are installed and set up on this computer. |
 | `latest_brief` | What needs you, from your latest brief in the RAPR app: approvals, unfinished work, scheduled results and what your AIs found in their apps. |
 
 - **It runs on your computer.** Your MCP client starts `rapr mcp` itself and talks to it over stdin/stdout. Nothing is hosted, and the RAPR app doesn't need to be open. The AIs run through their own command-line tools with your sign-ins, as in a bake-off.
 - **Your files are safe by default.** `second_opinion` and `ask_agent` run the other AI in a temporary copy of the project, including your uncommitted changes. If it edits anything, you get the diff back; your files don't change. Pass `allow_edits` to `ask_agent` to let it work in the real folder.
-- Each call takes as long as the other AI does, usually a minute or a few. Relays and bake-offs run in the background: `start_bakeoff` returns an id, and `bakeoff_status` waits up to 50 seconds per call (inside Codex's time limit, even without `tool_timeout_sec`), so your AI calls it again until the results are in. `relay_status` and `team_status` work the same way. Bake-offs from MCP are kept like the app's, so they count in your monthly recap.
+- Each call takes as long as the other AI does, usually a minute or a few. Relays and bake-offs run in the background: `start_bakeoff` returns an id, and `bakeoff_status` waits up to 50 seconds per call (inside Codex's time limit, even without `tool_timeout_sec`), so your AI calls it again until the results are in. `relay_status` and `team_status` work the same way. While something runs, these give a short progress report (who did what, a line of each reply); the plan, reviews and diffs come in full once it has finished, so waiting doesn't fill your AI's context. Bake-offs from MCP are kept like the app's, so they count in your monthly recap.
+- **Long answers are cut, not lost.** An answer over about 60,000 characters (Claude Code refuses tool answers over 25,000 tokens) is cut, and the whole text is saved to a file in your temp folder (`rapr-mcp-output`, kept a day) that the answer names, so your AI can read the rest. Set `RAPR_MCP_OUTPUT_CHARS` to change the limit.
+- **Stopping works.** If you stop your AI while a `second_opinion` or `ask_agent` is running (Esc in Claude Code), the other AI is stopped too and its copy removed. When the MCP client closes, running AIs are stopped and the copies of relays, teams and bake-offs that weren't merged are removed, bake-off branches included. Clients that ask for progress get a note every 15 seconds while a tool works.
 
 #### Relays: plan, build, review, fix
 
@@ -445,11 +447,11 @@ A relay gives each AI one job. You pick who does what:
 | `planner` | Reads the project and writes a plan. It can't change files. | Pass your own `plan` instead, or neither, and the executor works from the task alone. |
 | `executor` | Carries out the plan. | Required. |
 | `reviewer` | Reviews the change and ends with *approved* or *changes needed*. It can't change files. | The planner reviews. |
-| `fixer` | Fixes what the reviewer found. Then the reviewer looks again. | The executor fixes. |
+| `fixer` | Fixes what the reviewer found (it sees the plan too). Then the reviewer looks again, checking its own earlier findings against what the fixer did and said. | The executor fixes. |
 
 Any AI from `list_agents` can take any role, and one AI can take several: plan with Claude, build with Codex, review with Claude; or plan with Grok, build with Antigravity, review with Codex. `fix_rounds` (0 to 3, default 1) is how many times it goes back to the fixer when the reviewer still wants changes. With a `test_command` (say `pytest -q`), the tests run after each build and fix, and the reviewer sees the result.
 
-Everything happens in one copy of your project, starting from your uncommitted work. `relay_status` shows the plan, what each AI said, the review and the diff so far; nothing in your project changes until `merge_relay`, which applies the result without staging or committing it. `discard_relay` stops a running relay and throws it away. A relay usually takes 10 minutes or more, and it ends if your MCP client closes.
+Everything happens in one copy of your project, starting from your uncommitted work. `relay_status` shows the plan, what each AI said, the review and the diff (in full once the relay has finished; pass `include_diff` to see them sooner); nothing in your project changes until `merge_relay`, which applies the result without staging or committing it. `discard_relay` stops a running relay and throws it away. A relay usually takes 10 minutes or more, and it ends if your MCP client closes.
 
 #### Teams: split a plan between AIs (and you)
 

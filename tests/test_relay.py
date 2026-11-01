@@ -271,3 +271,60 @@ def test_what_the_tests_leave_behind_is_not_merged(repo, monkeypatch):
     assert "): passed" in report and "__pycache__" not in report.split("Files changed")[1]
     merged, _ = call(s, "merge_relay", id=rid_of(text))
     assert "1 file(s) changed" in merged and not (repo / "__pycache__").exists()
+
+
+def test_the_second_review_checks_the_first_and_the_fixer_sees_the_plan(repo, monkeypatch):
+    ais = FakeAIs(monkeypatch)
+    s = mcp.Server(out=None, cwd=str(repo))
+    text, _ = call(s, "start_relay", task="add() is wrong", planner="planner", executor="builder",
+                   reviewer="critic")
+    wait(s, rid_of(text))
+    build, review1, fix, review2 = (c["prompt"] for c in ais.calls[1:])
+    assert "Make add() return a + b" in fix                    # the fixer knows the plan
+    assert "second look" not in review1
+    assert "Your previous review:" in review2 and "no test for add()" in review2
+    assert "Added the test." in review2                        # …and what the fixer said about it
+
+
+def test_a_planner_that_fails_stops_the_relay(repo, monkeypatch):
+    ais = FakeAIs(monkeypatch)
+
+    def run(agent, prompt, cwd, model=None, **kw):
+        if agent == "planner":
+            raise mcp.ToolError("planner didn't finish within 15 minutes")
+        return ais.run(agent, prompt, cwd, model, **kw)
+    monkeypatch.setattr(mcp, "run_agent", run)
+    s = mcp.Server(out=None, cwd=str(repo))
+    text, _ = call(s, "start_relay", task="t", planner="planner", executor="builder", reviewer="critic")
+    report = wait(s, rid_of(text))
+    assert ": failed" in report and "didn't produce a plan" in report and "15 minutes" in report
+    assert not any(c["agent"] == "builder" for c in ais.calls)   # nobody built from a non-plan
+
+
+def test_a_cut_diff_names_every_changed_file(monkeypatch):
+    monkeypatch.setattr(relay, "DIFF_LIMIT", 100)
+    r = relay.create("/x", "t", "builder", "critic")
+    r.diff, r.files = "x" * 500, ["a.py", "b/c.py"]
+    out = relay._diff_for_review(r)
+    assert out.startswith("x" * 100) and "- a.py\n- b/c.py" in out and "too long" in out
+    r.diff = "short"
+    assert relay._diff_for_review(r) == "short"
+
+
+def test_relay_status_is_short_until_the_relay_finishes(repo, monkeypatch):
+    ais = FakeAIs(monkeypatch)
+    ais.gate = threading.Event()
+    s = mcp.Server(out=None, cwd=str(repo))
+    text, _ = call(s, "start_relay", task="add() is wrong", planner="planner", executor="builder",
+                   reviewer="critic")
+    rid = rid_of(text)
+    end = time.time() + 10
+    status, _ = call(s, "relay_status", id=rid, wait_seconds=0)
+    while "builder is carrying out" not in status and time.time() < end:
+        time.sleep(0.05)
+        status, _ = call(s, "relay_status", id=rid, wait_seconds=0)
+    assert "## Plan: planner" in status and "Make add() return a + b" in status   # a line of it
+    assert "Still running" in status and "Diff:" not in status
+    ais.gate.set()
+    report = wait(s, rid)
+    assert "Diff:" in report and "+    return a + b" in report

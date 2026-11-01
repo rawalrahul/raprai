@@ -107,7 +107,7 @@ def test_unknown_agent_and_missing_args(repo, fake_agents):
 def test_bakeoff_round_trip(repo, fake_agents, monkeypatch, tmp_path):
     import helm.bakeoff as bakeoff
     real_create = bakeoff.create
-    monkeypatch.setattr(bakeoff, "create", lambda r, t, a, test_command=None: real_create(r, t, a, test_command=test_command, root=str(tmp_path / "w")))
+    monkeypatch.setattr(bakeoff, "create", lambda r, t, a, **kw: real_create(r, t, a, root=str(tmp_path / "w"), **kw))
     saved = []
     monkeypatch.setattr(mcp, "_save", lambda b: saved.append(b.status))
     s = mcp.Server(out=None, cwd=str(repo))
@@ -151,9 +151,16 @@ def fake_claude(tmp_path):
     exe.write_text(textwrap.dedent(f"""\
         #!{sys.executable}
         import json, os, sys
-        prompt = sys.argv[sys.argv.index("-p") + 1]
+        args = sys.argv[1:]
+        i = args.index("-p")
+        # Like Claude Code: piped stdin is read, and is the prompt when none is given. (Had it
+        # inherited the MCP server's stdin, this would eat the client's messages.)
+        piped = sys.stdin.read()
+        via_stdin = i + 1 >= len(args)
+        prompt = piped if via_stdin else args[i + 1]
         open("touched_by_claude.txt", "w").write("x")
-        print(json.dumps({{"result": "FAKE REVIEW cwd=" + os.getcwd() + " saw=" + str("return a * b" in prompt)}}))
+        print(json.dumps({{"result": "FAKE REVIEW cwd=" + os.getcwd() + " saw=" + str("return a * b" in prompt)
+                          + " stdin=" + str(via_stdin)}}))
     """))
     exe.chmod(0o755)
     return bindir
@@ -162,7 +169,8 @@ def fake_claude(tmp_path):
 @pytest.mark.skipif(sys.platform == "win32", reason="uses a shebang script as a fake CLI")
 def test_stdio_end_to_end(repo, fake_claude, tmp_path):
     """The real entry point, over stdin/stdout, running a (fake) claude CLI."""
-    (repo / "app.py").write_text("def add(a, b):\n    return a * b\n")
+    # A change big enough that the review prompt goes to claude over stdin.
+    (repo / "app.py").write_text("def add(a, b):\n    return a * b\n" + "# padding line\n" * 600)
     env = dict(os.environ, PATH=f"{fake_claude}{os.pathsep}{os.environ['PATH']}", RAPR_DATA_DIR=str(tmp_path / "data"))
     proc = subprocess.Popen([sys.executable, str(ROOT / "rapr_mcp.py")], cwd=repo, env=env, text=True,
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -200,7 +208,7 @@ def test_stdio_end_to_end(repo, fake_claude, tmp_path):
         review = got[4]["result"]
         assert not review.get("isError"), review
         text = review["content"][0]["text"]
-        assert "FAKE REVIEW" in text and "saw=True" in text and f"cwd={repo}" not in text
+        assert "FAKE REVIEW" in text and "saw=True" in text and "stdin=True" in text and f"cwd={repo}" not in text
         assert not (repo / "touched_by_claude.txt").exists()
         send({"jsonrpc": "2.0", "id": 6, "method": "bogus"})
         assert recv()["error"]["code"] == -32601
@@ -415,3 +423,178 @@ def test_list_agents_explains_copilot_chat_is_not_a_cli(monkeypatch, tmp_path):
     monkeypatch.setattr(mcp, "agents", lambda: {"claude": "Claude Code", "copilot": "Copilot"})
     text = mcp.Server(out=None).call_tool("list_agents", {})["content"][0]["text"]
     assert "npm install" not in text
+
+
+# ── Robustness: failures, output size, cancellation, progress, cleanup ──────
+
+def test_shared_runner_never_hands_the_ai_our_stdin_and_reports_errors(tmp_path):
+    from helm.council.runner import _extract_text, _run_subprocess_blocking, failed
+    # The child sees an empty stdin (not ours), so it can't eat an MCP client's messages.
+    out = _run_subprocess_blocking([sys.executable, "-c", "import sys; print(repr(sys.stdin.read()))"],
+                                   str(tmp_path), None)
+    assert out == "''"
+    # No output and a failing exit: the error text, not "(no output)".
+    out = _run_subprocess_blocking([sys.executable, "-c", "import sys; sys.stderr.write('not logged in'); sys.exit(3)"],
+                                   str(tmp_path), None)
+    assert out == "(error: not logged in)" and failed(out)
+    assert _extract_text(json.dumps({"is_error": True, "result": "Credit balance is too low"})) \
+        == "(error: Credit balance is too low)"
+    assert not failed("Looks good")
+
+
+def test_run_agent_raises_when_the_ai_does_not_answer(monkeypatch):
+    import helm.council.runner as runner
+    monkeypatch.setattr(runner, "_build_cmd_for_session", lambda sess, prompt: (["x"], None, {}))
+    for reply, says in [("(timed out)", "didn't finish within 5 minutes"),
+                        ("(error: not logged in)", "didn't answer: error: not logged in")]:
+        monkeypatch.setattr(runner, "_run_subprocess_blocking", lambda *a, reply=reply, **k: reply)
+        with pytest.raises(mcp.ToolError, match=says):
+            mcp.run_agent("codex", "hi", ".", timeout=300)
+    # Saying nothing isn't failing: it may have edited files. The reply is just empty.
+    monkeypatch.setattr(runner, "_run_subprocess_blocking", lambda *a, **k: "(no output)")
+    assert mcp.run_agent("codex", "hi", ".") == ""
+
+
+def test_long_answers_are_cut_and_saved_to_a_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(mcp, "OUTPUT_LIMIT", 1000)
+    monkeypatch.setattr(mcp, "output_dir", lambda: tmp_path / "out")
+    text = "".join(f"line {i}\n" for i in range(1000))
+    out = mcp.fit_output("ask_agent", text)
+    assert len(out) < 1300 and out.startswith("line 0\n") and "cut here" in out
+    saved = list((tmp_path / "out").glob("ask_agent-*.md"))
+    assert len(saved) == 1 and saved[0].read_text() == text and str(saved[0]) in out
+    assert mcp.fit_output("x", "short") == "short"
+
+
+def _server(out):
+    class Out:
+        def write(self, s):
+            out.extend(json.loads(line) for line in s.splitlines() if line)
+
+        def flush(self):
+            pass
+    return Out()
+
+
+def test_cancelling_a_request_stops_its_ai_and_sends_no_answer(repo, monkeypatch):
+    import helm.council.runner as runner
+    monkeypatch.setattr(mcp, "agents", lambda: {"slow": "Slow"})
+    monkeypatch.setattr(runner, "_build_cmd_for_session",
+                        lambda sess, prompt: ([sys.executable, "-c", "import time; time.sleep(60)"], None, {}))
+    sent: list = []
+    s = mcp.Server(out=_server(sent), cwd=str(repo))
+    s.handle({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+              "params": {"name": "ask_agent", "arguments": {"agent": "slow", "prompt": "hi"}}})
+    for _ in range(100):
+        if mcp._live:
+            break
+        time.sleep(0.05)
+    assert mcp._live, "the AI never started"
+    t0 = time.time()
+    s.handle({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 7}})
+    for _ in range(100):
+        if not mcp._live and not s._pending:
+            break
+        time.sleep(0.05)
+    assert not mcp._live and time.time() - t0 < 5          # killed, not left to run 60s
+    assert [m for m in sent if m.get("id") == 7] == []      # a cancelled request gets no answer
+    # Cancelling something already answered is ignored.
+    s.cancel(99)
+    assert 99 not in s._cancelled
+
+
+def test_progress_notifications_while_a_tool_works(repo, monkeypatch):
+    monkeypatch.setattr(mcp, "PROGRESS_EVERY", 0.05)
+    monkeypatch.setattr(mcp, "agents", lambda: {"x": "X"})
+    monkeypatch.setattr(mcp, "run_agent", lambda *a, **k: time.sleep(0.4) or "done")
+    sent: list = []
+    s = mcp.Server(out=_server(sent), cwd=str(repo))
+    s.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
+        "name": "ask_agent", "arguments": {"agent": "x", "prompt": "hi"}, "_meta": {"progressToken": "tok"}}})
+    for _ in range(100):
+        if any(m.get("id") == 3 for m in sent):
+            break
+        time.sleep(0.05)
+    progress = [m for m in sent if m.get("method") == "notifications/progress"]
+    assert progress and all(p["params"]["progressToken"] == "tok" for p in progress)
+    assert [p["params"]["progress"] for p in progress] == sorted({p["params"]["progress"] for p in progress})
+    answer = next(m for m in sent if m.get("id") == 3)
+    assert "done" in answer["result"]["content"][0]["text"]
+    n = len([m for m in sent if m.get("method") == "notifications/progress"])
+    time.sleep(0.2)
+    assert len([m for m in sent if m.get("method") == "notifications/progress"]) == n   # stopped
+
+
+def test_status_is_short_while_running_and_full_when_done(repo, fake_agents, monkeypatch, tmp_path):
+    import threading
+    import helm.bakeoff as bakeoff
+    real_create = bakeoff.create
+    monkeypatch.setattr(bakeoff, "create", lambda r, t, a, **kw: real_create(r, t, a, root=str(tmp_path / "w"), **kw))
+    monkeypatch.setattr(mcp, "_save", lambda b: None)
+    gate = threading.Event()
+
+    def run(agent, prompt, cwd, model=None, **kw):
+        if agent == "reader":
+            gate.wait(10)
+        Path(cwd, "app.py").write_text("def add(a, b):\n    return a + b\n")
+        return agent + " says " + "blah " * 200
+    monkeypatch.setattr(mcp, "run_agent", run)
+    s = mcp.Server(out=None, cwd=str(repo))
+    call(s, "start_bakeoff", task="fix add", agents=["editor", "reader"])
+    bid = next(iter(s.bakeoffs))
+    for _ in range(100):
+        if s.bakeoffs[bid].attempts[0].seconds:
+            break
+        time.sleep(0.05)
+    text, _ = call(s, "bakeoff_status", id=bid, wait_seconds=0)
+    assert "Still running" in text and "Diff:" not in text and len(text) < 1200
+    text, _ = call(s, "bakeoff_status", id=bid, wait_seconds=0, include_diffs=True)
+    assert "Diff:" in text                                  # asked for: shown anyway
+    gate.set()
+    text, _ = call(s, "bakeoff_status", id=bid, wait_seconds=10)
+    assert "Still running" not in text and text.count("Diff:") == 2
+
+
+def test_closing_the_server_removes_bakeoff_copies_and_branches(repo, fake_agents, monkeypatch, tmp_path):
+    import helm.bakeoff as bakeoff
+    real_create = bakeoff.create
+    monkeypatch.setattr(bakeoff, "create", lambda r, t, a, **kw: real_create(r, t, a, root=str(tmp_path / "w"), **kw))
+    monkeypatch.setattr(mcp, "_save", lambda b: None)
+    s = mcp.Server(out=None, cwd=str(repo))
+    call(s, "start_bakeoff", task="fix add", agents=["editor", "reader"])
+    bid = next(iter(s.bakeoffs))
+    call(s, "bakeoff_status", id=bid, wait_seconds=10)
+    assert "bakeoff/" in subprocess.run(["git", "branch"], cwd=repo, capture_output=True, text=True).stdout
+    s.serve([])   # the client goes away
+    assert s.bakeoffs[bid].status == "discarded"
+    assert "bakeoff/" not in subprocess.run(["git", "branch"], cwd=repo, capture_output=True, text=True).stdout
+    assert len(subprocess.run(["git", "worktree", "list"], cwd=repo, capture_output=True, text=True).stdout.splitlines()) == 1
+
+
+def test_bakeoff_works_on_and_merges_onto_uncommitted_work(repo, monkeypatch, tmp_path):
+    import helm.bakeoff as bakeoff
+    real_create = bakeoff.create
+    monkeypatch.setattr(bakeoff, "create", lambda r, t, a, **kw: real_create(r, t, a, root=str(tmp_path / "w"), **kw))
+    monkeypatch.setattr(mcp, "_save", lambda b: None)
+    # The user's work in progress: an edit and a new file, neither committed.
+    (repo / "app.py").write_text("def add(a, b):\n    return a - b\n\n\ndef sub(a, b):\n    return a - b\n")
+    (repo / "notes.md").write_text("wip\n")
+    seen = {}
+
+    def run(agent, prompt, cwd, model=None, **kw):
+        seen[agent] = (Path(cwd, "app.py").read_text(), Path(cwd, "notes.md").exists())
+        if agent == "editor":
+            Path(cwd, "app.py").write_text(Path(cwd, "app.py").read_text().replace("return a - b\n\n", "return a + b\n\n", 1))
+        return "ok"
+    monkeypatch.setattr(mcp, "agents", lambda: {"editor": "E", "reader": "R"})
+    monkeypatch.setattr(mcp, "run_agent", run)
+    s = mcp.Server(out=None, cwd=str(repo))
+    call(s, "start_bakeoff", task="fix add", agents=["editor", "reader"])
+    bid = next(iter(s.bakeoffs))
+    text, _ = call(s, "bakeoff_status", id=bid, wait_seconds=10)
+    assert all("def sub" in app and notes for app, notes in seen.values())   # they saw the work in progress
+    assert "1 file(s) changed, +1 −1" in text                               # only the AI's own change
+    text, err = call(s, "merge_bakeoff", id=bid, agent="editor")
+    assert not err and "on top of your own uncommitted work" in text
+    app = (repo / "app.py").read_text()
+    assert "return a + b" in app and "def sub" in app and (repo / "notes.md").exists()

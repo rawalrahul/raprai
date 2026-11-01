@@ -41,6 +41,13 @@ ATTEMPT_DIFF_LIMIT = 8_000
 # tool time limits (Codex gives up after 60 seconds unless tool_timeout_sec is raised).
 STATUS_WAIT_DEFAULT = 45
 STATUS_WAIT_MAX = 50
+# A tool's answer is read into the client AI's context. Claude Code refuses answers over
+# 25,000 tokens by default, so longer ones are cut and the whole text saved to a file
+# the client can read when it needs it.
+OUTPUT_LIMIT = int(os.environ.get("RAPR_MCP_OUTPUT_CHARS", "60000"))
+OUTPUT_KEEP_SECONDS = 24 * 3600
+# While a tool works, a client that asked for progress gets a note this often.
+PROGRESS_EVERY = 15
 AGENT_TIMEOUT = 300        # seconds an AI gets to answer (a bake-off attempt gets BUILD_TIMEOUT)
 BUILD_TIMEOUT = 1800
 
@@ -52,7 +59,8 @@ INSTRUCTIONS = (
     "start_team to split a plan into parts that different AIs do at the same time and then merge, and "
     "start_bakeoff to give the same task to several AIs in separate copies of the project and "
     "compare them. Call list_agents first to see which AIs are available. Each call can take "
-    "a few minutes while the other AI works."
+    "a few minutes while the other AI works. While a relay, team or bake-off runs, its status "
+    "tool gives a short progress report; the plan, reviews and diffs come once it has finished."
 )
 
 
@@ -155,15 +163,36 @@ def _check_agent(agent: str) -> None:
                         "Use list_agents to see them.")
 
 
+# Every AI process running now, and the request it works for (None for the background
+# work of relays, teams and bake-offs), so a cancelled request can stop its AI and
+# none outlives the server.
+_live: dict[int, tuple[subprocess.Popen, object]] = {}
+_live_lock = threading.Lock()
+_request = threading.local()     # .id: the request this thread is answering
+
+
+def kill_processes(request_id=None, everything: bool = False) -> int:
+    """Stop the AIs working for request_id (or all of them). Returns how many."""
+    with _live_lock:
+        procs = [p for p, rid in _live.values() if everything or (rid is not None and rid == request_id)]
+    for proc in procs:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    return len(procs)
+
+
 def run_agent(agent: str, prompt: str, cwd: str, model: Optional[str] = None, *, edits: bool = False,
               timeout: int = AGENT_TIMEOUT, on_start=None) -> str:
-    """Run one AI's command-line tool in `cwd` and return its reply.
+    """Run one AI's command-line tool in `cwd` and return its reply. Raises ToolError
+    when it doesn't answer (timed out, crashed, not signed in…), with what it said.
 
     edits: the AI is meant to change files. Claude Code asks before every edit, and
     with nobody there to answer it would change nothing, so it's allowed file edits
     (not commands). The other AIs' commands already let them edit.
     """
-    from helm.council.runner import _build_cmd_for_session, _run_subprocess_blocking
+    from helm.council.runner import _build_cmd_for_session, _run_subprocess_blocking, failed
     _load()
     sess = {"id": "mcp", "ai": agent, "cwd": cwd, "model": model}
     try:
@@ -172,7 +201,28 @@ def run_agent(agent: str, prompt: str, cwd: str, model: Optional[str] = None, *,
         raise ToolError(str(exc)) from exc
     if edits and agent == "claude":
         cmd[1:1] = ["--permission-mode", "acceptEdits"]
-    return _run_subprocess_blocking(cmd, cwd, stdin_text, extra_env, on_start=on_start, timeout=timeout)
+    request_id = getattr(_request, "id", None)
+    started: list = []
+
+    def track(proc):
+        started.append(proc)
+        with _live_lock:
+            _live[id(proc)] = (proc, request_id)
+        if on_start:
+            on_start(proc)
+    try:
+        reply = _run_subprocess_blocking(cmd, cwd, stdin_text, extra_env, on_start=track, timeout=timeout)
+    finally:
+        with _live_lock:
+            for proc in started:
+                _live.pop(id(proc), None)
+    if reply.strip() == "(no output)":
+        return ""   # it may still have done its work (edited files); callers judge an empty reply
+    if failed(reply):
+        if reply.startswith("(timed out)"):
+            raise ToolError(f"{agent} didn't finish within {timeout // 60} minutes")
+        raise ToolError(f"{agent} didn't answer: {reply.strip()[1:-1] if reply.endswith(')') else reply.strip()}")
+    return reply
 
 
 # ---------------------------------------------------------------------------
@@ -358,6 +408,23 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + f"\n… ({len(text) - limit:,} more characters cut)"
 
 
+# While something runs, its status tool is called again every minute or so, and each answer
+# goes into the client AI's context. So until it finishes a report is short: who did what and
+# how long it took, a line of each reply, no diffs. The full texts come in the final report.
+PEEK = 300
+
+
+def _peek(text: str) -> str:
+    one = " ".join((text or "").split())
+    return one if len(one) <= PEEK else one[:PEEK] + "…"
+
+
+def _want_full(args: dict, finished: bool, key: str) -> bool:
+    """Diffs and full texts: in the final report, or whenever the client asks for them."""
+    asked = args.get(key)
+    return finished if asked is None else bool(asked)
+
+
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -420,7 +487,7 @@ def tool_ask_agent(args: dict, ctx: "Server") -> str:
         changes = scratch.changes()
     finally:
         scratch.close()
-    out = f"{agent} replied:\n\n{_clip(reply, REPLY_LIMIT)}"
+    out = f"{agent} replied:\n\n{_clip(reply, REPLY_LIMIT) if reply.strip() else '(nothing)'}"
     if changes.strip():
         out += ("\n\nIt also made changes in a temporary copy of the project (not applied to your files):\n\n"
                 + _clip(changes, REPLY_LIMIT))
@@ -455,7 +522,8 @@ def tool_second_opinion(args: dict, ctx: "Server") -> str:
 
 
 def _bakeoff_report(b, include_diffs: bool) -> str:
-    lines = [f"Bake-off {b.id}: {b.status}", f"Task: {b.task}"]
+    running = b.status in ("created", "running")
+    lines = [f"Bake-off {b.id}: {b.status}", f"Task: {_peek(b.task) if running else b.task}"]
     if b.test_command:
         lines.append(f"Test command: {b.test_command}")
     for a in b.attempts:
@@ -469,11 +537,13 @@ def _bakeoff_report(b, include_diffs: bool) -> str:
         lines.append(f"\n## {a.ai}{' (merged)' if b.winner is not None and b.attempts[b.winner] is a else ''}: "
                      + ", ".join(bits))
         if a.output:
-            lines.append("What it said:\n" + _clip(a.output.strip(), 1500))
+            lines.append("What it said: " + _peek(a.output) if running and not include_diffs
+                         else "What it said:\n" + _clip(a.output.strip(), 1500))
         if include_diffs and a.diff.strip():
             lines.append("Diff:\n" + _clip(a.diff, ATTEMPT_DIFF_LIMIT))
-    if b.status in ("created", "running"):
-        lines.append("\nStill running. Call bakeoff_status again to keep waiting.")
+    if running:
+        lines.append("\nStill running. Call bakeoff_status again to keep waiting; the diffs come "
+                     "when every AI has finished.")
     if b.status == "done":
         lines.append("\nNext: merge_bakeoff with the agent you prefer (it applies that attempt to the project), "
                      "or discard_bakeoff. The result is also kept in RAPR, where it counts in the monthly recap.")
@@ -487,7 +557,9 @@ def tool_start_bakeoff(args: dict, ctx: "Server") -> str:
         _check_agent(a)
     folder = _folder(args.get("folder"), ctx.cwd)
     try:
-        b = bakeoff.create(folder, args["task"], ais, test_command=(args.get("test_command") or None))
+        # Started from the coding agent mid-task: the AIs work on the project as it is now.
+        b = bakeoff.create(folder, args["task"], ais, test_command=(args.get("test_command") or None),
+                           carry_uncommitted=True)
     except (ValueError, RuntimeError) as exc:
         raise ToolError(str(exc)) from exc
 
@@ -535,7 +607,8 @@ def tool_bakeoff_status(args: dict, ctx: "Server") -> str:
     end = time.monotonic() + wait
     while b.status in ("created", "running") and time.monotonic() < end:
         time.sleep(1)
-    return _bakeoff_report(b, include_diffs=args.get("include_diffs", True))
+    return _bakeoff_report(b, include_diffs=_want_full(
+        args, b.status not in ("created", "running"), "include_diffs"))
 
 
 def tool_merge_bakeoff(args: dict, ctx: "Server") -> str:
@@ -549,8 +622,10 @@ def tool_merge_bakeoff(args: dict, ctx: "Server") -> str:
     except (ValueError, RuntimeError) as exc:
         raise ToolError(str(exc)) from exc
     _save(b)
+    staged = b.attempts[b.winner].base == "HEAD"
     return (f"Merged {args['agent']}'s attempt into {b.repo} ({n} file(s)); the other copies were removed. "
-            "The changes are staged, not committed.")
+            + ("The changes are staged, not committed." if staged else
+               "The changes are in your files on top of your own uncommitted work, not staged or committed."))
 
 
 def tool_discard_bakeoff(args: dict, ctx: "Server") -> str:
@@ -616,13 +691,14 @@ def tool_start_relay(args: dict, ctx: "Server") -> str:
 
 
 def _relay_report(r, include_diff: bool) -> str:
+    full = include_diff or not r.busy
     roles = ([f"planner {r.planner}"] if r.planner else ["plan given"] if r.plan else []) + [
         f"executor {r.executor}", f"reviewer {r.reviewer}"]
     if r.fix_rounds:
         roles.append(f"fixer {r.fixer}")
     lines = [f"Relay {r.id}: {r.status}" + (f" ({r.stage})" if r.busy else ""),
-             f"Task: {r.task}", "Roles: " + ", ".join(roles)]
-    if r.plan and not r.planner:
+             f"Task: {r.task if full else _peek(r.task)}", "Roles: " + ", ".join(roles)]
+    if r.plan and not r.planner and full:
         lines.append("\n## The plan you gave\n" + _clip(r.plan, 3000))
     for st in r.steps:
         head = f"\n## {ROLE_NAMES.get(st.role, st.role)}: {st.agent}"
@@ -631,10 +707,11 @@ def _relay_report(r, include_diff: bool) -> str:
             continue
         lines.append(head + f" ({st.seconds:.0f}s)" + (f", failed: {st.error}" if st.error else ""))
         if st.output.strip():
-            lines.append(_clip(st.output.strip(), 6000 if st.role in ("plan", "review") else 2000))
+            lines.append(_clip(st.output.strip(), 6000 if st.role in ("plan", "review") else 2000)
+                         if full else _peek(st.output))
     if r.tests_passed is not None:
         lines.append(f"\nTests (`{r.test_command}`): {'passed' if r.tests_passed else 'FAILED'}")
-        if not r.tests_passed and r.test_output:
+        if not r.tests_passed and r.test_output and full:
             lines.append(_clip(r.test_output, 2000))
     if r.error:
         lines.append(f"\nStopped: {r.error}")
@@ -644,7 +721,8 @@ def _relay_report(r, include_diff: bool) -> str:
         if include_diff and r.diff.strip():
             lines.append("Diff:\n" + _clip(r.diff, REPLY_LIMIT))
     if r.busy:
-        lines.append("\nStill running. Call relay_status again to keep waiting.")
+        lines.append("\nStill running. Call relay_status again to keep waiting; the plan, reviews and "
+                     "diff come in full when it has finished.")
     elif r.status == "done":
         said = {True: "The reviewer approved the change.",
                 False: "The reviewer still wants changes after the last fix round.",
@@ -667,16 +745,19 @@ def tool_relay_status(args: dict, ctx: "Server") -> str:
     end = time.monotonic() + wait
     while r.busy and time.monotonic() < end:
         time.sleep(1)
-    return _relay_report(r, include_diff=args.get("include_diff", True))
+    return _relay_report(r, include_diff=_want_full(args, not r.busy, "include_diff"))
 
 
 def tool_merge_relay(args: dict, ctx: "Server") -> str:
     r = _get_relay(args, ctx)
-    if r.status != "done":
-        raise ToolError(f"Relay {r.id} is {r.status}; only a finished relay can be merged.")
+    with r.lock:   # two merge calls at once must not apply it twice
+        if r.status != "done":
+            raise ToolError(f"Relay {r.id} is {r.status}; only a finished relay can be merged.")
+        r.status = "merging"
     try:
         names = r.workspace.apply()
     except RuntimeError as exc:
+        r.status = "done"
         raise ToolError(str(exc)) from exc
     r.workspace.close()
     r.status = "merged"
@@ -687,7 +768,7 @@ def tool_merge_relay(args: dict, ctx: "Server") -> str:
 def tool_discard_relay(args: dict, ctx: "Server") -> str:
     from helm import relay
     r = _get_relay(args, ctx)
-    if r.status in ("merged", "discarded"):
+    if r.status in ("merged", "merging", "discarded"):
         return f"Relay {r.id} is already {r.status}."
     _discard_relay(r, relay)
     return f"Discarded relay {r.id}; the copy is removed and your project is unchanged."
@@ -800,11 +881,11 @@ def _team_report(t: Team, include_diffs: bool) -> str:
         head = f"\n## Part {p.n}: {p.agent}, {p.status}"
         if p.seconds:
             head += f" ({p.seconds:.0f}s)"
-        lines.append(head + f"\nTask: {_clip(p.task, 500)}")
+        lines.append(head + f"\nTask: {_clip(p.task, 500) if include_diffs else _peek(p.task)}")
         if p.error:
             lines.append(f"Error: {_clip(p.error, 1000)}")
         if p.reply.strip():
-            lines.append(_clip(p.reply.strip(), 2000))
+            lines.append(_clip(p.reply.strip(), 2000) if include_diffs else _peek(p.reply))
         if p.files:
             lines.append(f"Files changed ({len(p.files)}): " + ", ".join(p.files[:30])
                          + (" …" if len(p.files) > 30 else ""))
@@ -815,8 +896,9 @@ def _team_report(t: Team, include_diffs: bool) -> str:
         lines.append("\nFiles changed by more than one part (check these merge cleanly): "
                      + "; ".join(f"{name} (parts {', '.join(map(str, ns))})" for name, ns in overlaps.items()))
     if t.busy:
-        lines.append("\nStill running. Call team_status again to keep waiting; merge_team can already "
-                     "bring in the parts that are done.")
+        lines.append("\nStill running. Call team_status again to keep waiting (the diffs come when every "
+                     "part has finished, or ask with include_diffs); merge_team can already bring in the "
+                     "parts that are done.")
     elif any(p.status == "done" for p in t.parts):
         lines.append("\nNext: merge_team to apply the finished parts to the project (not staged or "
                      "committed), or discard_team to throw them away.")
@@ -836,7 +918,7 @@ def tool_team_status(args: dict, ctx: "Server") -> str:
     end = time.monotonic() + wait
     while t.busy and time.monotonic() < end:
         time.sleep(1)
-    return _team_report(t, include_diffs=args.get("include_diffs", True))
+    return _team_report(t, include_diffs=_want_full(args, not t.busy, "include_diffs"))
 
 
 def _changed_since_copy(s: Scratch, names: list[str]) -> list[str]:
@@ -977,12 +1059,12 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
         "inputSchema": {"type": "object", "required": ["id"], "properties": {
             "id": {"type": "string"},
             "wait_seconds": {"type": "integer", "minimum": 0, "maximum": STATUS_WAIT_MAX, "default": STATUS_WAIT_DEFAULT},
-            "include_diffs": {"type": "boolean", "default": True},
+            "include_diffs": {"type": "boolean", "description": "Show the diffs. Default: once it has finished."},
         }},
-        "annotations": {"readOnlyHint": True},
+        "annotations": {"readOnlyHint": True, "idempotentHint": True},
     }, tool_bakeoff_status),
     "merge_bakeoff": ({
-        "description": "Apply one AI's bake-off attempt to the project (staged, not committed) and remove the copies.",
+        "description": "Apply one AI's bake-off attempt to the project (not committed) and remove the copies.",
         "inputSchema": {"type": "object", "required": ["id", "agent"], "properties": {
             "id": {"type": "string"}, "agent": {"type": "string", "description": "The AI whose attempt to keep."},
         }},
@@ -991,6 +1073,7 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
     "discard_bakeoff": ({
         "description": "Throw away every attempt of a bake-off. The project is left unchanged.",
         "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}},
+        "annotations": {"destructiveHint": True, "idempotentHint": True},
     }, tool_discard_bakeoff),
     "start_relay": ({
         "description": "Hand a task down a line of AIs, each in a role the user picks: the planner writes a "
@@ -1022,9 +1105,10 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
         "inputSchema": {"type": "object", "required": ["id"], "properties": {
             "id": {"type": "string"},
             "wait_seconds": {"type": "integer", "minimum": 0, "maximum": STATUS_WAIT_MAX, "default": STATUS_WAIT_DEFAULT},
-            "include_diff": {"type": "boolean", "default": True},
+            "include_diff": {"type": "boolean", "description": "Show the plan, reviews and diff in full. "
+                                                               "Default: once it has finished."},
         }},
-        "annotations": {"readOnlyHint": True},
+        "annotations": {"readOnlyHint": True, "idempotentHint": True},
     }, tool_relay_status),
     "merge_relay": ({
         "description": "Apply a finished relay's change to the project (not staged or committed) and remove the copy.",
@@ -1034,6 +1118,7 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
     "discard_relay": ({
         "description": "Stop a relay if it's running and throw away its copy. The project is left unchanged.",
         "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}},
+        "annotations": {"destructiveHint": True, "idempotentHint": True},
     }, tool_discard_relay),
     "start_team": ({
         "description": "Split a plan into parts and give each part to a different AI (or the same AI more "
@@ -1059,9 +1144,10 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
         "inputSchema": {"type": "object", "required": ["id"], "properties": {
             "id": {"type": "string"},
             "wait_seconds": {"type": "integer", "minimum": 0, "maximum": STATUS_WAIT_MAX, "default": STATUS_WAIT_DEFAULT},
-            "include_diffs": {"type": "boolean", "default": True},
+            "include_diffs": {"type": "boolean", "description": "Show the diffs and full replies. "
+                                                                "Default: once every part has finished."},
         }},
-        "annotations": {"readOnlyHint": True},
+        "annotations": {"readOnlyHint": True, "idempotentHint": True},
     }, tool_team_status),
     "merge_team": ({
         "description": "Apply the finished parts of a team to the project, one after another, on top of what "
@@ -1078,6 +1164,7 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
     "discard_team": ({
         "description": "Throw away a team's parts that aren't merged yet. Parts already merged stay in the project.",
         "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}},
+        "annotations": {"destructiveHint": True, "idempotentHint": True},
     }, tool_discard_team),
 }
 
@@ -1085,6 +1172,36 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
 # ---------------------------------------------------------------------------
 # The MCP protocol (JSON-RPC 2.0, one message per line on stdin/stdout)
 # ---------------------------------------------------------------------------
+
+def output_dir() -> Path:
+    return Path(tempfile.gettempdir()) / "rapr-mcp-output"
+
+
+def fit_output(name: str, text: str) -> str:
+    """A tool's answer, cut to OUTPUT_LIMIT. When it's cut, the whole text is saved to a
+    file (kept a day) and the answer says where, so the client can read the rest."""
+    if len(text) <= OUTPUT_LIMIT:
+        return text
+    folder = output_dir()
+    path = None
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        for old in folder.glob("*.md"):
+            try:
+                if now - old.stat().st_mtime > OUTPUT_KEEP_SECONDS:
+                    old.unlink()
+            except OSError:
+                pass
+        path = folder / f"{name}-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}-{threading.get_ident() % 10000}.md"
+        path.write_text(text, encoding="utf-8", errors="replace")
+    except OSError:
+        logger.debug("Couldn't save the full answer", exc_info=True)
+        path = None
+    where = (f"The whole answer ({len(text):,} characters) is in {path}; read it there for the rest."
+             if path else f"({len(text) - OUTPUT_LIMIT:,} more characters not shown.)")
+    return text[:OUTPUT_LIMIT] + f"\n\n… cut here to keep this answer small. {where}"
+
 
 class Server:
     def __init__(self, out, cwd: Optional[str] = None):
@@ -1095,6 +1212,8 @@ class Server:
         self.teams: dict = {}
         self._lock = threading.Lock()
         self._pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="mcp-tool")
+        self._pending: set = set()       # tools/call requests not answered yet
+        self._cancelled: set = set()     # …of which the client gave up on these
 
     def send(self, msg: dict) -> None:
         # An AI's reply can hold half an emoji (a lone surrogate), which UTF-8 can't encode.
@@ -1119,20 +1238,56 @@ class Server:
         if missing:
             return {"content": [{"type": "text", "text": f"Missing: {', '.join(missing)}"}], "isError": True}
         try:
-            return {"content": [{"type": "text", "text": fn(args, self)}]}
+            return {"content": [{"type": "text", "text": fit_output(name, fn(args, self))}]}
         except ToolError as exc:
             return {"content": [{"type": "text", "text": str(exc)}], "isError": True}
         except Exception as exc:
             return {"content": [{"type": "text", "text": f"{name} failed: {exc}"}], "isError": True}
 
-    def _answer(self, mid, name: str, args: dict) -> None:
-        """Run a tool and send its result. Whatever goes wrong, the client gets an answer:
-        an error the thread pool swallowed would leave it waiting forever."""
+    def _answer(self, mid, name: str, args: dict, progress_token=None) -> None:
+        """Run a tool and send its result. Whatever goes wrong, the client gets an answer
+        (an error the thread pool swallowed would leave it waiting forever), unless it
+        cancelled the request, which wants no answer."""
+        _request.id = mid
+        done = threading.Event()
+        if progress_token is not None:
+            threading.Thread(target=self._progress, args=(progress_token, name, done),
+                             daemon=True, name=f"mcp-progress-{mid}").start()
         try:
-            self._reply(mid, self.call_tool(name, args))
+            result = self.call_tool(name, args)
         except Exception as exc:
             logger.exception("MCP: couldn't answer %s", name)
-            self._reply(mid, {"content": [{"type": "text", "text": f"{name} failed: {exc}"}], "isError": True})
+            result = {"content": [{"type": "text", "text": f"{name} failed: {exc}"}], "isError": True}
+        finally:
+            done.set()
+            _request.id = None
+        with self._lock:
+            self._pending.discard(mid)
+            if mid in self._cancelled:
+                self._cancelled.discard(mid)
+                return
+        self._reply(mid, result)
+
+    def _progress(self, token, name: str, done: threading.Event) -> None:
+        """Tell a client that asked for progress that the tool is still working, so it can
+        show it (and, where it resets its time limit on progress, keep waiting)."""
+        start = time.monotonic()
+        n = 0
+        while not done.wait(PROGRESS_EVERY):
+            n += 1
+            secs = int(time.monotonic() - start)
+            self.send({"jsonrpc": "2.0", "method": "notifications/progress", "params": {
+                "progressToken": token, "progress": n,
+                "message": f"{name}: still working ({secs // 60}m {secs % 60:02d}s)"}})
+
+    def cancel(self, request_id) -> None:
+        """The client gave up on a request: stop the AI working for it (its copy is removed as
+        the tool returns) and don't answer."""
+        with self._lock:
+            if request_id not in self._pending:
+                return           # already answered (or never asked)
+            self._cancelled.add(request_id)
+        kill_processes(request_id)
 
     def handle(self, msg: dict) -> None:
         method, mid = msg.get("method"), msg.get("id")
@@ -1154,8 +1309,14 @@ class Server:
             self._reply(mid, {"tools": [{"name": n, **spec} for n, (spec, _) in TOOLS.items()]})
         elif method == "tools/call":
             name, args = params.get("name"), params.get("arguments") or {}
+            token = (params.get("_meta") or {}).get("progressToken")
+            with self._lock:
+                self._pending.add(mid)
             # Tools take minutes; run them off the reading thread so pings still get answers.
-            self._pool.submit(self._answer, mid, name, args)
+            self._pool.submit(self._answer, mid, name, args, token)
+        elif method == "notifications/cancelled":
+            if params.get("requestId") is not None:
+                self.cancel(params["requestId"])
         elif mid is not None:
             self._reply(mid, error={"code": -32601, "message": f"Method not found: {method}"})
         # other notifications (initialized, cancelled…) need no answer
@@ -1166,6 +1327,7 @@ class Server:
         finally:
             self._pool.shutdown(wait=False, cancel_futures=True)
             self.close_relays()
+            kill_processes(everything=True)   # e.g. an ask_agent still waiting on its AI
 
     def _serve(self, inp) -> None:
         for line in inp:
@@ -1182,10 +1344,18 @@ class Server:
                     self.handle(m)
 
     def close_relays(self) -> None:
-        """The client went away: nobody can merge these any more, so stop them and remove their copies."""
+        """The client went away: nobody can merge relays, teams or bake-offs any more, so stop
+        them and remove their copies (bake-offs leave branches and worktrees in the repository)."""
+        import helm.bakeoff as bakeoff
         from helm import relay
+        for b in self.bakeoffs.values():
+            if b.status not in ("merged", "discarded"):
+                try:
+                    bakeoff.discard(b)   # its AIs, if still working, are stopped right after this
+                except Exception:
+                    logger.debug("Couldn't clean up bake-off %s", b.id, exc_info=True)
         for r in self.relays.values():
-            if r.status not in ("merged", "discarded"):
+            if r.status not in ("merged", "merging", "discarded"):
                 try:
                     relay.stop(r)
                     if r.workspace is not None:

@@ -251,13 +251,13 @@ def test_command_line_members_get_a_tighter_budget(env, monkeypatch):
     assert gc.prompt_budget_tokens(m) == 2000
 
 
-def test_long_claude_prompts_go_over_stdin():
-    sess = {"ai": "claude"}
-    short, long_ = "hi", "y" * (gc.STDIN_PROMPT_CHARS + 1)
-    assert gc.use_stdin_if_long(sess, ["claude", "-p", short], None, short) == (["claude", "-p", short], None)
-    assert gc.use_stdin_if_long(sess, ["claude", "-p", long_], None, long_) == (["claude", "-p"], long_)
-    other = {"ai": "codex"}
-    assert gc.use_stdin_if_long(other, ["codex", long_], None, long_) == (["codex", long_], None)
+def test_long_claude_prompts_go_over_stdin(monkeypatch):
+    from helm.council.runner import CLAUDE_STDIN_CHARS, _build_cmd_for_session
+    short, long_ = "hi", "y" * (CLAUDE_STDIN_CHARS + 1)
+    cmd, stdin, _ = _build_cmd_for_session({"ai": "claude"}, short)
+    assert cmd[-2:] == ["-p", short] and stdin is None
+    cmd, stdin, _ = _build_cmd_for_session({"ai": "claude"}, long_)
+    assert cmd[-1] == "-p" and long_ not in cmd and stdin == long_
 
 
 def test_summary_replaces_folded_messages_in_the_prompt(env):
