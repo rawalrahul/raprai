@@ -355,7 +355,7 @@ Finished bake-offs are kept (the numbers only, not the code), so they count towa
 
 RAPR is also an MCP server, so the AI you're coding with can call the others. The `rapr mcp` command comes with the Windows and Mac installs; from a source checkout, use `python /path/to/raprai/rapr_mcp.py` wherever you see `rapr mcp` below.
 
-The other AIs need their own command-line tools on this computer. If Claude Code or Codex came only with its extension for VS Code, Cursor or Windsurf, RAPR uses the copy inside the extension; a separate install of the command-line tool, when you have one, comes first.
+The other AIs need their own command-line tools on this computer. If Claude Code or Codex came only with its extension for VS Code, Cursor or Windsurf, RAPR uses the copy inside the extension. A separate install of the command-line tool, when you have one, comes first, except when RAPR runs under VS Code (the Claude Code extension started it): then the extension's own copy comes first, so RAPR uses the same tools as your editor. In a VS Code window connected to WSL (or SSH, a container), that's the copy in `~/.vscode-server`, where the extensions run.
 
 ### Without installing the app
 
@@ -429,6 +429,29 @@ A window whose reset time has passed shows 0% until the AI reports again. Three 
 - **In VS Code** (and anywhere else), `/rapr-usage`: the plugin calls RAPR's MCP server's `usage` tool, which asks every AI live, prints the answer in the chat and opens a **RAPR usage** pane beside it, with an "Ask every AI now" button. The MCP server also refreshes the numbers when it starts and every five minutes. It needs RAPR's MCP server added to Claude Code (as `rapr`, the name the README uses); without it, the command says how to add it and shows the last numbers RAPR saw.
 - **In any MCP client**, the `usage` tool answers with the same numbers as text.
 - **In the RAPR app**, the ribbon above the message box once you're in a session (click it for every AI, asked live), and the Usage panel.
+
+### Copilot from VS Code
+
+GitHub Copilot in VS Code has no command-line tool RAPR can run, and keeps its GitHub sign-in inside VS Code. RAPR asks it through **RAPR Bridge**, a small VS Code extension that RAPR carries and installs itself (`vscode-bridge/` in the repository). It uses VS Code's own language model API, the one Copilot Chat uses, so nothing else is installed and no other sign-in is needed.
+
+1. Ask your AI to *"connect Copilot from VS Code"*: RAPR's `connect_vscode_copilot` tool installs the bridge into VS Code.
+2. In VS Code, reload the window (**Developer: Reload Window**), run **RAPR: Connect Copilot** from the Command Palette, and press **Allow** when VS Code asks whether RAPR Bridge may use Copilot.
+3. Copilot appears in `list_agents` as `copilot_vscode`. Use it for `second_opinion`, `ask_agent`, or a relay's planner or reviewer.
+
+**Finding Copilot.** Copilot can be an extension you installed or built into VS Code, and in a WSL window it can live on either side. RAPR looks in all of these, identifying Copilot by its manifest (publisher GitHub, `copilot-chat` or `copilot`), not its folder name:
+
+- installed extensions: `~/.vscode/extensions`, VS Code Server's `~/.vscode-server/extensions` (WSL side) and, from inside WSL, Windows' `C:\Users\<you>\.vscode\extensions`;
+- VS Code's built-in extensions: inside its install (`AppData\Local\Programs\Microsoft VS Code`, Program Files, `/Applications`, `/usr/share/code`, including a versioned folder inside), reached from WSL through `/mnt/c`, and VS Code Server's own.
+
+Versions VS Code has replaced (listed in `.obsolete`) don't count. Once the bridge runs, VS Code's own answer (does it have Copilot models?) decides, whatever the files say. If RAPR finds nothing, `connect_vscode_copilot` says how to check (Extensions, `@installed copilot`, under both Local and WSL), and `anyway: true` installs the bridge regardless.
+
+What to know:
+
+- It **answers questions; it doesn't edit files**, so RAPR doesn't offer it for bake-offs, team parts, or a relay's executor or fixer. For Copilot that edits files (and works without VS Code), install the Copilot CLI instead: `npm install -g @github/copilot`, then `copilot login`.
+- It works **while VS Code is open**. With several windows open, one serves RAPR; another takes over when it closes. **RAPR: Bridge status** says which.
+- Each question counts against your Copilot plan like a Copilot Chat one. Without a model named, the bridge picks one that uses no premium requests (GPT-4.1, GPT-5 mini, GPT-4o) when your plan has it.
+- **Safety:** the bridge listens on `127.0.0.1` only, on a random port, and answers only requests carrying a random key it writes to `~/.config/rapr/vscode-bridge.json` (readable only by you). It refuses anything a web page could send. No certificate or account is involved; it's installed from a file, not the Marketplace.
+- **WSL:** in a VS Code window connected to WSL, Copilot Chat, Claude Code, `rapr mcp` and the bridge all run inside WSL, and RAPR installs the bridge there with VS Code Server's own CLI. In a window that isn't connected, they all run on Windows, and you connect once there too. Each side keeps its own bridge and key file.
 
 ### Cursor, Windsurf and other MCP clients
 

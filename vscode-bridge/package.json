@@ -1,0 +1,19 @@
+{
+  "name": "rapr-bridge",
+  "displayName": "RAPR Bridge",
+  "description": "Lets RAPR AI (on this computer) use GitHub Copilot through your VS Code sign-in, with your permission.",
+  "version": "0.1.0",
+  "publisher": "raprai",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/rawalrahul/raprai" },
+  "engines": { "vscode": "^1.95.0" },
+  "categories": ["AI", "Other"],
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [
+      { "command": "rapr.connectCopilot", "title": "RAPR: Connect Copilot" },
+      { "command": "rapr.bridgeStatus", "title": "RAPR: Bridge status" }
+    ]
+  }
+}
