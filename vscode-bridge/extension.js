@@ -8,6 +8,8 @@
 // - One VS Code window serves at a time; when it closes, another window takes over.
 // - VS Code asks the person once whether RAPR Bridge may use Copilot's models: the
 //   "RAPR: Connect Copilot" command asks that question.
+// - Copilot can work as an agent: /chat takes a conversation and tools, and returns the tool
+//   calls Copilot asks for. RAPR runs them, in the folder it was given, and sends the results.
 // Plain JavaScript with no dependencies: what's in RAPR's repository is what runs.
 'use strict'
 
@@ -122,26 +124,68 @@ function explain (err) {
   return [502, 'copilot_error', 'Copilot didn\'t answer: ' + String((err && err.message) || err).slice(0, 300)]
 }
 
-async function ask (prompt, wanted) {
-  const models = await copilotModels()
+// One turn of a conversation with Copilot: RAPR's messages (text, the tool calls Copilot asked
+// for, and their results), the tools Copilot may call, and what it said back.
+//   messages: [{ role: 'user' | 'assistant', content?, toolCalls?: [{ callId, name, input }],
+//                toolResults?: [{ callId, content }] }]
+//   tools:    [{ name, description, inputSchema }]
+function toVscodeMessages (messages) {
+  return messages.map(m => {
+    const parts = []
+    if (m.role === 'assistant') {
+      if (m.content) parts.push(new vscode.LanguageModelTextPart(String(m.content)))
+      for (const c of m.toolCalls || []) parts.push(new vscode.LanguageModelToolCallPart(String(c.callId), String(c.name), c.input || {}))
+      return vscode.LanguageModelChatMessage.Assistant(parts)
+    }
+    for (const r of m.toolResults || []) {
+      parts.push(new vscode.LanguageModelToolResultPart(String(r.callId), [new vscode.LanguageModelTextPart(String(r.content ?? ''))]))
+    }
+    if (m.content) parts.push(new vscode.LanguageModelTextPart(String(m.content)))
+    return vscode.LanguageModelChatMessage.User(parts)
+  })
+}
+
+function canCallTools (m) {
+  return !(m.capabilities && m.capabilities.supportsToolCalling === false)
+}
+
+async function converse ({ prompt, messages, tools, model: wanted }) {
+  let models = await copilotModels()
   if (!models.length) {
     const e = new Error('no_models')
     e.status = 503
     e.reason = 'Copilot isn\'t available in VS Code: install GitHub Copilot Chat and sign in to GitHub there.'
     throw e
   }
+  const withTools = Array.isArray(tools) && tools.length > 0
+  if (withTools && models.some(canCallTools)) models = models.filter(canCallTools)
   const model = pickModel(models, wanted)
+  const chat = Array.isArray(messages) && messages.length ? toVscodeMessages(messages)
+    : [vscode.LanguageModelChatMessage.User(prompt)]
+  const options = { justification: JUSTIFICATION }
+  if (withTools) {
+    options.tools = tools.map(t => ({ name: String(t.name), description: String(t.description || ''), inputSchema: t.inputSchema || { type: 'object' } }))
+    options.toolMode = vscode.LanguageModelChatToolMode.Auto
+  }
   const cts = new vscode.CancellationTokenSource()
   const stop = setTimeout(() => cts.cancel(), ANSWER_TIMEOUT_MS)
   try {
-    const resp = await model.sendRequest([vscode.LanguageModelChatMessage.User(prompt)], { justification: JUSTIFICATION }, cts.token)
+    const resp = await model.sendRequest(chat, options, cts.token)
     let text = ''
-    for await (const part of resp.text) text += part
-    return { text, model: describe(model) }
+    const toolCalls = []
+    for await (const part of resp.stream) {
+      if (part instanceof vscode.LanguageModelTextPart) text += part.value
+      else if (part instanceof vscode.LanguageModelToolCallPart) toolCalls.push({ callId: part.callId, name: part.name, input: part.input || {} })
+    }
+    return { text, toolCalls, model: describe(model) }
   } finally {
     clearTimeout(stop)
     cts.dispose()
   }
+}
+
+async function ask (prompt, wanted) {
+  return converse({ prompt, model: wanted })
 }
 
 function readBody (req) {
@@ -172,7 +216,7 @@ async function handle (req, res) {
   const url = new URL(req.url, 'http://127.0.0.1')
   try {
     if (req.method === 'GET' && url.pathname === '/health') {
-      return send(res, 200, { ok: true, version: VERSION, vscode: vscode.version, pid: process.pid })
+      return send(res, 200, { ok: true, version: VERSION, vscode: vscode.version, pid: process.pid, features: ['chat', 'tools'] })
     }
     if (req.method === 'GET' && url.pathname === '/models') {
       return send(res, 200, { models: (await copilotModels()).map(describe) })
@@ -182,12 +226,14 @@ async function handle (req, res) {
       try { body = JSON.parse(await readBody(req)) } catch (e) {
         return send(res, e.status || 400, { error: 'bad_request', message: e.status === 413 ? 'The prompt is too large.' : 'Send JSON: {"prompt": "..."}.' })
       }
-      if (!body || typeof body.prompt !== 'string' || !body.prompt.trim()) {
-        return send(res, 400, { error: 'bad_request', message: 'Send JSON: {"prompt": "..."}.' })
+      const hasPrompt = body && typeof body.prompt === 'string' && body.prompt.trim()
+      const hasMessages = body && Array.isArray(body.messages) && body.messages.length
+      if (!hasPrompt && !hasMessages) {
+        return send(res, 400, { error: 'bad_request', message: 'Send JSON: {"prompt": "..."} or {"messages": [...], "tools": [...]}.' })
       }
-      log(`question (${body.prompt.length} characters)${body.model ? ' for ' + body.model : ''}`)
-      const answer = await ask(body.prompt, body.model)
-      log(`answered by ${answer.model.id} (${answer.text.length} characters)`)
+      log(hasMessages ? `step ${body.messages.length} (${(body.tools || []).length} tools)` : `question (${body.prompt.length} characters)`)
+      const answer = await converse(body)
+      log(`answered by ${answer.model.id}: ${answer.text.length} characters, ${answer.toolCalls.length} tool calls`)
       return send(res, 200, answer)
     }
     return send(res, 404, { error: 'not_found', message: 'RAPR Bridge has /health, /models and /chat.' })
@@ -271,4 +317,4 @@ function deactivate () {
   if (server) { server.close(); server = null }
 }
 
-module.exports = { activate, deactivate, _test: { pickModel, explain, handle, bridgeFile } }
+module.exports = { activate, deactivate, _test: { pickModel, explain, handle, bridgeFile, toVscodeMessages } }

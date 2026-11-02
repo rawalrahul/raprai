@@ -2,8 +2,9 @@
 
 VS Code's Copilot has no command-line tool RAPR can run and keeps its sign-in inside VS Code,
 so RAPR asks it through a small extension (helm/vscode_bridge, vscode-bridge/ in the repo)
-that uses VS Code's language model API with your permission. It answers questions (reviews,
-plans, second opinions); it doesn't edit files, and it works while VS Code is open.
+that uses VS Code's language model API with your permission. Copilot works there as an agent:
+RAPR gives it tools (read, search and edit files, run commands, as the job allows) and runs
+the calls it makes (helm/vscode_bridge/agent.py). It works while VS Code is open.
 
 Shown only where GitHub Copilot Chat is installed in VS Code (or the bridge is), ready only
 while the bridge answers, so nothing changes for anyone else.
@@ -34,8 +35,6 @@ def READY() -> bool:
     return vscode_bridge.healthy()
 
 
-# Answers questions; can't edit files (RAPR refuses it for roles that must).
-ANSWERS_ONLY = True
 STDIN_PROMPT = True
 ENV_VARS: list[str] = []
 SETUP_HINT = ("Needs GitHub Copilot Chat signed in, in VS Code, and the RAPR Bridge extension: ask your AI to "
@@ -43,6 +42,6 @@ SETUP_HINT = ("Needs GitHub Copilot Chat signed in, in VS Code, and the RAPR Bri
               "\"RAPR: Connect Copilot\" and press Allow.")
 
 # Catalog (Settings → AI Integrations)
-ABOUT   = "GitHub Copilot, using your VS Code sign-in through the RAPR Bridge extension. Answers questions; no file edits."
+ABOUT   = "GitHub Copilot, using your VS Code sign-in through the RAPR Bridge extension, as an agent that reads, edits and tests code."
 INSTALL = ""
 DOCS    = "https://github.com/rawalrahul/raprai/blob/main/docs/guide.md#copilot-from-vs-code"

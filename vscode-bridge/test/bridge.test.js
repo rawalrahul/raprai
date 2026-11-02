@@ -15,21 +15,29 @@ class LanguageModelError extends Error {
   static Blocked = { name: 'Blocked' }
   static NotFound = { name: 'NotFound' }
 }
-const state = { models: [], sent: [], fail: null }
-function model (id, family) {
+class LanguageModelTextPart { constructor (value) { this.value = value } }
+class LanguageModelToolCallPart { constructor (callId, name, input) { Object.assign(this, { callId, name, input }) } }
+class LanguageModelToolResultPart { constructor (callId, content) { Object.assign(this, { callId, content }) } }
+const state = { models: [], sent: [], fail: null, reply: null }
+function model (id, family, capabilities) {
   return {
-    id, family, name: id.toUpperCase(), version: '1', maxInputTokens: 128000,
+    id, family, name: id.toUpperCase(), version: '1', maxInputTokens: 128000, capabilities,
     async sendRequest (messages, options) {
       state.sent.push({ id, messages, options })
       if (state.fail) throw state.fail
-      return { text: (async function * () { yield 'Hello '; yield 'from ' + id })() }
+      const parts = state.reply ? state.reply() : [new LanguageModelTextPart('Hello '), new LanguageModelTextPart('from ' + id)]
+      return { stream: (async function * () { yield * parts })() }
     }
   }
 }
 const fakeVscode = {
   version: '1.105.0',
   LanguageModelError,
-  LanguageModelChatMessage: { User: content => ({ role: 'user', content }) },
+  LanguageModelTextPart,
+  LanguageModelToolCallPart,
+  LanguageModelToolResultPart,
+  LanguageModelChatToolMode: { Auto: 1, Required: 2 },
+  LanguageModelChatMessage: { User: content => ({ role: 'user', content }), Assistant: content => ({ role: 'assistant', content }) },
   CancellationTokenSource: class { constructor () { this.token = {} } cancel () {} dispose () {} },
   ProgressLocation: { Notification: 15 },
   lm: { selectChatModels: async sel => (sel && sel.vendor === 'copilot' ? state.models : []) },
@@ -116,6 +124,39 @@ test('serves RAPR on localhost behind a key, and only RAPR', async t => {
 
   assert.strictEqual((await call(info, 'POST', '/chat', { headers: auth(info), body: 'not json' })).status, 400)
   assert.strictEqual((await call(info, 'POST', '/chat', { headers: auth(info), body: { prompt: '  ' } })).status, 400)
+})
+
+test('Copilot works as an agent: tools go in, tool calls come out, results go back', async t => {
+  const context = { subscriptions: [] }
+  ext.activate(context)
+  t.after(() => ext.deactivate())
+  const info = await started()
+  // A model that can't call tools is passed over when tools are asked for.
+  state.models = [model('o1-mini', 'o1-mini', { supportsToolCalling: false }), model('gpt-4.1', 'gpt-4.1')]
+  state.reply = () => [new LanguageModelTextPart('Reading it.'),
+    new LanguageModelToolCallPart('call-1', 'read_file', { path: 'app.py' })]
+  const tools = [{ name: 'read_file', description: 'Read a file', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }]
+  const messages = [
+    { role: 'user', content: 'Fix the bug in app.py' },
+    { role: 'assistant', content: 'Let me look.', toolCalls: [{ callId: 'call-0', name: 'list_files', input: {} }] },
+    { role: 'user', toolResults: [{ callId: 'call-0', content: 'app.py' }] }
+  ]
+  const r = await call(info, 'POST', '/chat', { headers: auth(info), body: { messages, tools } })
+  assert.strictEqual(r.status, 200)
+  assert.strictEqual(r.json.text, 'Reading it.')
+  assert.deepStrictEqual(r.json.toolCalls, [{ callId: 'call-1', name: 'read_file', input: { path: 'app.py' } }])
+  assert.strictEqual(r.json.model.id, 'gpt-4.1')
+  const sent = state.sent.at(-1)
+  assert.strictEqual(sent.options.tools[0].name, 'read_file')
+  assert.strictEqual(sent.options.toolMode, 1)
+  // The conversation reached VS Code as its own message parts.
+  assert.strictEqual(sent.messages.length, 3)
+  assert.ok(sent.messages[1].content[1] instanceof LanguageModelToolCallPart)
+  assert.ok(sent.messages[2].content[0] instanceof LanguageModelToolResultPart)
+  assert.strictEqual(sent.messages[2].content[0].content[0].value, 'app.py')
+  state.reply = null
+  const health = await call(info, 'GET', '/health', { headers: auth(info) })
+  assert.deepStrictEqual(health.json.features, ['chat', 'tools'])
 })
 
 test('closing the window removes its file', async () => {

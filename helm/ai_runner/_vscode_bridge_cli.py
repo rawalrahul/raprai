@@ -1,13 +1,16 @@
-"""Ask GitHub Copilot through the RAPR Bridge in VS Code (helm/vscode_bridge).
+"""GitHub Copilot through the RAPR Bridge in VS Code (helm/vscode_bridge), as an agent.
 
-Run as a subprocess by integrations/copilot_vscode.py, like the other API helpers here:
+Run as a subprocess by integrations/copilot_vscode.py, like the other API helpers here, in
+the folder Copilot should work in:
 
-    python -m helm.ai_runner._vscode_bridge_cli [--model gpt-4.1]
+    RAPR_AGENT_MODE=edit+run python -m helm.ai_runner._vscode_bridge_cli [--model gpt-4.1]
 
-Reads the prompt from stdin and prints Copilot's answer. On failure prints "(error: ...)"
-to stderr, with what to do, and exits 1.
+Reads the task from stdin, lets Copilot work on it with the tools RAPR_AGENT_MODE allows
+(read, edit, edit+run; read when unset: see helm/vscode_bridge/agent.py) and prints its
+answer. On failure prints "(error: ...)" to stderr, with what to do, and exits 1.
 """
 
+import os
 import sys
 
 from helm.ai_runner._openai_compat_cli import _use_utf8
@@ -22,8 +25,10 @@ def main() -> None:
         print("(error: empty prompt)", file=sys.stderr)
         sys.exit(1)
     from helm import vscode_bridge
+    from helm.vscode_bridge import agent
+    mode = os.environ.get("RAPR_AGENT_MODE", "").strip() or agent.READ
     try:
-        answer = vscode_bridge.ask(prompt, model)
+        answer = agent.run(prompt, os.getcwd(), mode, model, log=lambda line: print(line, file=sys.stderr))
     except vscode_bridge.BridgeError as exc:
         print(f"(error: {exc})", file=sys.stderr)
         sys.exit(1)
