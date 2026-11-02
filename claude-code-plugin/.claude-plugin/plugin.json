@@ -1,6 +1,6 @@
 {
   "name": "rapr-usage",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A ribbon above the Claude Code prompt showing what the AIs RAPR ran for you did today: calls, AI time and tokens, per AI.",
   "author": { "name": "Rahul Rawal", "url": "https://github.com/rawalrahul" },
   "homepage": "https://github.com/rawalrahul/raprai",

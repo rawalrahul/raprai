@@ -1593,4 +1593,15 @@ def main() -> None:
     logging.getLogger("helm").setLevel(logging.WARNING)
     # A client that stops the server (rather than closing stdin) still gets the relays' copies removed.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    _keep_usage_fresh()
     Server(proto).serve(inp)
+
+
+def _keep_usage_fresh(every: float = 300) -> None:
+    """Each AI's real usage, asked of its own service now and every five minutes while the
+    server runs, for the RAPR usage band and pane in Claude Code (helm/usage_readers.py)."""
+    def loop():
+        while True:
+            _refresh_usage_soon()
+            time.sleep(every)
+    threading.Thread(target=loop, name="usage-refresh", daemon=True).start()

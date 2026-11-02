@@ -107,3 +107,40 @@ test('an API key shows money spent, never 5-hour or weekly windows', async ($, o
     await ui.unmount()
   }
 })
+
+const PANE = {
+  plugin: 'rapr-usage',
+  component: 'Pane',
+  requestId: 'rapr-usage',
+  props: { title: 'RAPR usage', isFocused: false, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
+} as const
+
+test('in VS Code, /rapr-usage asks RAPR live, prints it and opens a pane', async ($, on) => {
+  engine(on, apiFile(), [{ kind: 'five_hour', percentUsed: 40, resetsAt: new Date(NOW + 3_600_000).toISOString() }])
+  const opened: string[] = []
+  on('ui.open', (_, e) => { opened.push(e.id); return { value: { isPlaced: true } } })
+  on('mcp.call', (_, e) => {
+    if (e.server !== 'rapr') throw new Error('no such server')
+    return { value: { content: [{ type: 'text', text: 'Plan usage (subscriptions), as each AI reports it:\n- Claude (Max): 5h 40%' }], isError: false } }
+  })
+  await $.session.start({ cwd: '/', surface: 'vscode', isInteractive: true })
+  const ran = await $.command.run({ command: 'rapr-usage', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
+  expect(ran.text).toContain('- Claude (Max): 5h 40%')
+  expect(opened).toEqual(['rapr-usage'])
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  expect((await ui.find({ type: 'Text', text: /^Claude/ }))?.text).toBe('Claude')
+  expect((await ui.find({ type: 'Text', text: /^  5h 40% used/ }))?.text).toBe('  5h 40% used, resets in 1h 0m')
+  expect((await ui.find({ type: 'Text', text: /Codex: \$0\.50/ }))?.text).toBe('  Codex: $0.50 today through RAPR')
+  await ui.unmount()
+})
+
+test('without RAPR connected, /rapr-usage says how to add it and shows the last usage', async ($, on) => {
+  engine(on, usage(day(NOW)), [{ kind: 'five_hour', percentUsed: 40 }])
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('mcp.call', () => { throw new Error('no such server') })
+  await $.session.start({ cwd: '/', surface: 'vscode', isInteractive: true })
+  const ran = await $.command.run({ command: 'rapr-usage', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
+  expect(ran.text).toContain('claude mcp add --scope user rapr -- rapr mcp')
+  expect(ran.text).toContain('  5h 40% used')
+})
