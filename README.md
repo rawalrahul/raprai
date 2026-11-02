@@ -148,6 +148,7 @@ Then ask in plain words: *"get a second opinion from Codex on my changes"*, *"pl
 | `start_team`, `team_status`, `merge_team`, `discard_team` | Split a plan into parts: say Claude does the API and Codex the UI at the same time, each in its own copy, while you do your own part; then merge them all into the project. |
 | `start_bakeoff`, `bakeoff_status`, `merge_bakeoff`, `discard_bakeoff` | A bake-off from your editor: 2 to 4 AIs, each in its own copy of the project; merge the one you like. |
 | `list_agents` | The AIs installed and signed in on this computer. |
+| `connect_vscode_copilot` | Lets RAPR use GitHub Copilot from VS Code with your VS Code sign-in (installs the small RAPR Bridge extension; answers questions, no file edits). |
 | `latest_brief` | What needs you, from your latest brief in the RAPR app (needs the app). |
 | `usage` | Each AI's plan usage as it reports it (Claude's and Codex's 5-hour and weekly windows), and what the AIs RAPR ran for you did today: calls, time, tokens, cost. |
 
@@ -184,7 +185,9 @@ In the app it sits above the message box once you're in a session; click it to a
 
 ### GitHub Copilot
 
-In **VS Code**, run **MCP: Open User Configuration** from the Command Palette and add:
+**Copilot from VS Code, with your VS Code sign-in:** ask your AI to *"connect Copilot from VS Code"*. RAPR installs its small RAPR Bridge extension into VS Code; in VS Code run **RAPR: Connect Copilot** and press **Allow**. Copilot then answers reviews and questions through RAPR as `copilot_vscode` (it doesn't edit files). Works in WSL windows too. [How it works](docs/guide.md#copilot-from-vs-code).
+
+**RAPR inside Copilot:** In **VS Code**, run **MCP: Open User Configuration** from the Command Palette and add:
 
 ```json
 {

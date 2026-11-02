@@ -238,6 +238,9 @@ def load_integrations() -> None:
                     # Optional check that the AI can answer right now, e.g. that the
                     # local server it talks to is running (its command alone isn't enough).
                     "ready":         getattr(mod, "READY",        None),
+                    # Answers questions but can't edit files (e.g. Copilot through the
+                    # RAPR Bridge): refused for roles that must edit.
+                    "answers_only":  bool(getattr(mod, "ANSWERS_ONLY", False)),
                     # Catalog (Settings → AI Integrations): one-line description,
                     # install command and docs link.
                     "about":         getattr(mod, "ABOUT",        ""),
