@@ -178,7 +178,9 @@ In the app it sits above the message box once you're in a session; click it to a
 /plugin install rapr-usage@raprai
 ```
 
-`/rapr-usage` hides or shows it, `/rapr-usage details` adds reset times and a row per AI. Other MCP clients (Codex, Cursor, Antigravity...) can ask for the `usage` tool. Everything stays on your computer, in `~/.config/rapr/mcp-usage.json`.
+**In VS Code**, Claude Code's panel has no room for a band, so type `/rapr-usage` instead: it asks every AI for its usage right then, prints it in the chat and opens a **RAPR usage** pane beside it that keeps itself current (it works the same in the terminal and the desktop app). Install the plugin the same way, from the Claude Code panel's prompt or a terminal, and keep RAPR's MCP server added (`claude mcp add --scope user rapr -- rapr mcp`): the plugin asks it for the numbers.
+
+`/rapr-usage band` hides or shows the band, `/rapr-usage details` adds reset times and a row per AI to it. Other MCP clients (Codex, Cursor, Antigravity...) can ask for the `usage` tool. Everything stays on your computer, in `~/.config/rapr/mcp-usage.json`.
 
 ### GitHub Copilot
 

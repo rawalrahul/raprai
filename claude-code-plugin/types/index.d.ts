@@ -34,6 +34,9 @@ export type Usage = {
   limits?: { [agent: string]: Limits }
   // How each AI is paid for: a plan (5-hour and weekly windows) or an API key (per token, none).
   billing?: { [agent: string]: { name: string; mode: 'plan' | 'api'; source: string; at: number } }
+  // The last live reading of each AI's own service (helm/usage_readers.py): its plan name,
+  // and why there is nothing to show when there isn't (not signed in, expired...).
+  live?: { [agent: string]: { name: string; mode: 'plan' | 'api' | null; plan?: string; note?: string; at: number } }
 }
 
 // What the band draws: the file, plus Claude Code's own figures for this session.

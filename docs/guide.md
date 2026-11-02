@@ -425,7 +425,8 @@ A sign-in is only read, never refreshed (that would replace the AI's own and cou
 
 A window whose reset time has passed shows 0% until the AI reports again. Three things show it:
 
-- **In Claude Code**, a band above the prompt. Add it with `/plugin marketplace add rawalrahul/raprai`, then `/plugin install rapr-usage@raprai`. Claude's windows and this session's cost come straight from Claude Code (`$.session.usage()`); Codex's and what RAPR ran today come from the file. `/rapr-usage` hides or shows it; `/rapr-usage details` adds reset times and a row per AI. It needs Claude Code 2.1.290 or later and does not show in the VS Code chat panel or `claude -p`.
+- **In Claude Code**, a band above the prompt. Add it with `/plugin marketplace add rawalrahul/raprai`, then `/plugin install rapr-usage@raprai`. Claude's windows and this session's cost come straight from Claude Code (`$.session.usage()`); Codex's and what RAPR ran today come from the file. `/rapr-usage band` hides or shows it; `/rapr-usage details` adds reset times and a row per AI. It needs Claude Code 2.1.290 or later, in the terminal or the desktop app: Claude Code draws no band in the VS Code panel (nor under `claude -p`).
+- **In VS Code** (and anywhere else), `/rapr-usage`: the plugin calls RAPR's MCP server's `usage` tool, which asks every AI live, prints the answer in the chat and opens a **RAPR usage** pane beside it, with an "Ask every AI now" button. The MCP server also refreshes the numbers when it starts and every five minutes. It needs RAPR's MCP server added to Claude Code (as `rapr`, the name the README uses); without it, the command says how to add it and shows the last numbers RAPR saw.
 - **In any MCP client**, the `usage` tool answers with the same numbers as text.
 - **In the RAPR app**, the ribbon above the message box once you're in a session (click it for every AI, asked live), and the Usage panel.
 

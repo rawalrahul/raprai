@@ -7,8 +7,13 @@
 //   - what the AIs RAPR ran for you (the `rapr` MCP server) did today.
 // The last two come from ~/.config/rapr/mcp-usage.json, which helm/mcp_usage.py writes.
 //
-// /rapr-usage           show or hide the band
-// /rapr-usage details   one line, or a row per AI
+// The band shows in the terminal and the desktop app; Claude Code draws no band in VS Code.
+// There (and everywhere), /rapr-usage asks the `rapr` MCP server for every AI's usage live,
+// prints it, and opens a RAPR usage pane that keeps itself current.
+//
+// /rapr-usage                 usage now, in the chat and a pane beside it
+// /rapr-usage band [on|off]   show or hide the band (terminal, desktop app)
+// /rapr-usage details         the band: one line, or a row per AI
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -18,6 +23,9 @@ const NO_LIVE: Live = { claude: [], cost: null, claudeMode: null }
 const view = atom({ plugin: 'rapr-usage', key: 'view' } as const, { usage: null, live: NO_LIVE, details: false } as View, { shape: 'view-3' })
 const HIDDEN = 'hidden'           // $.store key, kept across sessions
 const REFRESH_MS = 20_000         // relays and bake-offs finish while you're idle
+const PANE = 'rapr-usage'
+// What /mcp may call RAPR's server: `claude mcp add rapr ...` (the README's), or its own name.
+const SERVERS = ['rapr', 'rapr-ai', 'RAPR AI']
 
 const EMPTY: Bucket = { calls: 0, failed: 0, seconds: 0, tokens: 0, agents: {} }
 
@@ -119,6 +127,22 @@ export function plans(v: View, nowSeconds: number): { agent: string; name: strin
   return out.map(p => ({ ...p, windows: p.windows.map(w => current(w, nowSeconds)) }))
 }
 
+// Every AI's usage, asked live by RAPR's MCP server (its `usage` tool); null when no RAPR
+// server is connected here. It also writes the file this plugin reads.
+async function askRapr($: EngineInterface): Promise<string | null> {
+  for (const server of SERVERS) {
+    try {
+      const r = await $.mcp.call(server, 'usage', {})
+      if (r.isError) continue
+      const text = r.content.map(c => (c.type === 'text' ? c.text : '')).join('\n').trim()
+      if (text) return text
+    } catch {
+      // not this name: try the next
+    }
+  }
+  return null
+}
+
 export function fmtSeconds(s: number): string {
   const t = Math.round(s)
   if (t < 60) return `${t}s`
@@ -149,11 +173,54 @@ export function agentsText(b: Bucket): string {
     .join('   ')
 }
 
+// The pane's text (and the chat's when RAPR's server isn't connected): every AI's plan
+// windows with reset times, API keys with money spent, why others show nothing, RAPR's runs.
+export function paneLines(v: View, nowSeconds: number): string[] {
+  const out: string[] = []
+  const planned = plans(v, nowSeconds)
+  const live = v.usage?.live ?? {}
+  if (planned.length) {
+    out.push('Plan usage, as each AI reports it:')
+    for (const p of planned) {
+      const plan = live[p.agent]?.plan ? ` (${live[p.agent]?.plan})` : ''
+      out.push(`${p.name}${plan}`)
+      for (const w of p.windows) {
+        const reset = w.resets_at ? `, resets in ${resetText(w, nowSeconds)}` : ''
+        out.push(`  ${w.label} ${Math.round(w.pct)}% used${reset}`)
+      }
+    }
+  }
+  const apis = Object.entries(v.usage?.billing ?? {}).filter(([agent, b]) => b.mode === 'api' || modeOf(v, agent) === 'api')
+  if (apis.length || modeOf(v, 'claude') === 'api') {
+    out.push('On an API key (billed per token, no 5-hour or weekly limit):')
+    if (modeOf(v, 'claude') === 'api' && v.live.cost !== null) out.push(`  Claude: this session $${v.live.cost.toFixed(2)}`)
+    for (const [agent, b] of apis) {
+      if (agent === 'claude') continue
+      out.push(`  ${b.name || agent}: $${(v.usage?.today.agents[agent]?.cost_usd ?? 0).toFixed(2)} today through RAPR`)
+    }
+  }
+  const shown = new Set([...planned.map(p => p.agent), ...apis.map(([a]) => a)])
+  const quiet = Object.entries(live).filter(([agent, r]) => !shown.has(agent) && r.note)
+  if (quiet.length) {
+    out.push('Nothing to show for:')
+    for (const [agent, r] of quiet) out.push(`  ${r.name || agent}: ${r.note}`)
+  }
+  const today = v.usage?.today
+  if (today && today.calls) {
+    out.push(`RAPR today: ${bucketText(today)}`)
+    for (const [agent, a] of Object.entries(today.agents).sort((x, y) => y[1].seconds - x[1].seconds)) {
+      out.push(`  ${a.name || agent}: ${bucketText(a)}`)
+    }
+  }
+  if (!out.length) out.push('No usage yet: RAPR hasn\'t heard from any AI. Press "Ask every AI now".')
+  return out
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'rapr-usage',
-      description: "Show or hide RAPR's usage ribbon; '/rapr-usage details' shows a row per AI",
+      description: "Every AI's real usage now, in the chat and a pane (works in VS Code); 'band' shows or hides the band",
     })
     await refresh($)
     $.clock.every(REFRESH_MS, () => {
@@ -163,17 +230,29 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'rapr-usage' }, async ($, e) => {
-    const arg = (e.args ?? '').trim().toLowerCase()
+    const [arg = '', value = ''] = (e.args ?? '').trim().toLowerCase().split(/\s+/)
     if (arg === 'details') {
       const v = await update($, view, x => ({ ...x, details: !x.details }))
       await $.store.set(HIDDEN, false)
-      return { text: v.details ? 'RAPR usage: a row per AI.' : 'RAPR usage: one line.' }
+      return { text: v.details ? 'RAPR usage band: a row per AI.' : 'RAPR usage band: one line.' }
     }
-    const hidden = arg === 'on' ? false : arg === 'off' ? true : !(await $.store.get(HIDDEN))
-    await $.store.set(HIDDEN, hidden)
+    if (arg === 'band' || arg === 'on' || arg === 'off') {
+      const want = arg === 'band' ? value : arg
+      const hidden = want === 'on' ? false : want === 'off' ? true : !(await $.store.get(HIDDEN))
+      await $.store.set(HIDDEN, hidden)
+      await refresh($)
+      $.ui.invalidate('ui.render')
+      return { text: hidden ? 'RAPR usage band hidden. /rapr-usage band brings it back.'
+                            : 'RAPR usage band shown (terminal and desktop app; in VS Code use /rapr-usage).' }
+    }
+    // Usage now: asked live of every AI by RAPR's MCP server, in the chat and a pane.
+    const text = await askRapr($)
     await refresh($)
-    $.ui.invalidate('ui.render')
-    return { text: hidden ? 'RAPR usage ribbon hidden. /rapr-usage brings it back.' : 'RAPR usage ribbon shown.' }
+    await $.ui.open({ id: PANE, title: 'RAPR usage' }).catch(() => undefined)
+    return {
+      text: text ?? 'RAPR\'s MCP server isn\'t connected here, so the usage below is the last RAPR saw. '
+        + 'Add it with: claude mcp add --scope user rapr -- rapr mcp\n\n' + paneLines(await read($, view), (await $.clock.now()) / 1000).join('\n'),
+    }
   })
 
   // A RAPR tool just answered (ask_agent, second_opinion, a relay's status…): show its run now.
@@ -268,6 +347,32 @@ export const register: Register = on => {
           </Box>
         ))}
         {v.usage && v.usage.total.calls ? <Text dimColor>RAPR all time {bucketText(v.usage.total)}</Text> : null}
+      </Box>
+    )
+  })
+  // The pane: drawn on every surface, VS Code included (Claude Code draws no band there).
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const v = await read($, view)
+    const lines = paneLines(v, (await $.clock.now()) / 1000)
+    return (
+      <Box flexDirection="column" gap={e.surface === 'terminal' ? 0 : 1}>
+        <Box gap={1}>
+          <Text color="claude" bold>RAPR usage</Text>
+          <Button
+            key="refresh"
+            label="Ask every AI now"
+            onPress={async () => {
+              await askRapr($)
+              await refresh($)
+            }}
+          />
+        </Box>
+        {lines.map((line, i) => (
+          <Text key={String(i)} dimColor={line.startsWith('  ')} bold={/^[A-Z]/.test(line) && line.endsWith(':')}>
+            {line}
+          </Text>
+        ))}
       </Box>
     )
   })
