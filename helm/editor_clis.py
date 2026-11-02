@@ -90,18 +90,29 @@ def is_wsl() -> bool:
         return False
 
 
+# Folders under C:\Users that aren't a person's.
+_NOT_PEOPLE = {"public", "default", "default user", "all users", "defaultappool", "wdagutilityaccount"}
+
+
+def windows_homes(users: Optional[Path] = None) -> list[Path]:
+    """From inside WSL, the Windows side's home folders (/mnt/c/Users/<you>)."""
+    if users is None:
+        if not is_wsl():
+            return []
+        users = Path("/mnt/c/Users")
+    try:
+        return [u for u in users.iterdir() if u.is_dir() and u.name.lower() not in _NOT_PEOPLE]
+    except OSError:
+        return []
+
+
 def _windows_extension_roots() -> list[Path]:
     """From inside WSL, the Windows side's VS Code extension folders (/mnt/c/Users/*/.vscode...)."""
-    if not is_wsl():
-        return []
     roots = []
-    try:
-        for user in Path("/mnt/c/Users").iterdir():
-            for editor in (".vscode", ".vscode-insiders", ".cursor", ".windsurf"):
-                if (user / editor / "extensions").is_dir():
-                    roots.append(user / editor / "extensions")
-    except OSError:
-        pass
+    for home in windows_homes():
+        for editor in (".vscode", ".vscode-insiders", ".cursor", ".windsurf"):
+            if (home / editor / "extensions").is_dir():
+                roots.append(home / editor / "extensions")
     return roots
 
 

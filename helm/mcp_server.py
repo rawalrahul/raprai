@@ -532,16 +532,17 @@ COPILOT_CLI = ("GitHub Copilot is installed in VS Code. RAPR can use it with you
 
 
 def tool_list_agents(args: dict, ctx: "Server") -> str:
-    from helm.editor_clis import has_extension
     have = agents()
     out = signed_out()
     note = "".join(f"\n{name} is installed but not signed in: run `{SIGN_IN[name]}` in a terminal."
                    for name in out)
-    if ("copilot" not in have and "copilot_vscode" not in have and has_extension("github.copilot-chat-")
-            and not _found("copilot")):
+    if "copilot" not in have and "copilot_vscode" not in have and not _found("copilot"):
         from helm import vscode_bridge
-        note += "\n" + (COPILOT_CLI if not vscode_bridge.installed() else
-                        "Copilot (VS Code): " + vscode_bridge.status_text())
+        if vscode_bridge.installed():
+            note += "\nCopilot (VS Code): " + vscode_bridge.status_text()
+        elif vscode_bridge.copilot_in_vscode():
+            where = vscode_bridge.where_copilot()
+            note += "\n" + COPILOT_CLI + (f" (Found: Copilot {where}.)" if where else "")
     edit_free = [v for k, v in have.items() if answers_only(k)]
     if edit_free:
         note += "\n" + ", ".join(edit_free) + " answers questions but can't edit files."
@@ -556,9 +557,15 @@ def tool_connect_vscode_copilot(args: dict, ctx: "Server") -> str:
     """Let RAPR use GitHub Copilot through the person's VS Code sign-in (helm/vscode_bridge)."""
     global _agents_cache
     from helm import vscode_bridge as vb
-    if not vb.copilot_in_vscode():
-        return vb.status_text()
+    found = vb.copilot_in_vscode(fresh=True)      # it may have been installed a moment ago
+    if not found and not vb.installed() and not args.get("anyway"):
+        return vb.NOT_FOUND
     steps = []
+    where = vb.where_copilot()
+    if where:
+        steps.append(f"Found GitHub Copilot: {where}.")
+    elif not found:
+        steps.append("Connecting anyway: RAPR found no Copilot on disk, so the bridge will ask VS Code directly.")
     if not vb.installed() or args.get("reinstall"):
         try:
             vb.install()
@@ -1229,6 +1236,9 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
         "inputSchema": {"type": "object", "properties": {
             "reinstall": {"type": "boolean", "default": False,
                           "description": "Install RAPR's copy again even if a bridge is installed (to update it)."},
+            "anyway": {"type": "boolean", "default": False,
+                       "description": "Install the bridge even though RAPR found no Copilot on disk (Copilot works "
+                                      "in VS Code but is installed somewhere unusual)."},
         }},
         "annotations": {"idempotentHint": True, "openWorldHint": False},
     }, tool_connect_vscode_copilot),

@@ -113,9 +113,154 @@ def ask(prompt: str, model: Optional[str] = None, timeout: float = 900.0) -> str
 # VS Code: is Copilot there, is the bridge installed, install it
 # ---------------------------------------------------------------------------
 
-def copilot_in_vscode() -> bool:
-    from helm.editor_clis import has_extension
-    return has_extension(COPILOT_CHAT)
+# ---------------------------------------------------------------------------
+# Finding Copilot: installed as an extension, or built into VS Code; on this computer,
+# on VS Code Server (a WSL or remote window), or, from inside WSL, on the Windows side
+# ---------------------------------------------------------------------------
+
+COPILOT_NAMES = {"copilot-chat", "copilot"}       # GitHub's publisher name for both
+FIND_CACHE_SECONDS = 60      # a scan of the Windows side from WSL takes a moment
+_found_cache: tuple = (0.0, None)
+
+
+def _manifest(folder: Path) -> Optional[dict]:
+    try:
+        data = json.loads((folder / "package.json").read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def is_copilot(folder: Path) -> bool:
+    """Whether an extension folder is GitHub Copilot (Chat), by its manifest, not its name."""
+    m = _manifest(folder)
+    return bool(m) and str(m.get("publisher", "")).lower() == "github" and str(m.get("name", "")).lower() in COPILOT_NAMES
+
+
+def _obsolete(root: Path) -> set:
+    """Folders VS Code has replaced and will delete (an update leaves the old one behind)."""
+    try:
+        return set(json.loads((root / ".obsolete").read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError):
+        return set()
+
+
+def _extension_roots(env=None) -> list[tuple[Path, str]]:
+    """Where installed extensions live, each with which side it is, for people."""
+    from helm.editor_clis import EDITOR_DIRS, is_wsl, windows_homes
+    env = os.environ if env is None else env
+    here = "WSL" if is_wsl() else "this computer"
+    out = []
+    for editor in EDITOR_DIRS:
+        side = "VS Code Server (WSL or remote)" if editor == ".vscode-server" else here
+        out.append((Path.home() / editor / "extensions", side))
+    agent = env.get("VSCODE_AGENT_FOLDER")
+    if agent:
+        out.insert(0, (Path(agent).expanduser() / "extensions", "VS Code Server (WSL or remote)"))
+    for home in windows_homes():
+        for editor in (".vscode", ".vscode-insiders"):
+            out.append((home / editor / "extensions", "Windows"))
+    return out
+
+
+def _vscode_installs() -> list[tuple[Path, str]]:
+    """Where VS Code itself is installed (its built-in extensions are inside)."""
+    from helm.editor_clis import is_wsl, windows_homes
+    names = ("Microsoft VS Code", "Microsoft VS Code Insiders")
+    out: list[tuple[Path, str]] = []
+    if sys.platform == "win32":
+        local = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+        for base in (local / "Programs", Path(os.environ.get("ProgramFiles") or "C:/Program Files")):
+            out += [(base / n, "this computer") for n in names]
+    elif sys.platform == "darwin":
+        for apps in (Path("/Applications"), Path.home() / "Applications"):
+            out += [(apps / f"{n}.app" / "Contents" / "Resources", "this computer")
+                    for n in ("Visual Studio Code", "Visual Studio Code - Insiders")]
+    else:
+        out += [(Path(p), "WSL" if is_wsl() else "this computer") for p in
+                ("/usr/share/code", "/usr/share/code-insiders", "/opt/visual-studio-code", "/snap/code/current/usr/share/code")]
+        for home in windows_homes():
+            out += [(home / "AppData" / "Local" / "Programs" / n, "Windows") for n in names]
+        if is_wsl():
+            out += [(Path("/mnt/c/Program Files") / n, "Windows") for n in names]
+    return out
+
+
+def _builtin_roots(env=None) -> list[tuple[Path, str]]:
+    """VS Code's built-in extension folders: in its install (also a versioned folder inside,
+    as newer Windows builds use), and VS Code Server's own."""
+    env = os.environ if env is None else env
+    out = []
+    for install, side in _vscode_installs():
+        out.append((install / "resources" / "app" / "extensions", side))
+        out.append((install / "app" / "extensions", side))                        # macOS bundle
+        try:
+            out += [(p, side) for p in install.glob("*/resources/app/extensions")]
+        except OSError:
+            pass
+    agent = Path(env.get("VSCODE_AGENT_FOLDER") or Path.home() / ".vscode-server").expanduser()
+    for layout in ("bin/*/extensions", "cli/servers/*/server/extensions"):
+        try:
+            out += [(p, "VS Code Server (WSL or remote)") for p in agent.glob(layout)]
+        except OSError:
+            pass
+    return out
+
+
+def find_copilot(env=None, fresh: bool = False) -> list[dict]:
+    """Every GitHub Copilot (Chat) found: [{how: "extension" | "built into VS Code", side, path}]."""
+    global _found_cache
+    import time
+    at, found = _found_cache
+    if not fresh and env is None and found is not None and time.monotonic() - at < FIND_CACHE_SECONDS:
+        return found
+    found, seen = [], set()
+    for root, side in _extension_roots(env):
+        gone = _obsolete(root)
+        try:
+            folders = [p for p in root.iterdir() if p.is_dir() and p.name.lower().startswith("github.copilot")
+                       and p.name not in gone]
+        except OSError:
+            continue
+        for p in folders:
+            if (is_copilot(p) or _manifest(p) is None) and str(p) not in seen:
+                seen.add(str(p))
+                found.append({"how": "extension", "side": side, "path": str(p)})
+    for root, side in _builtin_roots(env):
+        try:
+            folders = [p for p in root.iterdir() if p.is_dir()]
+        except OSError:
+            continue
+        for p in folders:        # built-in folders have plain names: check every manifest
+            if is_copilot(p) and str(p) not in seen:
+                seen.add(str(p))
+                found.append({"how": "built into VS Code", "side": side, "path": str(p)})
+    if env is None:
+        _found_cache = (time.monotonic(), found)
+    return found
+
+
+def copilot_in_vscode(fresh: bool = False) -> bool:
+    """Copilot is in VS Code: found on disk (either kind, either side), or the bridge can
+    already see its models (true however VS Code got it). fresh: look again now."""
+    if find_copilot(fresh=fresh):
+        return True
+    if read_info() is not None and healthy():
+        try:
+            return bool(models())
+        except BridgeError:
+            return False
+    return False
+
+
+def where_copilot() -> str:
+    """Where Copilot was found, for people: "built into VS Code (Windows), extension (WSL)"."""
+    parts = []
+    for f in find_copilot():
+        text = f"{f['how']} ({f['side']})"
+        if text not in parts:
+            parts.append(text)
+    return ", ".join(parts)
 
 
 def installed() -> bool:
@@ -188,11 +333,19 @@ def install(timeout: float = 120.0) -> str:
     return (r.stdout or "").strip()
 
 
+NOT_FOUND = ("RAPR couldn't find GitHub Copilot in VS Code, neither built in nor as an extension (it looked on "
+             "this computer, in VS Code Server for WSL, and on the Windows side). To check: in VS Code open "
+             "Extensions (Ctrl+Shift+X) and type @installed copilot; look under both Local and WSL. If it isn't "
+             "there, install GitHub Copilot Chat and sign in to GitHub in VS Code (a free Copilot plan works). If "
+             "Copilot does work in your VS Code, connect anyway (connect_vscode_copilot with anyway=true): the "
+             "bridge then asks VS Code directly. Or install the Copilot CLI: `npm install -g @github/copilot`, "
+             "then `copilot login`.")
+
+
 def status_text() -> str:
     """Where things stand, and the next step, for people."""
-    if not copilot_in_vscode():
-        return ("GitHub Copilot isn't installed in VS Code here. Install GitHub Copilot Chat in VS Code and sign in, "
-                "or install the Copilot CLI (`npm install -g @github/copilot`, then `copilot login`).")
+    if not copilot_in_vscode() and not installed():
+        return NOT_FOUND
     if not installed():
         return "Copilot is in VS Code, but the RAPR Bridge isn't installed yet: use connect_vscode_copilot."
     if not healthy():
@@ -202,7 +355,8 @@ def status_text() -> str:
     except BridgeError as exc:
         return str(exc)
     if not found:
-        return "The RAPR Bridge is running, but VS Code has no Copilot models: sign in to GitHub Copilot in VS Code."
+        return ("The RAPR Bridge is running, but VS Code has no Copilot models: install GitHub Copilot Chat in VS Code "
+                "(if it isn't built in) and sign in to GitHub there.")
     return ("Copilot (VS Code) is ready through the RAPR Bridge, with "
             + ", ".join(m.get("family") or m.get("id") for m in found[:8]) + ". The first question may ask you, in "
             f"VS Code, to allow RAPR Bridge to use Copilot (or run \"{CONNECT_COMMAND}\" there first).")

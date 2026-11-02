@@ -438,6 +438,13 @@ GitHub Copilot in VS Code has no command-line tool RAPR can run, and keeps its G
 2. In VS Code, reload the window (**Developer: Reload Window**), run **RAPR: Connect Copilot** from the Command Palette, and press **Allow** when VS Code asks whether RAPR Bridge may use Copilot.
 3. Copilot appears in `list_agents` as `copilot_vscode`. Use it for `second_opinion`, `ask_agent`, or a relay's planner or reviewer.
 
+**Finding Copilot.** Copilot can be an extension you installed or built into VS Code, and in a WSL window it can live on either side. RAPR looks in all of these, identifying Copilot by its manifest (publisher GitHub, `copilot-chat` or `copilot`), not its folder name:
+
+- installed extensions: `~/.vscode/extensions`, VS Code Server's `~/.vscode-server/extensions` (WSL side) and, from inside WSL, Windows' `C:\Users\<you>\.vscode\extensions`;
+- VS Code's built-in extensions: inside its install (`AppData\Local\Programs\Microsoft VS Code`, Program Files, `/Applications`, `/usr/share/code`, including a versioned folder inside), reached from WSL through `/mnt/c`, and VS Code Server's own.
+
+Versions VS Code has replaced (listed in `.obsolete`) don't count. Once the bridge runs, VS Code's own answer (does it have Copilot models?) decides, whatever the files say. If RAPR finds nothing, `connect_vscode_copilot` says how to check (Extensions, `@installed copilot`, under both Local and WSL), and `anyway: true` installs the bridge regardless.
+
 What to know:
 
 - It **answers questions; it doesn't edit files**, so RAPR doesn't offer it for bake-offs, team parts, or a relay's executor or fixer. For Copilot that edits files (and works without VS Code), install the Copilot CLI instead: `npm install -g @github/copilot`, then `copilot login`.

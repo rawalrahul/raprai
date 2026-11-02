@@ -106,6 +106,7 @@ def test_the_integration_shows_only_with_copilot_in_vscode(tmp_path, monkeypatch
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     assert not mod.SHOW() and not mod.READY() and mod.ANSWERS_ONLY
     (tmp_path / ".vscode" / "extensions" / "github.copilot-chat-0.40.0").mkdir(parents=True)
+    vb.find_copilot(fresh=True)                       # the integration reads the last look
     assert mod.SHOW()
     assert mod.build_command("x", model="gpt-4.1")[1:] == ["-m", "helm.ai_runner._vscode_bridge_cli", "--model", "gpt-4.1"]
 
@@ -131,7 +132,8 @@ def test_roles_that_edit_files_refuse_it(monkeypatch):
 
 def test_connect_installs_the_bridge_into_vscode(monkeypatch, tmp_path):
     ran = []
-    monkeypatch.setattr(vb, "copilot_in_vscode", lambda: True)
+    monkeypatch.setattr(vb, "copilot_in_vscode", lambda fresh=False: True)
+    monkeypatch.setattr(vb, "find_copilot", lambda *a, **k: [{"how": "extension", "side": "WSL", "path": "x"}])
     monkeypatch.setattr(vb, "installed", lambda: False)
     monkeypatch.setattr(vb, "code_cli", lambda: "/usr/bin/code")
     monkeypatch.setattr(vb.subprocess, "run", lambda cmd, **k: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0, "ok", ""))
@@ -141,7 +143,7 @@ def test_connect_installs_the_bridge_into_vscode(monkeypatch, tmp_path):
 
 
 def test_connect_without_the_code_command_says_how(monkeypatch):
-    monkeypatch.setattr(vb, "copilot_in_vscode", lambda: True)
+    monkeypatch.setattr(vb, "copilot_in_vscode", lambda fresh=False: True)
     monkeypatch.setattr(vb, "installed", lambda: False)
     monkeypatch.setattr(vb, "code_cli", lambda: None)
     out = mcp.Server(out=None).call_tool("connect_vscode_copilot", {})
@@ -151,10 +153,12 @@ def test_connect_without_the_code_command_says_how(monkeypatch):
 def test_list_agents_offers_vscode_copilot_not_only_the_cli(monkeypatch):
     monkeypatch.setattr(mcp, "agents", lambda: {"codex": "Codex"})
     monkeypatch.setattr(mcp, "signed_out", lambda: [])
-    monkeypatch.setattr("helm.editor_clis.has_extension", lambda prefix, home=None: prefix == "github.copilot-chat-")
+    monkeypatch.setattr(vb, "find_copilot", lambda *a, **k: [{"how": "built into VS Code", "side": "Windows", "path": "x"}])
+    monkeypatch.setattr(vb, "installed", lambda: False)
     monkeypatch.setattr(mcp, "_found", lambda exe: False)
     text = mcp.Server(out=None).call_tool("list_agents", {})["content"][0]["text"]
     assert "connect_vscode_copilot" in text and "your VS Code sign-in" in text
+    assert "Found: Copilot built into VS Code (Windows)." in text
 
 
 def test_the_packaged_bridge_is_the_source_in_the_repo():
@@ -252,3 +256,85 @@ def test_in_wsl_windows_code_launcher_is_not_used(tmp_path, monkeypatch):
     monkeypatch.setattr(vb.shutil, "which", lambda n: "/mnt/c/Program Files/Microsoft VS Code/bin/code" if n == "code" else None)
     monkeypatch.setattr(vb.sys, "platform", "linux")
     assert vb.code_cli({}) is None
+
+
+# --- Finding Copilot: an extension or built into VS Code, on either side of WSL ---------------
+
+def _copilot(folder, name="copilot-chat", publisher="GitHub"):
+    folder.mkdir(parents=True)
+    (folder / "package.json").write_text(json.dumps({"publisher": publisher, "name": name, "version": "0.40.0"}))
+    return folder
+
+
+@pytest.fixture
+def nowhere(tmp_path, monkeypatch):
+    """A machine with no VS Code: every place RAPR looks starts empty, inside tmp_path."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.setattr(ec, "windows_homes", lambda users=None: [])
+    monkeypatch.setattr(vb, "_vscode_installs", lambda: [])
+    return tmp_path
+
+
+def test_copilot_is_not_found_when_it_isnt_there(nowhere):
+    _copilot(nowhere / "home" / ".vscode-server" / "extensions" / "github.vscode-pull-request-github-0.172.0",
+             name="vscode-pull-request-github")
+    assert vb.find_copilot(env={}) == []
+
+
+def test_copilot_extension_inside_wsl(nowhere):
+    _copilot(nowhere / "home" / ".vscode-server" / "extensions" / "github.copilot-chat-0.40.0")
+    assert vb.find_copilot(env={}) == [{"how": "extension", "side": "VS Code Server (WSL or remote)",
+                                        "path": str(nowhere / "home" / ".vscode-server" / "extensions" / "github.copilot-chat-0.40.0")}]
+
+
+def test_copilot_extension_on_the_windows_side_seen_from_wsl(nowhere, monkeypatch):
+    win = nowhere / "c" / "Users" / "rrawal5"
+    _copilot(win / ".vscode" / "extensions" / "github.copilot-chat-0.40.0")
+    monkeypatch.setattr(ec, "windows_homes", lambda users=None: [win])
+    assert [(f["how"], f["side"]) for f in vb.find_copilot(env={})] == [("extension", "Windows")]
+
+
+def test_an_old_version_vscode_is_deleting_doesnt_count(nowhere):
+    root = nowhere / "home" / ".vscode" / "extensions"
+    _copilot(root / "github.copilot-chat-0.39.0")
+    (root / ".obsolete").write_text(json.dumps({"github.copilot-chat-0.39.0": True}))
+    assert vb.find_copilot(env={}) == []
+
+
+def test_copilot_built_into_vscode_on_windows_seen_from_wsl(nowhere, monkeypatch):
+    install = nowhere / "c" / "Users" / "rrawal5" / "AppData" / "Local" / "Programs" / "Microsoft VS Code"
+    _copilot(install / "resources" / "app" / "extensions" / "copilot")      # a plain built-in folder name
+    _copilot(install / "resources" / "app" / "extensions" / "git", name="git", publisher="vscode")
+    monkeypatch.setattr(vb, "_vscode_installs", lambda: [(install, "Windows")])
+    assert [(f["how"], f["side"]) for f in vb.find_copilot(env={})] == [("built into VS Code", "Windows")]
+
+
+def test_copilot_built_into_a_versioned_vscode_folder(nowhere, monkeypatch):
+    install = nowhere / "Microsoft VS Code"
+    _copilot(install / "a1b2c3d4" / "resources" / "app" / "extensions" / "github-copilot-chat")
+    monkeypatch.setattr(vb, "_vscode_installs", lambda: [(install, "this computer")])
+    assert [f["how"] for f in vb.find_copilot(env={})] == ["built into VS Code"]
+
+
+def test_copilot_built_into_vscode_server(nowhere):
+    agent = nowhere / "home" / ".vscode-server"
+    _copilot(agent / "cli" / "servers" / "Stable-abc" / "server" / "extensions" / "copilot")
+    assert [(f["how"], f["side"]) for f in vb.find_copilot(env={})] == [("built into VS Code", "VS Code Server (WSL or remote)")]
+
+
+def test_windows_homes_skips_folders_that_arent_people(tmp_path):
+    for name in ("rrawal5", "Public", "Default", "All Users"):
+        (tmp_path / name).mkdir()
+    assert [p.name for p in ec.windows_homes(tmp_path)] == ["rrawal5"]
+
+
+def test_connect_says_where_to_look_when_copilot_isnt_found(nowhere, monkeypatch):
+    ran = []
+    monkeypatch.setattr(vb, "code_cli", lambda env=None: "/usr/bin/code")
+    monkeypatch.setattr(vb.subprocess, "run", lambda cmd, **k: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", ""))
+    monkeypatch.setattr(vb, "find_copilot", lambda *a, **k: [])
+    s = mcp.Server(out=None)
+    text = s.call_tool("connect_vscode_copilot", {})["content"][0]["text"]
+    assert "@installed copilot" in text and "Local and WSL" in text and ran == []
+    text = s.call_tool("connect_vscode_copilot", {"anyway": True})["content"][0]["text"]
+    assert len(ran) == 1 and "Connecting anyway" in text
