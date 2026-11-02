@@ -162,7 +162,7 @@ def agents() -> dict[str, str]:
 
 
 def answers_only(agent: str) -> bool:
-    """An AI that answers questions but can't edit files (Copilot through the RAPR Bridge)."""
+    """An AI that answers questions but can't edit files (an integration with ANSWERS_ONLY)."""
     import helm.state as _st
     return bool((_st.integrations.get(agent) or {}).get("answers_only"))
 
@@ -201,13 +201,17 @@ def kill_processes(request_id=None, everything: bool = False) -> int:
 
 
 def run_agent(agent: str, prompt: str, cwd: str, model: Optional[str] = None, *, edits: bool = False,
-              timeout: int = AGENT_TIMEOUT, on_start=None) -> str:
+              timeout: int = AGENT_TIMEOUT, on_start=None, in_copy: bool = True) -> str:
     """Run one AI's command-line tool in `cwd` and return its reply. Raises ToolError
     when it doesn't answer (timed out, crashed, not signed in…), with what it said.
 
     edits: the AI is meant to change files. Claude Code asks before every edit, and
     with nobody there to answer it would change nothing, so it's allowed file edits
     (not commands). The other AIs' commands already let them edit.
+
+    in_copy: cwd is a copy of the project (a scratch copy, worktree or relay workspace),
+    not the person's own folder. Copilot through the RAPR Bridge, whose tools RAPR runs,
+    may then run commands too; in the real project it may only edit files (RAPR_AGENT_MODE).
     """
     from helm.council.runner import _build_cmd_for_session, _run_subprocess_blocking, failed
     _load()
@@ -218,6 +222,9 @@ def run_agent(agent: str, prompt: str, cwd: str, model: Optional[str] = None, *,
         raise ToolError(str(exc)) from exc
     if edits and agent == "claude":
         cmd[1:1] = ["--permission-mode", "acceptEdits"]
+    # For AIs whose tools RAPR runs itself (Copilot through the RAPR Bridge): what they may do.
+    extra_env = {**(extra_env or {}),
+                 "RAPR_AGENT_MODE": "read" if not edits else ("edit+run" if in_copy else "edit")}
     streamed = False
     if agent == "claude":
         # stream-json carries what json leaves out: the plan's 5-hour and weekly usage
@@ -526,9 +533,9 @@ def signed_out() -> list[str]:
 
 COPILOT_CLI = ("GitHub Copilot is installed in VS Code. RAPR can use it with your VS Code sign-in, with "
                "nothing else to install: call connect_vscode_copilot (it adds the small RAPR Bridge extension "
-               "to VS Code). It answers questions and reviews; for Copilot that also edits files and works "
-               "without VS Code, install Copilot CLI instead: `npm install -g @github/copilot`, then "
-               "`copilot login`.")
+               "to VS Code). Copilot then takes any role: second opinions, questions, bake-offs, relays and "
+               "teams, editing and testing code. It works while VS Code is open; for Copilot without VS Code, "
+               "install Copilot CLI instead: `npm install -g @github/copilot`, then `copilot login`.")
 
 
 def tool_list_agents(args: dict, ctx: "Server") -> str:
@@ -566,12 +573,16 @@ def tool_connect_vscode_copilot(args: dict, ctx: "Server") -> str:
         steps.append(f"Found GitHub Copilot: {where}.")
     elif not found:
         steps.append("Connecting anyway: RAPR found no Copilot on disk, so the bridge will ask VS Code directly.")
-    if not vb.installed() or args.get("reinstall"):
+    old = vb.installed_version() if vb.installed() else ""
+    if not vb.installed() or args.get("reinstall") or vb.outdated():
         try:
             vb.install()
         except vb.BridgeError as exc:
             raise ToolError(str(exc)) from exc
-        steps.append(f"Installed the RAPR Bridge {vb.bundled_version()} in VS Code.")
+        steps.append(f"Updated the RAPR Bridge in VS Code from {old} to {vb.bundled_version()}." if old and old != vb.bundled_version()
+                     else f"Installed the RAPR Bridge {vb.bundled_version()} in VS Code.")
+        if vb.healthy():
+            steps.append("Reload the VS Code window (Ctrl+Shift+P, \"Developer: Reload Window\") so the new bridge runs.")
     _agents_cache = (0.0, {})          # it may be ready now
     if not vb.healthy():
         steps.append("Next, in VS Code: reload the window (Ctrl+Shift+P, \"Developer: Reload Window\"), then run "
@@ -579,7 +590,8 @@ def tool_connect_vscode_copilot(args: dict, ctx: "Server") -> str:
                      "Copilot. Then call list_agents: copilot_vscode appears.")
         return "\n".join(steps)
     steps.append(vb.status_text())
-    steps.append("Use it as copilot_vscode, e.g. second_opinion with agent copilot_vscode. If a question says "
+    steps.append("Use it as copilot_vscode in any tool: second_opinion, ask_agent, start_bakeoff, start_relay "
+                 "(any role), start_team. If a question says "
                  f"VS Code hasn't allowed it yet, run \"{vb.CONNECT_COMMAND}\" in VS Code and press Allow.")
     return "\n".join(steps)
 
@@ -695,7 +707,7 @@ def tool_ask_agent(args: dict, ctx: "Server") -> str:
 
     def work() -> str:
         if args.get("allow_edits"):
-            reply = run_agent(agent, prompt, folder, model, edits=True)
+            reply = run_agent(agent, prompt, folder, model, edits=True, in_copy=False)
             return f"{agent} (working in {folder}, edits allowed):\n\n{_clip(reply, REPLY_LIMIT)}"
         scratch = Scratch(folder)   # made here: copying a big project takes a while
         try:
@@ -1232,7 +1244,8 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
         "description": "Let RAPR use GitHub Copilot from VS Code with the user's VS Code sign-in (no Copilot CLI "
                        "needed): installs the small RAPR Bridge extension into VS Code if it isn't there, and says "
                        "the one step left in VS Code (run \"RAPR: Connect Copilot\" and press Allow). Copilot then "
-                       "shows up as copilot_vscode; it answers questions and reviews but can't edit files.",
+                       "shows up as copilot_vscode and can take any role: reviews, questions, bake-offs, relays, "
+                       "teams (it reads, edits and tests code with tools RAPR runs). Also updates an older bridge.",
         "inputSchema": {"type": "object", "properties": {
             "reinstall": {"type": "boolean", "default": False,
                           "description": "Install RAPR's copy again even if a bridge is installed (to update it)."},

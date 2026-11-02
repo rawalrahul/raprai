@@ -4,9 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
-import threading
 import zipfile
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -17,56 +15,6 @@ import helm.mcp_server as mcp
 from helm import vscode_bridge as vb
 
 ROOT = Path(__file__).resolve().parent.parent
-KEY = "k" * 64
-
-
-@pytest.fixture
-def bridge():
-    """A stand-in for the extension: same file, same key check, same answers."""
-    seen = []
-    state = {"status": 200, "reply": {"text": "Looks good to me.", "model": {"id": "gpt-4.1"}}}
-
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *a):
-            pass
-
-        def _send(self, status, body):
-            data = json.dumps(body).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-
-        def _authorized(self):
-            return self.headers.get("Authorization") == f"Bearer {KEY}"
-
-        def do_GET(self):
-            if not self._authorized():
-                return self._send(401, {"error": "unauthorized", "message": "Wrong or missing key."})
-            if self.path == "/health":
-                return self._send(200, {"ok": True, "version": "0.1.0"})
-            if self.path == "/models":
-                return self._send(200, {"models": [{"id": "gpt-4.1", "family": "gpt-4.1"}]})
-            self._send(404, {})
-
-        def do_POST(self):
-            if not self._authorized():
-                return self._send(401, {"error": "unauthorized", "message": "Wrong or missing key."})
-            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            seen.append(body)
-            if state["status"] != 200:
-                return self._send(state["status"], {"error": "no_permission", "message":
-                                  'VS Code hasn\'t allowed RAPR Bridge to use Copilot yet. In VS Code, run '
-                                  '"RAPR: Connect Copilot" (Ctrl+Shift+P) and press Allow.'})
-            self._send(200, state["reply"])
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    vb.config_dir().mkdir(parents=True, exist_ok=True)
-    vb.bridge_file().write_text(json.dumps({"port": server.server_address[1], "key": KEY, "pid": 1}))
-    yield {"seen": seen, "state": state}
-    server.shutdown()
 
 
 def test_asks_copilot_through_the_bridge(bridge):
@@ -104,30 +52,22 @@ def test_the_integration_shows_only_with_copilot_in_vscode(tmp_path, monkeypatch
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    assert not mod.SHOW() and not mod.READY() and mod.ANSWERS_ONLY
+    assert not mod.SHOW() and not mod.READY() and not getattr(mod, "ANSWERS_ONLY", False)
     (tmp_path / ".vscode" / "extensions" / "github.copilot-chat-0.40.0").mkdir(parents=True)
     vb.find_copilot(fresh=True)                       # the integration reads the last look
     assert mod.SHOW()
     assert mod.build_command("x", model="gpt-4.1")[1:] == ["-m", "helm.ai_runner._vscode_bridge_cli", "--model", "gpt-4.1"]
 
 
-def test_roles_that_edit_files_refuse_it(monkeypatch):
+def test_an_ai_that_only_answers_is_kept_out_of_roles_that_edit(monkeypatch):
+    """The rule stays for an integration marked ANSWERS_ONLY; Copilot through the bridge isn't one."""
     import helm.state as _st
-    monkeypatch.setattr(mcp, "agents", lambda: {"copilot_vscode": "Copilot (VS Code)", "codex": "Codex"})
-    monkeypatch.setitem(_st.integrations, "copilot_vscode", {"answers_only": True})
+    monkeypatch.setattr(mcp, "agents", lambda: {"chatty": "Chatty", "codex": "Codex"})
+    monkeypatch.setitem(_st.integrations, "chatty", {"answers_only": True})
     s = mcp.Server(out=None)
-
-    def err(tool, **args):
-        out = s.call_tool(tool, args)
-        return out.get("isError"), out["content"][0]["text"]
-    for tool, args in [("start_bakeoff", {"task": "t", "agents": ["copilot_vscode", "codex"]}),
-                       ("start_relay", {"task": "t", "executor": "copilot_vscode", "reviewer": "codex"}),
-                       ("start_relay", {"task": "t", "executor": "codex", "fixer": "copilot_vscode", "reviewer": "codex"}),
-                       ("start_team", {"parts": [{"agent": "copilot_vscode", "task": "t"}]}),
-                       ("ask_agent", {"agent": "copilot_vscode", "prompt": "p", "allow_edits": True})]:
-        is_err, text = err(tool, **args)
-        assert is_err and "can't edit files" in text, (tool, text)
-    mcp._check_agent("copilot_vscode")      # answering is fine: second_opinion, ask_agent, planner, reviewer
+    out = s.call_tool("start_bakeoff", {"task": "t", "agents": ["chatty", "codex"]})
+    assert out.get("isError") and "can't edit files" in out["content"][0]["text"]
+    mcp._check_agent("chatty")                     # answering is fine
 
 
 def test_connect_installs_the_bridge_into_vscode(monkeypatch, tmp_path):
@@ -139,7 +79,7 @@ def test_connect_installs_the_bridge_into_vscode(monkeypatch, tmp_path):
     monkeypatch.setattr(vb.subprocess, "run", lambda cmd, **k: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0, "ok", ""))
     text = mcp.Server(out=None).call_tool("connect_vscode_copilot", {})["content"][0]["text"]
     assert ran == [["/usr/bin/code", "--install-extension", str(vb.vsix_path()), "--force"]]
-    assert "Installed the RAPR Bridge 0.1.0" in text and "RAPR: Connect Copilot" in text and "Reload Window" in text
+    assert "Installed the RAPR Bridge 0.2.0" in text and "RAPR: Connect Copilot" in text and "Reload Window" in text
 
 
 def test_connect_without_the_code_command_says_how(monkeypatch):

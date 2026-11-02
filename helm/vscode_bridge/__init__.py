@@ -10,7 +10,8 @@ language model API (vscode.lm) with the person's permission and answers RAPR on 
 computer: 127.0.0.1, a random port, and a random key, both in
 ~/.config/rapr/vscode-bridge.json (RAPR_CONFIG_DIR overrides the folder).
 
-It answers questions (reviews, plans, second opinions); it doesn't edit files.
+Copilot works as an agent through it: RAPR gives it tools (read, search, edit files, run
+commands, depending on the job) and runs the calls it makes (helm/vscode_bridge/agent.py).
 """
 
 from __future__ import annotations
@@ -100,6 +101,37 @@ def healthy(timeout: float = 2.0) -> bool:
 
 def models(timeout: float = 10.0) -> list[dict]:
     return request("/models", timeout=timeout).get("models") or []
+
+
+def bridge_version(timeout: float = 2.0) -> str:
+    """The running bridge's version ("" when it isn't running)."""
+    try:
+        return str(request("/health", timeout=timeout).get("version") or "")
+    except BridgeError:
+        return ""
+
+
+def _ver(text: str) -> tuple:
+    try:
+        return tuple(int(x) for x in text.split(".")[:3])
+    except ValueError:
+        return ()
+
+
+TOOLS_SINCE = "0.2.0"     # the first bridge that lets Copilot call tools
+
+
+def chat(messages: list[dict], tools: list[dict], model: Optional[str] = None, timeout: float = 900.0) -> dict:
+    """One step of an agent conversation: {text, toolCalls, model}."""
+    running = bridge_version()
+    if running and _ver(running) < _ver(TOOLS_SINCE):
+        raise BridgeError(f"The RAPR Bridge in VS Code is version {running}; Copilot needs {TOOLS_SINCE} or later to "
+                          "work on files. Update it: ask for connect_vscode_copilot (it updates the bridge), then "
+                          "reload the VS Code window.")
+    body: dict = {"messages": messages, "tools": tools}
+    if model:
+        body["model"] = model
+    return request("/chat", body, timeout=timeout)
 
 
 def ask(prompt: str, model: Optional[str] = None, timeout: float = 900.0) -> str:
@@ -266,6 +298,31 @@ def where_copilot() -> str:
 def installed() -> bool:
     from helm.editor_clis import has_extension
     return has_extension(EXTENSION_ID + "-")
+
+
+def installed_version() -> str:
+    """The newest RAPR Bridge installed in VS Code ("" when none is): the running one's, else
+    its folder's (raprai.rapr-bridge-0.2.0)."""
+    running = bridge_version()
+    if running:
+        return running
+    best = ""
+    for root, _side in _extension_roots():
+        try:
+            for p in root.iterdir():
+                if p.name.startswith(EXTENSION_ID + "-"):
+                    v = p.name[len(EXTENSION_ID) + 1:].split("-")[0]
+                    if _ver(v) > _ver(best):
+                        best = v
+        except OSError:
+            continue
+    return best
+
+
+def outdated() -> bool:
+    """An installed bridge older than the one RAPR carries."""
+    have, ours = installed_version(), bundled_version()
+    return bool(have and ours and _ver(have) < _ver(ours))
 
 
 def _server_cli(env=None) -> Optional[str]:

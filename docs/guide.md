@@ -432,11 +432,11 @@ A window whose reset time has passed shows 0% until the AI reports again. Three 
 
 ### Copilot from VS Code
 
-GitHub Copilot in VS Code has no command-line tool RAPR can run, and keeps its GitHub sign-in inside VS Code. RAPR asks it through **RAPR Bridge**, a small VS Code extension that RAPR carries and installs itself (`vscode-bridge/` in the repository). It uses VS Code's own language model API, the one Copilot Chat uses, so nothing else is installed and no other sign-in is needed.
+GitHub Copilot in VS Code has no command-line tool RAPR can run, and keeps its GitHub sign-in inside VS Code. RAPR asks it through **RAPR Bridge**, a small VS Code extension that RAPR carries and installs itself (and updates, when it carries a newer one) (`vscode-bridge/` in the repository). It uses VS Code's own language model API, the one Copilot Chat uses, so nothing else is installed and no other sign-in is needed.
 
 1. Ask your AI to *"connect Copilot from VS Code"*: RAPR's `connect_vscode_copilot` tool installs the bridge into VS Code.
 2. In VS Code, reload the window (**Developer: Reload Window**), run **RAPR: Connect Copilot** from the Command Palette, and press **Allow** when VS Code asks whether RAPR Bridge may use Copilot.
-3. Copilot appears in `list_agents` as `copilot_vscode`. Use it for `second_opinion`, `ask_agent`, or a relay's planner or reviewer.
+3. Copilot appears in `list_agents` as `copilot_vscode`. Use it in any tool, in any role: `second_opinion`, `ask_agent`, `start_bakeoff`, `start_relay` (planner, executor, reviewer, fixer) and `start_team`.
 
 **Finding Copilot.** Copilot can be an extension you installed or built into VS Code, and in a WSL window it can live on either side. RAPR looks in all of these, identifying Copilot by its manifest (publisher GitHub, `copilot-chat` or `copilot`), not its folder name:
 
@@ -447,7 +447,12 @@ Versions VS Code has replaced (listed in `.obsolete`) don't count. Once the brid
 
 What to know:
 
-- It **answers questions; it doesn't edit files**, so RAPR doesn't offer it for bake-offs, team parts, or a relay's executor or fixer. For Copilot that edits files (and works without VS Code), install the Copilot CLI instead: `npm install -g @github/copilot`, then `copilot login`.
+- **Copilot works as an agent.** RAPR gives it tools through VS Code's language model API (native tool calling, as in Copilot's own agent mode) and runs the calls it makes, in the folder the job uses (`helm/vscode_bridge/agent.py`). Which tools depends on the job:
+  - looking only (`second_opinion`, a relay's planner or reviewer): list, read and search files;
+  - in a copy of the project (`ask_agent`, bake-offs, a relay's executor or fixer, team parts): also write and edit files, and run commands such as your tests;
+  - in your project itself (`ask_agent` with `allow_edits`): it may edit files but not run commands, as with Claude Code there.
+
+  Every path stays inside that folder (no `..` out of it, nothing written into `.git`), and a run stops after 60 steps. For Copilot without VS Code, install the Copilot CLI instead: `npm install -g @github/copilot`, then `copilot login`.
 - It works **while VS Code is open**. With several windows open, one serves RAPR; another takes over when it closes. **RAPR: Bridge status** says which.
 - Each question counts against your Copilot plan like a Copilot Chat one. Without a model named, the bridge picks one that uses no premium requests (GPT-4.1, GPT-5 mini, GPT-4o) when your plan has it.
 - **Safety:** the bridge listens on `127.0.0.1` only, on a random port, and answers only requests carrying a random key it writes to `~/.config/rapr/vscode-bridge.json` (readable only by you). It refuses anything a web page could send. No certificate or account is involved; it's installed from a file, not the Marketplace.

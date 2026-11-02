@@ -9,7 +9,9 @@ questions through **your VS Code sign-in**, so you don't need to install or sign
   key it writes to `~/.config/rapr/vscode-bridge.json`, readable only by you. Nothing is reachable
   from your network.
 - Works while VS Code is open. Each request counts against your Copilot plan, like a Copilot Chat one.
-- Answers questions; it doesn't edit files.
+- Copilot can work as an agent for RAPR: RAPR gives it tools (read, search and edit files, run
+  commands, depending on the job) and runs the tool calls Copilot makes in the folder it was given.
+  The bridge itself never touches your files; it only passes the conversation to Copilot and back.
 
 RAPR installs it for you (ask your AI to "connect Copilot through RAPR", or run
 `code --install-extension <path>`); see RAPR's guide.
