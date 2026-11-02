@@ -165,9 +165,11 @@ def test_the_packaged_bridge_is_the_source_in_the_repo():
     """helm/vscode_bridge/rapr-bridge.vsix must be rebuilt when vscode-bridge/ changes:
     cd vscode-bridge && npx @vscode/vsce package --no-dependencies -o ../helm/vscode_bridge/rapr-bridge.vsix"""
     with zipfile.ZipFile(vb.vsix_path()) as z:
-        assert z.read("extension/extension.js").decode() == (ROOT / "vscode-bridge" / "extension.js").read_text()
+        # UTF-8 (Windows reads cp1252 by default) and either line ending (git's autocrlf on Windows).
+        packed_js = z.read("extension/extension.js").decode("utf-8").replace("\r\n", "\n")
+        assert packed_js == (ROOT / "vscode-bridge" / "extension.js").read_text(encoding="utf-8").replace("\r\n", "\n")
         packed = json.loads(z.read("extension/package.json"))
-    source = json.loads((ROOT / "vscode-bridge" / "package.json").read_text())
+    source = json.loads((ROOT / "vscode-bridge" / "package.json").read_text(encoding="utf-8"))
     assert {k: packed[k] for k in source} == source
     assert vb.bundled_version() == source["version"]
 
