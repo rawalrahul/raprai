@@ -18,18 +18,20 @@ How a group answers a message (a "room turn"):
     (and kills the reply that is being written).
 
 What a member sees (its prompt) is built fresh for every reply, because each
-reply is a new, one-shot run of that AI's CLI:
-  • the room header (who is here, what the group is for, the member's role),
-  • messages the user pinned (always shown, never scroll out),
-  • a running summary of older messages (see below),
-  • the most recent messages, newest kept word for word and older ones
-    shortened, fitted into a budget sized for that member's AI (a share of
-    its context window, capped; tighter when the prompt has to go on the
-    command line). Older messages that don't fit are counted, not shown.
-When enough messages have piled up, or some no longer fit, the oldest ones are
-folded into the group's running summary by one of the members (falling back to
-a plain digest if that fails). Long prompts go to Claude over stdin, so they
-never hit the OS command-line length limit (about 8K chars through cmd.exe).
+reply is a new, one-shot run of that AI's CLI. helm/groupchat_context/ owns it:
+  • older messages are folded in the background into write-once summaries,
+    in levels (a level-2 summary merges old level-1 ones), written by Claude or
+    the strongest paid AI set up, checked to keep exact names, paths, numbers;
+  • each member gets its own view of that shared history, sized to its AI:
+    the user's setting for online AIs (default 200K tokens, raise it as
+    windows grow), a share of the window for offline models. Spare room opens summaries back up, newest first, so big-window
+    members read most of the chat word for word;
+  • room facts (decisions, owners, requirements) and pins are always shown;
+  • a member that needs the words behind a summary replies "(recall b3)" and
+    is asked once more with them shown (or uses RAPR's MCP group_recall).
+Every message is also archived to disk, so nothing summarised is lost.
+Long prompts go to Claude over stdin, so they never hit the OS command-line
+length limit (about 8K chars through cmd.exe).
 
 Groups are kept in <user data>/group_chats.json so they survive restarts.
 Members are snapshots of sessions (AI, model, folder); while that session is
@@ -50,27 +52,20 @@ from uuid import uuid4
 
 import helm.state as _st
 from helm.config import logger
+from helm.groupchat_context import archive as _archive
+from helm.groupchat_context import blocks as _blocks
+from helm.groupchat_context import budget as _budget
+from helm.groupchat_context import folder as _folder
+from helm.groupchat_context import meter as _meter
+from helm.groupchat_context import recall as _recall
+from helm.groupchat_context import render as _render
+from helm.groupchat_context import text as _text
 
 MAX_ROUNDS = 3
 MAX_REPLIES = 10
 MAX_MEMBERS = 8
 MAX_STORED_MESSAGES = 500
-CONTEXT_MESSAGES = 40          # at most this many recent room messages in a prompt
-KEEP_FULL_MESSAGES = 6         # the newest ones are shown in full, older ones shortened
-OLD_MESSAGE_CHARS = 2000       # longest an older message may be in a prompt
-CONTEXT_SHARE = float(os.environ.get("GROUP_CONTEXT_SHARE", "0.3"))       # of the AI's window
-MAX_PROMPT_TOKENS = int(os.environ.get("GROUP_CONTEXT_MAX_TOKENS", "24000"))
-MIN_PROMPT_TOKENS = 2000
-CHARS_PER_TOKEN = 4
-ARGV_MAX_CHARS_WINDOWS = 7000  # cmd.exe caps a whole command line at 8191 chars
-ARGV_MAX_CHARS_POSIX = 100_000 # Linux caps one argument at 128 KiB
-SUMMARY_KEEP_RECENT = 20       # messages never folded into the summary
-SUMMARY_BATCH = 10             # fold once this many more have piled up…
-SUMMARY_MIN_FOLD = 4           # …or once at least this many no longer fit a prompt
-SUMMARY_MAX_CHARS = 3000
-SUMMARY_TIMEOUT = 180
 MAX_PINS = 10
-PIN_CHARS = 1500
 REPLY_TIMEOUT = 600            # seconds one member may take to answer
 PASS_RE = re.compile(r"^\s*\(?\s*pass\s*\)?\s*\.?\s*$", re.IGNORECASE)
 _ANSI_ESC_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
@@ -112,6 +107,8 @@ def load_groups() -> None:
             for g in data.get("groups", []):
                 g["status"] = "idle"
                 g["speaking"] = None
+                _blocks.migrate_legacy_summary(g)
+                _archive.backfill(g)
                 groups[g["id"]] = g
             for ch, gid in (data.get("active") or {}).items():
                 if gid in groups:
@@ -197,6 +194,7 @@ def make_message(role: str, content: str, member: Optional[dict] = None,
 
 def append_message(group: dict, msg: dict) -> None:
     group["messages"].append(msg)
+    _archive.append(group["id"], msg)
     if len(group["messages"]) > MAX_STORED_MESSAGES:
         del group["messages"][:-MAX_STORED_MESSAGES]
     group["updated_at"] = msg["timestamp"]
@@ -248,181 +246,26 @@ def _mentioned_since_user(group: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Prompt
+# Prompt (built by helm/groupchat_context: one view of the shared history per member)
 # ---------------------------------------------------------------------------
 
-def _speaker(msg: dict) -> str:
-    if msg["role"] == "user":
-        return "User"
-    if msg["role"] == "member":
-        return msg.get("author_name") or "AI"
-    return "System"
-
-
-def _shorten(text: str, limit: int) -> str:
-    """text cut to about limit chars, keeping its start and end."""
-    if len(text) <= limit:
-        return text
-    if limit < 80:
-        return text[:max(limit - 1, 0)] + "…"
-    note = f"\n[… {len(text) - limit} chars cut …]\n"
-    keep = max(limit - len(note), 20)
-    head = keep * 2 // 3
-    return text[:head] + note + text[len(text) - (keep - head):]
-
-
-def _chat_messages(group: dict) -> list[dict]:
-    return [m for m in group["messages"] if m["role"] in ("user", "member")]
-
-
-def _unsummarised(group: dict) -> list[dict]:
-    """Chat messages newer than the ones folded into the running summary."""
-    msgs = _chat_messages(group)
-    upto = group.get("summary_upto")
-    if not upto or not group.get("summary"):
-        return msgs
-    for i, m in enumerate(msgs):
-        if m["id"] == upto:
-            return msgs[i + 1:]
-    # The boundary message was trimmed from storage, so everything left is newer.
-    return msgs
-
-
-def prompt_via_stdin(member: dict) -> bool:
-    """True when a long prompt reaches this member's CLI over stdin, not argv."""
-    if member.get("ai") == "claude":
-        return True
-    info = _st.integrations.get(member.get("ai") or "") or {}
-    return bool(info.get("stdin_prompt"))
+_speaker = _text.speaker
+_shorten = _text.shorten
+prompt_via_stdin = _budget.prompt_via_stdin
 
 
 def prompt_budget_tokens(member: dict) -> int:
     """How big (in estimated tokens) a prompt for this member may get."""
-    from helm.context_manager import context_window_for
-    try:
-        window = context_window_for(member.get("ai") or "", member.get("model") or "")
-    except Exception:
-        window = 128_000
-    budget = max(min(int(window * CONTEXT_SHARE), MAX_PROMPT_TOKENS), MIN_PROMPT_TOKENS)
-    if not prompt_via_stdin(member):
-        argv_max = ARGV_MAX_CHARS_WINDOWS if os.name == "nt" else ARGV_MAX_CHARS_POSIX
-        budget = min(budget, argv_max // CHARS_PER_TOKEN)
-    return budget
+    return _budget.budget_tokens(member)
 
 
-def _pinned_block(group: dict) -> str:
-    pins = group.get("pinned") or []
-    if not pins:
-        return ""
-    lines = [f"- {p.get('who') or 'User'}: {_shorten(p.get('content', ''), PIN_CHARS)}" for p in pins]
-    return "Pinned by the user (always keep these in mind):\n" + "\n".join(lines) + "\n\n"
-
-
-def _summary_block(group: dict) -> str:
-    if not group.get("summary"):
-        return ""
-    return f"Summary of the earlier conversation:\n{group['summary']}\n\n"
-
-
-def _fit_transcript(group: dict, member: dict, budget_chars: int) -> tuple[list[str], int]:
-    """Lines of the most recent messages that fit budget_chars (oldest first),
-    and how many unsummarised messages didn't fit."""
-    msgs = _unsummarised(group)
-    chosen: list[str] = []
-    remaining = budget_chars
-    for i, msg in enumerate(reversed(msgs)):
-        if len(chosen) >= CONTEXT_MESSAGES:
-            break
-        who = "You" if msg.get("author") == member["id"] else _speaker(msg)
-        text = msg["content"] if i < KEEP_FULL_MESSAGES else _shorten(msg["content"], OLD_MESSAGE_CHARS)
-        line = f"{who}: {text}"
-        if len(line) + 2 > remaining:
-            if not chosen:   # always show the newest message, cut down if need be
-                chosen.append(_shorten(line, max(remaining - 2, 200)))
-            break
-        chosen.append(line)
-        remaining -= len(line) + 2
-    chosen.reverse()
-    return chosen, len(msgs) - len(chosen)
-
-
-def _prompt_parts(group: dict, member: dict) -> tuple[str, str]:
-    """(everything above the transcript, everything below it)."""
-    others = [m for m in group["members"] if m["id"] != member["id"]]
-    roster = ", ".join(f'{m["name"]} ({m["ai"]})' for m in others) or "nobody else"
-    header = f'[Group chat: "{group["name"]}" - with the user, {roster}]'
-    about = f'What this group is for: {group["about"]}\n\n' if group.get("about") else ""
-    role = f'Your role in this group: {member["role_prompt"]}\n\n' if member.get("role_prompt") else ""
-    top = (
-        f"{header}\n\n"
-        f"You are {member['name']}, one of several AI assistants in a group chat "
-        f"with the user. {about}{role}"
-        f"{_pinned_block(group)}{_summary_block(group)}"
-        "Conversation so far (oldest first):\n\n"
-    )
-    bottom = (
-        f"\n\n---\nWrite your next message to the group as {member['name']}.\n"
-        "- Answer the user directly, and build on, correct or agree with the other "
-        "assistants instead of repeating them.\n"
-        "- Address someone with @Name (e.g. @" + (others[0]["name"].split()[0] if others else "User")
-        + ") when you want a specific member to respond.\n"
-        "- If you have nothing useful to add, reply with exactly: (pass)\n"
-        "- Reply with your message only: no name prefix, no preamble."
-    )
-    return top, bottom
-
-
-def _build(group: dict, member: dict) -> tuple[str, dict]:
-    top, bottom = _prompt_parts(group, member)
-    budget_tokens = prompt_budget_tokens(member)
-    room = budget_tokens * CHARS_PER_TOKEN - len(top) - len(bottom)
-    lines, hidden = _fit_transcript(group, member, max(room, 1000))
-    if hidden:
-        lines.insert(0, f"(… {hidden} earlier messages not shown)")
-    transcript = "\n\n".join(lines) or "(no messages yet)"
-    prompt = f"{top}{transcript}{bottom}"
-    info = {
-        "member": member["id"],
-        "tokens": len(prompt) // CHARS_PER_TOKEN,
-        "budget": budget_tokens,
-        "shown": len(lines) - (1 if hidden else 0),
-        "hidden": hidden,
-    }
-    return prompt, info
-
-
-def build_prompt(group: dict, member: dict) -> str:
-    return _build(group, member)[0]
+def build_prompt(group: dict, member: dict, recalled: Optional[str] = None) -> str:
+    return _render.build_prompt(group, member, recalled)
 
 
 def context_info(group: dict) -> dict:
-    """What the members see, for the context indicator: the tightest member's
-    usage, how many messages are summarised, shown, and not shown."""
-    total = len(_chat_messages(group))
-    unsummarised = len(_unsummarised(group))
-    worst = None
-    for m in group.get("members") or []:
-        try:
-            _, info = _build(group, m)
-        except Exception:
-            continue
-        info["pct"] = round(100 * info["tokens"] / max(info["budget"], 1))
-        if worst is None or (info["pct"], info["hidden"]) > (worst["pct"], worst["hidden"]):
-            worst = info
-    worst = worst or {"tokens": 0, "budget": 0, "pct": 0, "shown": 0, "hidden": 0, "member": None}
-    return {
-        "messages": total,
-        "summarised": total - unsummarised if group.get("summary") else 0,
-        "has_summary": bool(group.get("summary")),
-        "pinned": len(group.get("pinned") or []),
-        "shown": worst["shown"],
-        "hidden": worst["hidden"],
-        "tokens": worst["tokens"],
-        "budget": worst["budget"],
-        "pct": worst["pct"],
-        "tightest": worst["member"],
-        "summarising": bool(group.get("_summarising")),
-    }
+    """What the members see, for the context meter (see groupchat_context/meter.py)."""
+    return _meter.context_info(group)
 
 
 # ---------------------------------------------------------------------------
@@ -602,115 +445,16 @@ async def _relay(group: dict, msg: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Running summary: older messages folded into a short recap
+# Summaries: older messages folded into write-once, layered summaries
 # ---------------------------------------------------------------------------
 
-def messages_to_fold(group: dict) -> list[dict]:
-    """The oldest unsummarised messages that should go into the summary now:
-    all but the newest SUMMARY_KEEP_RECENT once SUMMARY_BATCH more have piled up,
-    or (at least SUMMARY_MIN_FOLD of) those that no longer fit some member's prompt."""
-    msgs = _unsummarised(group)
-    n = len(msgs) - SUMMARY_KEEP_RECENT if len(msgs) >= SUMMARY_KEEP_RECENT + SUMMARY_BATCH else 0
-    hidden = 0
-    for m in group.get("members") or []:
-        try:
-            hidden = max(hidden, _build(group, m)[1]["hidden"])
-        except Exception:
-            continue
-    if hidden >= SUMMARY_MIN_FOLD:
-        n = max(n, hidden)
-    return msgs[:n] if n > 0 else []
-
-
-def _digest(previous: str, msgs: list[dict]) -> str:
-    """Plain recap used when no AI could write the summary."""
-    lines = previous.splitlines() if previous else []
-    for m in msgs:
-        text = " ".join(m["content"].split())
-        lines.append(f"- {_speaker(m)}: {_shorten(text, 160)}")
-    out = "\n".join(lines)
-    while len(out) > SUMMARY_MAX_CHARS and len(lines) > 1:
-        lines.pop(0)   # drop the oldest lines first
-        out = "\n".join(lines)
-    return _shorten(out, SUMMARY_MAX_CHARS)
-
-
-def summary_prompt(group: dict, msgs: list[dict]) -> str:
-    convo = "\n\n".join(f"{_speaker(m)}: {_shorten(m['content'], 1500)}" for m in msgs)
-    convo = _shorten(convo, 40_000)
-    previous = group.get("summary") or "(none yet)"
-    about = f'The group is for: {group["about"]}\n' if group.get("about") else ""
-    return (
-        f'You keep the running summary of a group chat called "{group["name"]}" between '
-        "the user and several AI assistants. The assistants only see this summary, not "
-        f"the messages it covers, so keep what they will need.\n{about}\n"
-        f"Current summary:\n{previous}\n\n"
-        f"Messages to fold in (oldest first):\n\n{convo}\n\n"
-        "---\nWrite the updated summary: the current summary plus these messages. "
-        "Keep the user's goals, requirements and preferences, decisions made, facts, "
-        "names, numbers and file paths that matter, open questions, and who agreed to "
-        "do what. Drop small talk. Use short bullet points, at most about 300 words. "
-        "Reply with the summary only, no preamble."
-    )
-
-
-def _summariser(group: dict) -> Optional[dict]:
-    """The member whose AI writes the summary: Claude if there is one."""
-    members = group.get("members") or []
-    return next((m for m in members if m.get("ai") == "claude"), members[0] if members else None)
-
-
-def _summarise_blocking(group: dict, msgs: list[dict]) -> str:
-    from helm.council.runner import _build_cmd_for_session, _run_subprocess_blocking, failed
-    member = _summariser(group)
-    if not member:
-        return ""
-    prompt = summary_prompt(group, msgs)
-    try:
-        sess = _runtime_session(member)
-        cmd, stdin_text, extra_env = _build_cmd_for_session(sess, prompt)
-        cwd = sess.get("cwd") or _st.last_cwd
-        if not os.path.isdir(cwd):
-            cwd = os.path.expanduser("~")
-        out = _run_subprocess_blocking(cmd, cwd, stdin_text, extra_env, timeout=SUMMARY_TIMEOUT)
-    except Exception as exc:
-        logger.warning("groupchat: summary by %s failed: %s", member.get("name"), exc)
-        return ""
-    out = (out or "").strip()
-    if not out or failed(out) or PASS_RE.match(out):
-        return ""
-    return _shorten(out, SUMMARY_MAX_CHARS)
-
-
 async def update_summary(group: dict) -> bool:
-    """Fold the messages that are due into the running summary. True if it changed."""
-    if group.get("_summarising"):
-        return False
-    msgs = messages_to_fold(group)
-    if not msgs:
-        return False
-    group["_summarising"] = True
-    cleared = group.get("_cleared", 0)
-    try:
-        loop = asyncio.get_running_loop()
-        text = await loop.run_in_executor(None, lambda: _summarise_blocking(group, msgs))
-        if not text:
-            text = _digest(group.get("summary") or "", msgs)
-        if groups.get(group["id"]) is not group or group.get("_cleared", 0) != cleared:
-            return False   # deleted or cleared meanwhile
-        group["summary"] = text
-        group["summary_upto"] = msgs[-1]["id"]
-        group["summary_count"] = (group.get("summary_count") or 0) + len(msgs)
-        save_groups()
-        return True
-    finally:
-        group.pop("_summarising", None)
-        await broadcast_context(group)
+    """Write the summaries that are due (see groupchat_context/folder.py). True if any changed."""
+    return await _folder.run(group)
 
 
 def _schedule_summary(group: dict) -> None:
-    if messages_to_fold(group):
-        asyncio.create_task(update_summary(group))
+    _folder.schedule(group)
 
 
 # ---------------------------------------------------------------------------
@@ -737,12 +481,19 @@ def unpin_message(group: dict, message_id: str) -> None:
 
 
 def clear_messages(group: dict) -> None:
-    """Empty the chat, with its summary and pins."""
+    """Empty the chat, with its summaries, facts, pins and archive."""
     group["messages"] = []
     group["pinned"] = []
     group["_cleared"] = group.get("_cleared", 0) + 1
+    _blocks.clear(group)
+    _archive.delete(group["id"])
     for k in ("summary", "summary_upto", "summary_count"):
         group.pop(k, None)
+
+
+def forget_group(group_id: str) -> None:
+    """Remove what a deleted group left on disk besides group_chats.json."""
+    _archive.delete(group_id)
 
 
 async def broadcast_context(group: dict) -> None:
@@ -770,6 +521,22 @@ def _has_news(group: dict, member_id: str) -> bool:
     last = _spoke_last_index(group, member_id)
     return any(m["role"] in ("user", "member") and m.get("author") != member_id
                for m in group["messages"][last + 1:])
+
+
+async def _answer_recall(group: dict, member: dict, reply: str) -> str:
+    """A member that replied "(recall b3)" or "(recall: words)" is run once more
+    with those earlier messages shown word for word; asking again counts as a pass."""
+    request = _recall.parse_request(reply or "")
+    if not request:
+        return reply
+    limit = _budget.budget_tokens(member) * _text.CHARS_PER_TOKEN // 2
+    shown = _recall.fulfil(group, request, member["id"], limit_chars=limit)
+    try:
+        again = await _run_member(group, member, build_prompt(group, member, recalled=shown))
+    except Exception as exc:
+        logger.warning("groupchat: %s failed after a recall: %s", member["name"], exc)
+        return f"(error: {exc})"
+    return "(pass)" if _recall.parse_request(again or "") else again
 
 
 async def run_room_turn(group_id: str, token: str) -> None:
@@ -804,6 +571,9 @@ async def run_room_turn(group_id: str, token: str) -> None:
                 except Exception as exc:
                     logger.warning("groupchat: %s failed: %s", member["name"], exc)
                     reply = f"(error: {exc})"
+                if cancelled():
+                    return
+                reply = await _answer_recall(group, member, reply)
                 if cancelled():
                     return
                 if not reply or PASS_RE.match(reply):

@@ -65,7 +65,8 @@ INSTRUCTIONS = (
     "a few minutes while the other AI works: second_opinion and ask_agent answer within a minute, "
     "with the reply or an id to wait on with agent_status. While a relay, team or bake-off runs, its status "
     "tool gives a short progress report; the plan, reviews and diffs come once it has finished. "
-    "usage tells each AI's plan usage (5-hour and weekly, as the AI reports it) and what RAPR ran today."
+    "usage tells each AI's plan usage (5-hour and weekly, as the AI reports it) and what RAPR ran today. "
+    "In a RAPR group chat, group_search and group_recall read summarised earlier messages word for word."
 )
 
 
@@ -1439,6 +1440,10 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
         "annotations": {"destructiveHint": True, "idempotentHint": True},
     }, tool_discard_team),
 }
+
+# group_search / group_recall: read summarised parts of a RAPR group chat.
+from helm.groupchat_context.mcp_tools import TOOLS as _GROUP_TOOLS  # noqa: E402
+TOOLS.update(_GROUP_TOOLS)
 
 
 # ---------------------------------------------------------------------------

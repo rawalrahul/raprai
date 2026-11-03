@@ -398,6 +398,9 @@ _SETTINGS_KEYS = [
     "CONTEXT_WINDOW_CODEX",
     "CONTEXT_WINDOW_GEMINI",
     "CONTEXT_WINDOW_OLLAMA",
+    # Group chats: how much of the chat each AI sees (helm/groupchat_context/budget.py)
+    "GROUP_CONTEXT_TOKENS",
+    "GROUP_CONTEXT_OFFLINE_SHARE",
     # Computer Use (desktop control via pyautogui / mss / pygetwindow)
     "COMPUTER_USE",
     # Computer Use Tier 2 — native API runners (Claude / Gemini / OpenAI)
