@@ -1226,6 +1226,23 @@ Example:
         </div>
       </div>
 
+      <!-- Group chats: how much of the chat each AI sees -->
+      <div class="settings-section">
+        <div class="settings-section-title">Group Chats</div>
+        <div class="settings-row">
+          <label>Context per online AI
+            <small>Tokens of the chat each online AI (Claude, Codex, Gemini…) may see per reply. Default 200,000; raise it to 1,000,000 or more as models grow. Only a smaller window you set below for an AI caps it.</small>
+          </label>
+          <input class="settings-input" id="st-GROUP_CONTEXT_TOKENS" type="number" min="2000" step="1000" placeholder="200000" style="width:120px">
+        </div>
+        <div class="settings-row">
+          <label>Share for offline models
+            <small>Percent of an offline model's window (Ollama, LM Studio) used for the chat. Default 50.</small>
+          </label>
+          <input class="settings-input" id="st-GROUP_CONTEXT_OFFLINE_SHARE" type="number" min="5" max="100" step="5" placeholder="50" style="width:70px">
+        </div>
+      </div>
+
       <!-- AI Context Windows — dynamically populated from /integrations -->
       <div class="settings-section">
         <div class="settings-section-title">AI Context Windows
@@ -1940,7 +1957,7 @@ Example:
 <script src="/js/chat.js?v=1"></script>
 <script src="/js/schedules_history.js?v=1"></script>
 <script src="/js/sidebar_panels.js?v=1"></script>
-<script src="/js/settings.js?v=2"></script>
+<script src="/js/settings.js?v=3"></script>
 <script src="/js/pipelines.js?v=1"></script>
 <script src="/js/layout.js?v=1"></script>
 <script src="/js/ai_list.js?v=2"></script>
@@ -1958,7 +1975,7 @@ Example:
 <script src="/js/agents_init.js?v=1"></script>
 <script src="/js/council.js?v=10"></script>
 <script src="/js/groupchat.js?v=8"></script>
-<script src="/js/groupchat_context.js?v=1"></script>
+<script src="/js/groupchat_context.js?v=2"></script>
 <script src="/js/whatsapp.js?v=2"></script>
 <script src="/js/telegram.js?v=1"></script>
 <script src="/js/voices.js?v=2"></script>

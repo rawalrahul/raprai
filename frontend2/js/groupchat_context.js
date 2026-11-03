@@ -77,8 +77,8 @@ async function openGroupContext(id) {
   const body = _g('div', 'modal-body group-context-body');
   const c = d.context || {};
   body.appendChild(_g('p', 'group-context-note',
-    'Each AI gets its own view of the chat, sized to its context window: online AIs see up to ' +
-    '200K tokens or more, offline models a share of theirs. Older messages are summarised; an AI ' +
+    'Each AI gets its own view of the chat: online AIs see up to ' + _gcNum(c.online_budget) +
+    ' tokens (Settings → Group Chats), offline models a share of their window. Older messages are summarised; an AI ' +
     'with room to spare reads them word for word instead, and any AI can ask for the messages ' +
     'behind a summary.' + (c.summarising ? ' Summarising now…' : '')));
 

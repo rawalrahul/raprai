@@ -23,8 +23,8 @@ reply is a new, one-shot run of that AI's CLI. helm/groupchat_context/ owns it:
     in levels (a level-2 summary merges old level-1 ones), written by Claude or
     the strongest paid AI set up, checked to keep exact names, paths, numbers;
   • each member gets its own view of that shared history, sized to its AI:
-    at least 200K tokens for online AIs, a share of the window for offline
-    models. Spare room opens summaries back up, newest first, so big-window
+    the user's setting for online AIs (default 200K tokens, raise it as
+    windows grow), a share of the window for offline models. Spare room opens summaries back up, newest first, so big-window
     members read most of the chat word for word;
   • room facts (decisions, owners, requirements) and pins are always shown;
   • a member that needs the words behind a summary replies "(recall b3)" and

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from helm.config import logger
-from helm.groupchat_context import blocks, render
+from helm.groupchat_context import blocks, budget, render
 from helm.groupchat_context.text import is_chat
 
 
@@ -41,6 +41,7 @@ def context_info(group: dict) -> dict:
         "pct": worst["pct"],
         "tightest": worst["member"],
         "members": per_member,
+        "online_budget": budget.online_tokens(),
         "summarising": bool(group.get("_summarising")),
     }
 

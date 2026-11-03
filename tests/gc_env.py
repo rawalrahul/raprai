@@ -68,7 +68,10 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(gc, "_loaded", True)
     monkeypatch.setattr(gc, "_store_path", lambda: tmp_path / "group_chats.json")
     monkeypatch.setattr(summariser, "claude_installed", lambda: False)
-    monkeypatch.delenv("GROUP_SUMMARISER", raising=False)
+    for var in ("GROUP_SUMMARISER", "GROUP_CONTEXT_TOKENS", "GROUP_CONTEXT_OFFLINE_SHARE"):
+        monkeypatch.delenv(var, raising=False)
+    for var in [k for k in os.environ if k.startswith("CONTEXT_WINDOW_")]:
+        monkeypatch.delenv(var, raising=False)
     # Same prompt budget on every OS (Windows' command line is much shorter).
     monkeypatch.setattr(budget, "ARGV_MAX_CHARS_WINDOWS", budget.ARGV_MAX_CHARS_POSIX)
     events = []

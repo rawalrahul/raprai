@@ -111,3 +111,21 @@ def test_pin_unpin_and_context_endpoints(client):
     client.delete(base + "/messages")
     got = client.get(base).json()["group"]
     assert got["messages"] == [] and got["pinned"] == []
+
+
+def test_group_context_setting_is_saved_and_used_from_the_next_reply(client, tmp_path, monkeypatch):
+    from helm.groupchat_context import budget
+    from helm.web_routes.app import _SETTINGS_KEYS
+    monkeypatch.setenv("RAPR_DATA_DIR", str(tmp_path))         # the .env lands in tmp
+    monkeypatch.setenv("GROUP_CONTEXT_TOKENS", "200000")        # restored after the test
+    monkeypatch.setenv("GROUP_CONTEXT_OFFLINE_SHARE", "50")
+    assert {"GROUP_CONTEXT_TOKENS", "GROUP_CONTEXT_OFFLINE_SHARE"} <= set(_SETTINGS_KEYS)
+    r = client.post("/settings", json={"GROUP_CONTEXT_TOKENS": "1000000",
+                                       "GROUP_CONTEXT_OFFLINE_SHARE": "40"})
+    assert set(r.json()["saved"]) == {"GROUP_CONTEXT_TOKENS", "GROUP_CONTEXT_OFFLINE_SHARE"}
+    assert "GROUP_CONTEXT_TOKENS=1000000" in (tmp_path / ".env").read_text()
+    assert budget.budget_tokens({"ai": "claude"}) == 1_000_000
+    assert client.get("/settings").json()["GROUP_CONTEXT_TOKENS"] == "1000000"
+    g = client.post("/api/groups", json={"member_ais": ["gemini"]}).json()["group"]
+    ctx = client.get(f"/api/groups/{g['id']}/context").json()["context"]
+    assert ctx["online_budget"] == 1_000_000

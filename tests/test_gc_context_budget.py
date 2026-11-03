@@ -7,29 +7,34 @@ def _m(ai, model=None):
     return {"id": "m", "ai": ai, "model": model}
 
 
-def test_online_ais_get_at_least_200k(env, monkeypatch):
+def test_online_ais_default_to_200k(env, monkeypatch):
+    monkeypatch.delenv("GROUP_CONTEXT_TOKENS", raising=False)
     _st.integrations["codex"] = {"stdin_prompt": True}
     _st.integrations["mystery"] = {"stdin_prompt": True}
-    assert budget.budget_tokens(_m("claude")) >= 200_000
-    assert budget.budget_tokens(_m("codex")) >= 200_000
-    assert budget.budget_tokens(_m("mystery")) >= 200_000   # unknown online AI: assume 1M window
-    monkeypatch.setattr(budget, "ONLINE_TOKENS", 400_000)
-    assert budget.budget_tokens(_m("claude")) == 400_000
+    for ai in ("claude", "codex", "mystery"):
+        assert budget.budget_tokens(_m(ai)) == 200_000
 
 
-def test_floor_cant_be_configured_lower():
-    import importlib
-    import os
-    old = os.environ.get("GROUP_CONTEXT_TOKENS")
-    os.environ["GROUP_CONTEXT_TOKENS"] = "50000"
-    try:
-        assert importlib.reload(budget).ONLINE_TOKENS == 200_000
-    finally:
-        if old is None:
-            os.environ.pop("GROUP_CONTEXT_TOKENS")
-        else:
-            os.environ["GROUP_CONTEXT_TOKENS"] = old
-        importlib.reload(budget)
+def test_the_setting_is_used_as_set_and_read_live(env, monkeypatch):
+    _st.integrations["codex"] = {"stdin_prompt": True}
+    monkeypatch.setenv("GROUP_CONTEXT_TOKENS", "1000000")
+    assert budget.budget_tokens(_m("claude")) == 1_000_000      # not cut to 80% of a 1M guess
+    assert budget.budget_tokens(_m("codex")) == 1_000_000
+    monkeypatch.setenv("GROUP_CONTEXT_TOKENS", "2,500,000")        # windows keep growing
+    assert budget.budget_tokens(_m("claude")) == 2_500_000
+    monkeypatch.setenv("GROUP_CONTEXT_TOKENS", "120000")           # lower is the user's call too
+    assert budget.budget_tokens(_m("claude")) == 120_000
+    for bad in ("lots", "-5", "10"):                               # nonsense → the default
+        monkeypatch.setenv("GROUP_CONTEXT_TOKENS", bad)
+        assert budget.budget_tokens(_m("claude")) == 200_000
+
+
+def test_a_window_the_user_set_for_an_ai_caps_the_setting(env, monkeypatch):
+    monkeypatch.setenv("GROUP_CONTEXT_TOKENS", "1000000")
+    monkeypatch.setenv("CONTEXT_WINDOW_CLAUDE", "500000")
+    assert budget.budget_tokens(_m("claude")) == int(500_000 * budget.WINDOW_HEADROOM)
+    monkeypatch.setenv("CONTEXT_WINDOW_CLAUDE", "4000000")
+    assert budget.budget_tokens(_m("claude")) == 1_000_000
 
 
 def test_offline_models_get_a_share_of_their_window(env, monkeypatch):
@@ -37,7 +42,14 @@ def test_offline_models_get_a_share_of_their_window(env, monkeypatch):
     _st.integrations["ollama"] = {"stdin_prompt": True}
     assert budget.is_offline(_m("claude_ollama")) and budget.is_offline(_m("ollama"))
     small = budget.budget_tokens(_m("claude_ollama"))
-    assert small == int(budget.OFFLINE_DEFAULT_WINDOW * budget.OFFLINE_SHARE)
+    assert small == int(budget.OFFLINE_DEFAULT_WINDOW * 0.5)
+    monkeypatch.setenv("GROUP_CONTEXT_TOKENS", "1000000")           # online setting: no effect here
+    assert budget.budget_tokens(_m("claude_ollama")) == small
+    monkeypatch.setenv("GROUP_CONTEXT_OFFLINE_SHARE", "25")         # percent, as Settings saves it
+    assert budget.budget_tokens(_m("claude_ollama")) == 8_000
+    monkeypatch.setenv("GROUP_CONTEXT_OFFLINE_SHARE", "0.75")
+    assert budget.budget_tokens(_m("claude_ollama")) == 24_000
+    monkeypatch.delenv("GROUP_CONTEXT_OFFLINE_SHARE")
     # A known model's window is used; an env override wins over everything.
     assert budget.budget_tokens(_m("ollama", "mistral:7b")) == 16_000
     monkeypatch.setenv("CONTEXT_WINDOW_OLLAMA", "8000")
