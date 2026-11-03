@@ -527,50 +527,18 @@ function _renderContextMeter() {
   el.appendChild(bar);
   const bits = [pct + '%'];
   if (c.summarising) bits.push('summarising…');
-  else if (c.has_summary) bits.push(c.summarised + ' summarised');
+  else if (c.has_summary) bits.push(c.summaries + (c.summaries === 1 ? ' summary' : ' summaries'));
   if (c.hidden) bits.push(c.hidden + ' not shown');
   if (c.pinned) bits.push('📌 ' + c.pinned);
   el.appendChild(_g('span', 'group-context-text', bits.join(' · ')));
   el.title = 'Context the AIs see: about ' + (c.tokens || 0).toLocaleString() + ' of ' +
     (c.budget || 0).toLocaleString() + ' tokens for the tightest member. ' +
     (c.shown || 0) + ' recent messages are shown' +
-    (c.has_summary ? ', ' + c.summarised + ' older ones are in a summary' : '') +
-    (c.hidden ? ', ' + c.hidden + ' don\'t fit yet' : '') + '. Click to see the summary and pins.';
+    (c.has_summary ? ', older ones are in ' + c.summaries + ' summaries' : '') +
+    (c.hidden ? ', ' + c.hidden + ' don\'t fit yet' : '') + '. Click to see each AI, the summaries and pins.';
 }
 
-async function openGroupContext(id) {
-  let d;
-  try { d = await _gFetch('/api/groups/' + encodeURIComponent(id) + '/context'); }
-  catch (err) { _gToast('error', err.message); return; }
-  document.getElementById('group-context-modal')?.remove();
-  const overlay = _g('div', 'modal-overlay open');
-  overlay.id = 'group-context-modal';
-  overlay.style.zIndex = '1300';
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-  const content = _g('div', 'modal-content');
-  content.style.maxWidth = '560px';
-  const head = _g('div', 'modal-header');
-  head.appendChild(_g('h3', null, 'What the AIs see'));
-  const x = _g('button', 'modal-close', '✕');
-  x.addEventListener('click', () => overlay.remove());
-  head.appendChild(x);
-  content.appendChild(head);
-  const body = _g('div', 'modal-body group-context-body');
-  const c = d.context || {};
-  body.appendChild(_g('p', 'group-context-note',
-    'Each reply shows an AI the pinned messages, a summary of older messages, and the most recent ' +
-    'messages that fit its budget (about ' + (c.budget || 0).toLocaleString() + ' tokens for the tightest member; ' +
-    (c.pct || 0) + '% used).'));
-  body.appendChild(_g('label', 'council-modal-label', 'Pinned (' + (d.pinned || []).length + ')'));
-  if (!(d.pinned || []).length) body.appendChild(_g('div', 'group-context-empty', 'Nothing pinned. Use “Pin” on a message to keep it in view.'));
-  (d.pinned || []).forEach(p => body.appendChild(_g('div', 'group-context-pin', (p.who ? p.who + ': ' : '') + (p.content || ''))));
-  body.appendChild(_g('label', 'council-modal-label', 'Summary of older messages' + (c.summarised ? ' (' + c.summarised + ')' : '')));
-  body.appendChild(_g('div', d.summary ? 'group-context-summary' : 'group-context-empty',
-    d.summary || 'No summary yet. Older messages are summarised once the chat gets long.'));
-  content.appendChild(body);
-  overlay.appendChild(content);
-  document.body.appendChild(overlay);
-}
+// openGroupContext (the "What the AIs see" panel) is in groupchat_context.js.
 
 // ── Actions ─────────────────────────────────────────────────────────────────
 

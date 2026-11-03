@@ -156,3 +156,17 @@
 .group-msg-pin.pinned { opacity: 1; color: oklch(78% 0.15 85); }
 .group-msg-user:hover .group-msg-copy { opacity: 1; }
 .group-msg.is-pinned .group-bubble { box-shadow: inset 0 0 0 1px oklch(78% 0.15 85 / 0.45); }
+
+/* "What the AIs see": one row per AI, summaries that open (groupchat_context.js) */
+.gc-member { display: grid; grid-template-columns: minmax(80px, 140px) 42px 1fr; align-items: center; gap: 8px; font-size: 12px; }
+.gc-member-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gc-member-text { color: var(--text-dim, #888); min-width: 0; }
+.gc-summary { display: flex; flex-direction: column; gap: 6px; white-space: normal; }
+.gc-summary-head { display: flex; flex-wrap: wrap; gap: 8px; font-size: 11.5px; color: var(--text-dim, #888); }
+.gc-summary-id { font-weight: 600; color: var(--text-main, #eee); }
+.gc-summary-text { white-space: pre-wrap; }
+.gc-summary-open { align-self: flex-start; background: none; border: 1px solid var(--border-dim, oklch(30% 0.01 264)); color: var(--text-dim, #aaa); border-radius: 6px; padding: 2px 8px; font-size: 11.5px; cursor: pointer; }
+.gc-summary-open:hover { color: var(--text-main, #eee); }
+.gc-summary-msgs { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border-dim, oklch(26% 0.01 264)); padding-top: 6px; }
+.gc-summary-msg { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 520px) { .gc-member { grid-template-columns: 1fr 42px; } .gc-member-text { grid-column: 1 / -1; } }

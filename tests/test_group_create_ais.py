@@ -105,7 +105,7 @@ def test_pin_unpin_and_context_endpoints(client):
     assert r.status_code == 200 and r.json()["pinned"][0]["content"] == "deadline is Friday"
     assert client.post(base + "/pins", json={"message_id": "gm-x"}).status_code == 400
     ctx = client.get(base + "/context").json()
-    assert ctx["context"]["pinned"] == 1 and ctx["summary"] == ""
+    assert ctx["context"]["pinned"] == 1 and ctx["summaries"] == [] and ctx["facts"] == []
     assert client.delete(base + "/pins/" + mid).json()["pinned"] == []
     client.post(base + "/pins", json={"message_id": mid})
     client.delete(base + "/messages")

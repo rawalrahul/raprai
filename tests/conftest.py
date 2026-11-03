@@ -1,5 +1,6 @@
 """Fixtures shared by the tests in this folder."""
 from core_harness import rapr  # noqa: F401  (a RAPR to send messages through)
+from gc_env import env  # noqa: F401  (group chats: fake AIs and a temp store)
 
 import pytest  # noqa: E402
 

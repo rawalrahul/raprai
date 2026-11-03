@@ -205,6 +205,7 @@ async def delete_group(group_id: str):
         return _err("Group not found", 404)
     await gc.stop_group(g)
     gc.groups.pop(group_id, None)
+    gc.forget_group(group_id)
     await _close_started_sessions(g)
     for channel, gid in list(gc.active_groups.items()):
         if gid == group_id:
@@ -288,8 +289,26 @@ async def group_context(group_id: str):
     g = gc.groups.get(group_id)
     if not g:
         return _err("Group not found", 404)
-    return JSONResponse({"context": gc.context_info(g), "summary": g.get("summary", ""),
-                         "pinned": g.get("pinned", [])})
+    from helm.groupchat_context import meter
+    return JSONResponse({"context": gc.context_info(g), "summaries": meter.blocks_view(g),
+                         "facts": g.get("facts", []), "pinned": g.get("pinned", [])})
+
+
+@router.get("/api/groups/{group_id}/summaries/{block_id}")
+async def group_summary_messages(group_id: str, block_id: str):
+    """The messages behind one summary, word for word."""
+    from helm.groupchat_context import archive, blocks
+    gc.load_groups()
+    g = gc.groups.get(group_id)
+    if not g:
+        return _err("Group not found", 404)
+    b = blocks.get(g, block_id)
+    if not b:
+        return _err("Summary not found", 404)
+    msgs = [m for m in archive.lookup(g, b.get("msg_ids") or []) if m]
+    return JSONResponse({"id": b["id"], "level": b.get("level", 1), "topic": b.get("topic", ""),
+                         "summary": b.get("summary", ""), "messages": msgs,
+                         "missing": len(b.get("msg_ids") or []) - len(msgs)})
 
 
 class CrewGroupRequest(BaseModel):
