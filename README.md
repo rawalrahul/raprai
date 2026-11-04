@@ -42,7 +42,7 @@ An assistant from one AI company sees that company's connectors, runs that compa
 |---|---|---|
 | **Apps it can see** | That AI's connectors | Every connected app of every AI you use, plus any MCP server, Zapier or Composio |
 | **Accounts** | Usually one per app | Several: each AI can hold a different account of the same app |
-| **Who does the work** | Its own model | Claude Code, Codex, Antigravity, Copilot, Cursor, Ollama and more; pick one, let **Auto** choose, or make them compete |
+| **Who does the work** | Its own model | Claude Code, Codex, Antigravity, Cursor, Ollama and more; pick one, let **Auto** choose, or make them compete |
 | **Schedules and briefs** | What that product offers | As many as you want, on your computer or server, running on your AI plans |
 | **Where you use it** | Its own apps | Browser, Telegram, WhatsApp, Discord, Slack, and inside Claude Code, Codex, Antigravity, Grok, Cursor and Windsurf (MCP) |
 | **Before it acts** | Its own rules | Your rules and one audit log over everything Claude Code reaches and every tool call through RAPR |
@@ -67,7 +67,7 @@ An assistant from one AI company sees that company's connectors, runs that compa
 
 ## Works with
 
-**Coding agents** (they use your own sign-in): Claude Code · Codex · Antigravity · Grok · Copilot CLI · Cursor · OpenCode · Droid · Qwen Code · Kiro (Amazon Q) · Aider · Goose · Kilo Code · OpenClaw · Open Interpreter
+**Coding agents** (they use your own sign-in): Claude Code · Codex · Antigravity · Grok · Cursor · OpenCode · Droid · Qwen Code · Kiro (Amazon Q) · Aider · Goose · Kilo Code · OpenClaw · Open Interpreter
 
 **Free and local:** Claude Code and Codex on a local model through Ollama, plus Ollama on its own
 
@@ -148,13 +148,12 @@ Then ask in plain words: *"get a second opinion from Codex on my changes"*, *"pl
 | `start_team`, `team_status`, `merge_team`, `discard_team` | Split a plan into parts: say Claude does the API and Codex the UI at the same time, each in its own copy, while you do your own part; then merge them all into the project. |
 | `start_bakeoff`, `bakeoff_status`, `merge_bakeoff`, `discard_bakeoff` | A bake-off from your editor: 2 to 4 AIs, each in its own copy of the project; merge the one you like. |
 | `list_agents` | The AIs installed and signed in on this computer. |
-| `connect_vscode_copilot` | Lets RAPR use GitHub Copilot from VS Code with your VS Code sign-in (installs the small RAPR Bridge extension). Copilot then takes any role in every tool above. |
 | `latest_brief` | What needs you, from your latest brief in the RAPR app (needs the app). |
 | `usage` | Each AI's plan usage as it reports it (Claude's and Codex's 5-hour and weekly windows), and what the AIs RAPR ran for you did today: calls, time, tokens, cost. |
 
 The other AI works in a temporary copy of your project, so your files only change if you allow edits or merge a relay or bake-off. Nothing is hosted, and the RAPR app doesn't need to be open, or even installed. More in the [full guide](docs/guide.md#use-rapr-from-your-coding-agent-mcp).
 
-RAPR only offers the AIs you can actually use: their command-line tool is installed (or came with their VS Code, Cursor or Windsurf extension), you're signed in where RAPR can check (Claude Code, Codex, Grok, Kiro), and a local model server like Ollama or LM Studio is running. Ask for `list_agents` to see them; it also says which installed AI still needs signing in, and how.
+RAPR only offers the AIs you can actually use: their command-line tool is installed (or came with their Cursor or Windsurf extension), you're signed in where RAPR can check (Claude Code, Codex, Grok, Kiro), and a local model server like Ollama or LM Studio is running. Ask for `list_agents` to see them; it also says which installed AI still needs signing in, and how.
 
 ### Usage ribbon
 
@@ -165,7 +164,7 @@ A slim ribbon shows how much of each AI's plan you've used, **asked live of the 
 | AI | What the ribbon shows | Where RAPR reads it |
 |---|---|---|
 | Claude | 5-hour and weekly plan usage (and weekly Opus/Sonnet where your plan has them), as on claude.ai's usage page; on an API key, money spent instead | claude.ai's usage service, with Claude Code's own sign-in (what its `/usage` shows) |
-| Codex | 5-hour and weekly plan usage, as Codex's `/status` shows; on an API key, money spent instead | `codex app-server` (what the Codex IDE extension uses), which reads Codex's own sign-in |
+| Codex | 5-hour and weekly plan usage, as Codex's `/status` shows; on an API key, money spent instead | `codex app-server`, which reads Codex's own sign-in |
 | Gemini | each model's daily quota, with a Google sign-in; on an API key, money spent instead | Google's Code Assist quota service, with Gemini CLI's sign-in (what its `/stats` shows) |
 | Local models | no limit | (they run on your computer) |
 | Others | no usage service to ask: RAPR's own counters (tasks, time, tokens) | RAPR |
@@ -179,26 +178,7 @@ In the app it sits above the message box once you're in a session; click it to a
 /plugin install rapr-usage@raprai
 ```
 
-**In VS Code**, Claude Code's panel has no room for a band, so type `/rapr-usage` instead: it asks every AI for its usage right then, prints it in the chat and opens a **RAPR usage** pane beside it that keeps itself current (it works the same in the terminal and the desktop app). Install the plugin the same way, from the Claude Code panel's prompt or a terminal, and keep RAPR's MCP server added (`claude mcp add --scope user rapr -- rapr mcp`): the plugin asks it for the numbers.
-
 `/rapr-usage band` hides or shows the band, `/rapr-usage details` adds reset times and a row per AI to it. Other MCP clients (Codex, Cursor, Antigravity...) can ask for the `usage` tool. Everything stays on your computer, in `~/.config/rapr/mcp-usage.json`.
-
-### GitHub Copilot
-
-**Copilot from VS Code, with your VS Code sign-in:** ask your AI to *"connect Copilot from VS Code"*. RAPR installs its small RAPR Bridge extension into VS Code; in VS Code run **RAPR: Connect Copilot** and press **Allow**. Copilot then works through RAPR as `copilot_vscode` in every tool: second opinions, questions, bake-offs, relays (any role) and teams, reading, editing and testing code. Works in WSL windows too. [How it works](docs/guide.md#copilot-from-vs-code).
-
-**RAPR inside Copilot:** In **VS Code**, run **MCP: Open User Configuration** from the Command Palette and add:
-
-```json
-{
-  "servers": {
-    "rapr": { "type": "stdio", "command": "uvx",
-              "args": ["--from", "git+https://github.com/rawalrahul/raprai", "rapr-mcp"] }
-  }
-}
-```
-
-Then switch Copilot Chat to **Agent** mode and turn on RAPR's tools. In **Copilot CLI**, add the same server with `/mcp add`, or in `~/.copilot/mcp-config.json` under `"mcpServers"`, with `"type": "local"` and `"tools": ["*"]`. With the app installed, use `"command": "rapr", "args": ["mcp"]` instead (on Windows, if `rapr` isn't found: `"command": "cmd", "args": ["/c", "rapr", "mcp"]`).
 
 ### Update, reset or remove the MCP server
 
@@ -215,12 +195,12 @@ There are three ways to run RAPR's MCP server, and each updates differently, so 
 
 **Which one you have.**
 
-1. Look at RAPR's entry in your MCP client. In VS Code and Copilot CLI, open the MCP config (VS Code: **MCP: Open User Configuration**; Copilot CLI: `~/.copilot/mcp-config.json`). In Claude Code or Codex, run `claude mcp list` or `codex mcp list`. Its **command** tells you which: `uvx`, `rapr-mcp` or `rapr`, as in the table.
+1. Look at RAPR's entry in your MCP client. In Claude Code or Codex, run `claude mcp list` or `codex mcp list`. Its **command** tells you which: `uvx`, `rapr-mcp` or `rapr`, as in the table.
 2. `uv tool list` lists `rapr-mcp` only if you used **uv tool install**.
 
 **Why the update commands differ.** `uvx` runs the server from `uv`'s cache and keeps using the copy it downloaded first, without checking for a newer one. Clearing the cache makes the next start download the latest `main`. If `uv cache clean rapr-mcp` reports that it removed nothing, run `uv cache clean`; that clears everything `uv` downloaded, so other tools re-download once. To always start the latest instead, put `--refresh` before `--from` in your config; each start then checks GitHub and is a little slower. **uv tool install** puts a permanent copy outside the cache, so clearing the cache doesn't touch it, and `uv tool upgrade rapr-mcp` fetches the latest `main`.
 
-**After updating,** restart your MCP client so it starts the new version (in VS Code, restart the `rapr` server or VS Code itself). Then ask for `list_agents` and look for the new tools in your client's tool list to check it worked.
+**After updating,** restart your MCP client so it starts the new version. Then ask for `list_agents` and look for the new tools in your client's tool list to check it worked.
 
 **Something stuck?** Close your MCP client, run the update command for your setup from the table, and open the client again.
 
@@ -228,7 +208,7 @@ There are three ways to run RAPR's MCP server, and each updates differently, so 
 
 **Remove it completely.**
 
-1. Take RAPR out of your MCP client: `claude mcp remove rapr --scope user` (or without `--scope user` if you added it to one project), `codex mcp remove rapr`; in VS Code, Copilot CLI, Antigravity, Cursor, Windsurf and the rest, delete the `rapr` entry from their MCP settings.
+1. Take RAPR out of your MCP client: `claude mcp remove rapr --scope user` (or without `--scope user` if you added it to one project), `codex mcp remove rapr`; in Antigravity, Cursor, Windsurf and the rest, delete the `rapr` entry from their MCP settings.
 2. Remove the server itself with the command in the table for your setup.
 3. Optional, deletes your bake-off history and settings: the `RAPR AI` folder in `%LOCALAPPDATA%` (Windows), `~/Library/Application Support` (Mac) or `~/.local/share` (Linux). The app keeps its data there too, so leave it if you use the app.
 
