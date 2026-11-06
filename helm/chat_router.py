@@ -3,7 +3,7 @@ helm/chat_router.py — One set of chat commands for every chat app.
 
 WhatsApp, Discord and Slack (and Telegram's text commands, in time) all take
 the same messages: plain text goes to the focused session or group, /sessions,
-/use, /new, /group, /approvals, /brief, /do, /skip, /kelvin, /status, /help.
+/use, /new, /group, /cloud, /approvals, /brief, /do, /skip, /kelvin, /status, /help.
 This module does the work once; each chat app only moves messages in and out.
 """
 
@@ -25,6 +25,7 @@ HELP = (
     "/brief — what needs you, from all your AIs' apps (/brief now for a fresh one)\n"
     "/do <number> — hand a brief item to its AI; /skip <number> — drop it\n"
     "/approvals — actions waiting for your OK; /approve <id> or /deny <id>\n"
+    "/cloud claude|codex <task> — run it in Claude's or Codex's own cloud (/cloud help)\n"
     "/status — what's running\n"
     "/help — this message"
 )
@@ -118,6 +119,9 @@ async def handle(channel: str, text: str) -> list[str]:
         return [HELP]
     if low.startswith("/group"):
         return [await gch.handle_command(channel, text[6:])]
+    if low == "/cloud" or low.startswith("/cloud "):
+        from helm import cloud_tasks
+        return [await cloud_tasks.handle(channel, text[6:])]
     if low in ("/kelvin", "kelvin"):
         from helm.kelvin_report import kelvin_report
         return [kelvin_report()]

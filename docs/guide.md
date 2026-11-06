@@ -536,9 +536,30 @@ Free WhatsApp control through [neonize](https://github.com/krypton-byte/neonize)
 | `/brief`, `/brief now` | Your latest brief, or a fresh one |
 | `/do 2`, `/skip 2` | Hand brief item 2 to its AI, or drop it |
 | `/approvals`, `/approve <id>`, `/deny <id>` | Actions waiting for your OK |
+| `/cloud claude <task>`, `/cloud codex <task>` | Run it in Claude's or Codex's own cloud (see [Cloud tasks](#cloud-tasks-claude-and-codex)) |
 | `/status`, `/help` | What's running; the command list |
 
 RAPR only acts on your "Message yourself" chat and on numbers you add under **Also accept messages from** (for when RAPR is linked to a spare number). Chats with other people, groups and statuses are ignored. **Unlink** in Settings, or removing the device on your phone, disconnects it. WhatsApp's terms don't cover unofficial clients, so a dedicated or spare number is the safest choice.
+
+### Cloud tasks (Claude and Codex)
+
+Claude Code and Codex can run a task on their own company's servers, against your GitHub repo. Once it has started, nothing has to keep running on your computer for the work to go on. From WhatsApp, Discord or Slack:
+
+| Message | What it does |
+|---------|-------------|
+| `/cloud claude <task>` | Starts a Claude Code cloud session (`claude --cloud`) on the repo of `CLOUD_CLAUDE_FOLDER`, or of the focused session's folder |
+| `/cloud codex <task>` | Starts a Codex cloud task (`codex cloud exec`) in the environment `CODEX_CLOUD_ENV` (branch `CODEX_CLOUD_BRANCH` if set) |
+| `/cloud list` | The cloud tasks you started |
+| `/cloud status <n>` | Codex: the task's status. Claude: its link |
+| `/cloud diff <n>` | The changes Codex made |
+| `/cloud reply <n> <text>` | A follow-up message to Claude cloud session n |
+| `/cloud setup` | What's ready and what's missing |
+
+RAPR tells you in the same chat when a Codex task finishes. Claude's link opens the session in the Claude app, which notifies you itself.
+
+**Setup:** sign in once on the machine RAPR runs on (`claude`, then `/login`; `codex login`). For Codex, make a cloud environment for your repo at chatgpt.com/codex and put its id (`codex cloud` lists them) in `CODEX_CLOUD_ENV`. For Claude, point `CLOUD_CLAUDE_FOLDER` at a folder cloned from GitHub, or leave it empty to use the focused session's folder.
+
+**Good to know:** cloud tasks run on your Claude or ChatGPT plan and use that company's connectors (Gmail, Drive, …) and permission rules, not the MCP servers on your computer. RAPR's *ask before acting* can't see inside them. The chat app still has to reach RAPR, so to message it with your laptop closed, run RAPR on [your own server](../README.md).
 
 ---
 
