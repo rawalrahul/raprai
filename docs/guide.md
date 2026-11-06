@@ -426,40 +426,11 @@ A sign-in is only read, never refreshed (that would replace the AI's own and cou
 
 **Plan or API key.** Only a subscription has 5-hour and weekly windows. RAPR keeps how each AI is paid for and never mixes the two: Claude: a claude.ai sign-in is a plan, `ANTHROPIC_API_KEY` without one (or Bedrock, Vertex, Foundry) is API; Codex: its app-server's `account/read`; Gemini: the sign-in type in `~/.gemini/settings.json`. On an API key the ribbon drops any windows kept from before and shows **API key** and the money spent. There is no made-up cap for anyone: only a `USAGE_CAP_MIN_<AI>` you set yourself is shown, as "of your cap". On a plan, Claude's `total_cost_usd` is a list price nobody is billed, so it isn't counted as money spent.
 
-A window whose reset time has passed shows 0% until the AI reports again. Three things show it:
+A window whose reset time has passed shows 0% until the AI reports again. Three places show it:
 
 - **In Claude Code**, a band above the prompt. Add it with `/plugin marketplace add rawalrahul/raprai`, then `/plugin install rapr-usage@raprai`. Claude's windows and this session's cost come straight from Claude Code (`$.session.usage()`); Codex's and what RAPR ran today come from the file. `/rapr-usage band` hides or shows it; `/rapr-usage details` adds reset times and a row per AI. It needs Claude Code 2.1.290 or later, in the terminal or the desktop app: Claude Code draws no band in the VS Code panel (nor under `claude -p`).
-- **In VS Code** (and anywhere else), `/rapr-usage`: the plugin calls RAPR's MCP server's `usage` tool, which asks every AI live, prints the answer in the chat and opens a **RAPR usage** pane beside it, with an "Ask every AI now" button. The MCP server also refreshes the numbers when it starts and every five minutes. It needs RAPR's MCP server added to Claude Code (as `rapr`, the name the README uses); without it, the command says how to add it and shows the last numbers RAPR saw.
 - **In any MCP client**, the `usage` tool answers with the same numbers as text.
 - **In the RAPR app**, the ribbon above the message box once you're in a session (click it for every AI, asked live), and the Usage panel.
-
-### Copilot from VS Code
-
-GitHub Copilot in VS Code has no command-line tool RAPR can run, and keeps its GitHub sign-in inside VS Code. RAPR asks it through **RAPR Bridge**, a small VS Code extension that RAPR carries and installs itself (and updates, when it carries a newer one) (`vscode-bridge/` in the repository). It uses VS Code's own language model API, the one Copilot Chat uses, so nothing else is installed and no other sign-in is needed.
-
-1. Ask your AI to *"connect Copilot from VS Code"*: RAPR's `connect_vscode_copilot` tool installs the bridge into VS Code.
-2. In VS Code, reload the window (**Developer: Reload Window**), run **RAPR: Connect Copilot** from the Command Palette, and press **Allow** when VS Code asks whether RAPR Bridge may use Copilot.
-3. Copilot appears in `list_agents` as `copilot_vscode`. Use it in any tool, in any role: `second_opinion`, `ask_agent`, `start_bakeoff`, `start_relay` (planner, executor, reviewer, fixer) and `start_team`.
-
-**Finding Copilot.** Copilot can be an extension you installed or built into VS Code, and in a WSL window it can live on either side. RAPR looks in all of these, identifying Copilot by its manifest (publisher GitHub, `copilot-chat` or `copilot`), not its folder name:
-
-- installed extensions: `~/.vscode/extensions`, VS Code Server's `~/.vscode-server/extensions` (WSL side) and, from inside WSL, Windows' `C:\Users\<you>\.vscode\extensions`;
-- VS Code's built-in extensions: inside its install (`AppData\Local\Programs\Microsoft VS Code`, Program Files, `/Applications`, `/usr/share/code`, including a versioned folder inside), reached from WSL through `/mnt/c`, and VS Code Server's own.
-
-Versions VS Code has replaced (listed in `.obsolete`) don't count. Once the bridge runs, VS Code's own answer (does it have Copilot models?) decides, whatever the files say. If RAPR finds nothing, `connect_vscode_copilot` says how to check (Extensions, `@installed copilot`, under both Local and WSL), and `anyway: true` installs the bridge regardless.
-
-What to know:
-
-- **Copilot works as an agent.** RAPR gives it tools through VS Code's language model API (native tool calling, as in Copilot's own agent mode) and runs the calls it makes, in the folder the job uses (`helm/vscode_bridge/agent.py`). Which tools depends on the job:
-  - looking only (`second_opinion`, a relay's planner or reviewer): list, read and search files;
-  - in a copy of the project (`ask_agent`, bake-offs, a relay's executor or fixer, team parts): also write and edit files, and run commands such as your tests;
-  - in your project itself (`ask_agent` with `allow_edits`): it may edit files but not run commands, as with Claude Code there.
-
-  Every path stays inside that folder (no `..` out of it, nothing written into `.git`), and a run stops after 60 steps. For Copilot without VS Code, install the Copilot CLI instead: `npm install -g @github/copilot`, then `copilot login`.
-- It works **while VS Code is open**. With several windows open, one serves RAPR; another takes over when it closes. **RAPR: Bridge status** says which.
-- Each question counts against your Copilot plan like a Copilot Chat one. Without a model named, the bridge picks one that uses no premium requests (GPT-4.1, GPT-5 mini, GPT-4o) when your plan has it.
-- **Safety:** the bridge listens on `127.0.0.1` only, on a random port, and answers only requests carrying a random key it writes to `~/.config/rapr/vscode-bridge.json` (readable only by you). It refuses anything a web page could send. No certificate or account is involved; it's installed from a file, not the Marketplace.
-- **WSL:** in a VS Code window connected to WSL, Copilot Chat, Claude Code, `rapr mcp` and the bridge all run inside WSL, and RAPR installs the bridge there with VS Code Server's own CLI. In a window that isn't connected, they all run on Windows, and you connect once there too. Each side keeps its own bridge and key file.
 
 ### Cursor, Windsurf and other MCP clients
 
@@ -536,9 +507,30 @@ Free WhatsApp control through [neonize](https://github.com/krypton-byte/neonize)
 | `/brief`, `/brief now` | Your latest brief, or a fresh one |
 | `/do 2`, `/skip 2` | Hand brief item 2 to its AI, or drop it |
 | `/approvals`, `/approve <id>`, `/deny <id>` | Actions waiting for your OK |
+| `/cloud claude <task>`, `/cloud codex <task>` | Run it in Claude's or Codex's own cloud (see [Cloud tasks](#cloud-tasks-claude-and-codex)) |
 | `/status`, `/help` | What's running; the command list |
 
 RAPR only acts on your "Message yourself" chat and on numbers you add under **Also accept messages from** (for when RAPR is linked to a spare number). Chats with other people, groups and statuses are ignored. **Unlink** in Settings, or removing the device on your phone, disconnects it. WhatsApp's terms don't cover unofficial clients, so a dedicated or spare number is the safest choice.
+
+### Cloud tasks (Claude and Codex)
+
+Claude Code and Codex can run a task on their own company's servers, against your GitHub repo. Once it has started, nothing has to keep running on your computer for the work to go on. From WhatsApp, Discord or Slack:
+
+| Message | What it does |
+|---------|-------------|
+| `/cloud claude <task>` | Starts a Claude Code cloud session (`claude --cloud`) on the repo of `CLOUD_CLAUDE_FOLDER`, or of the focused session's folder |
+| `/cloud codex <task>` | Starts a Codex cloud task (`codex cloud exec`) in the environment `CODEX_CLOUD_ENV` (branch `CODEX_CLOUD_BRANCH` if set) |
+| `/cloud list` | The cloud tasks you started |
+| `/cloud status <n>` | Codex: the task's status. Claude: its link |
+| `/cloud diff <n>` | The changes Codex made |
+| `/cloud reply <n> <text>` | A follow-up message to Claude cloud session n |
+| `/cloud setup` | What's ready and what's missing |
+
+RAPR tells you in the same chat when a Codex task finishes. Claude's link opens the session in the Claude app, which notifies you itself.
+
+**Setup:** sign in once on the machine RAPR runs on (`claude`, then `/login`; `codex login`). For Codex, make a cloud environment for your repo at chatgpt.com/codex and put its id (`codex cloud` lists them) in `CODEX_CLOUD_ENV`. For Claude, point `CLOUD_CLAUDE_FOLDER` at a folder cloned from GitHub, or leave it empty to use the focused session's folder.
+
+**Good to know:** cloud tasks run on your Claude or ChatGPT plan and use that company's connectors (Gmail, Drive, …) and permission rules, not the MCP servers on your computer. RAPR's *ask before acting* can't see inside them. The chat app still has to reach RAPR, so to message it with your laptop closed, run RAPR on [your own server](../README.md).
 
 ---
 
