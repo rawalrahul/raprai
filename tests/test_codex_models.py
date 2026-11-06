@@ -170,3 +170,61 @@ def test_codex_config_stays_valid_toml_with_windows_paths(tmp_path, monkeypatch)
     assert fs["args"] == ["-y", r"C:\Users\me\Desktop"]
     assert fs["env"] == {"TOKEN": 'a"b\\c', "ODD KEY": "x"}
     assert data["mcp_servers"]["my.server"]["command"] == "uvx"
+
+
+def test_sync_keeps_the_users_own_mcp_servers(tmp_path, monkeypatch):
+    """Starting RAPR wiped MCP servers the user had set up in Codex and Gemini
+    themselves. Only RAPR's own entries may be added, replaced or removed."""
+    import json
+    import tomllib
+    from helm.mcp.manager import MCPManager
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    (tmp_path / ".codex").mkdir()
+    (tmp_path / ".gemini").mkdir()
+    codex = tmp_path / ".codex" / "config.toml"
+    gemini = tmp_path / ".gemini" / "settings.json"
+    codex.write_text('model = "gpt-6-sol"\n\n[mcp_servers.mine]\ncommand = "my-server"\n'
+                     'args = ["--x"]\n\n[mcp_servers.mine.env]\nK = "v"\n\n[profiles.p]\nmodel = "m"\n')
+    gemini.write_text(json.dumps({"theme": "dark",
+                                  "mcpServers": {"mine": {"command": "my-server"}}}))
+
+    m = MCPManager()
+    servers = {"fs": {"command": "npx", "args": ["fs"]}, "web": {"command": "uvx"}}
+    monkeypatch.setattr(m, "_get_subprocess_servers", lambda: servers)
+    m.sync_native_mcp_configs()
+    m.sync_native_mcp_configs()
+
+    c = tomllib.loads(codex.read_text())
+    assert c["model"] == "gpt-6-sol" and c["profiles"]["p"]["model"] == "m"
+    assert c["mcp_servers"]["mine"] == {"command": "my-server", "args": ["--x"], "env": {"K": "v"}}
+    assert set(c["mcp_servers"]) == {"mine", "fs", "web"}
+    g = json.loads(gemini.read_text())
+    assert g["theme"] == "dark"
+    assert set(g["mcpServers"]) == {"mine", "fs", "web"}
+
+    # A RAPR server that stops is cleaned up; the user's server stays.
+    servers.pop("web")
+    m.sync_native_mcp_configs()
+    assert set(tomllib.loads(codex.read_text())["mcp_servers"]) == {"mine", "fs"}
+    assert set(json.loads(gemini.read_text())["mcpServers"]) == {"mine", "fs"}
+
+    # Removing the last RAPR server leaves only the user's.
+    servers.clear()
+    m.sync_native_mcp_configs(removed=["fs"])
+    assert set(tomllib.loads(codex.read_text())["mcp_servers"]) == {"mine"}
+    assert set(json.loads(gemini.read_text())["mcpServers"]) == {"mine"}
+
+
+def test_unreadable_gemini_settings_are_not_overwritten(tmp_path, monkeypatch):
+    from helm.mcp.manager import MCPManager
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    (tmp_path / ".gemini").mkdir()
+    gemini = tmp_path / ".gemini" / "settings.json"
+    original = '{\n  // my comment\n  "mcpServers": {"mine": {"command": "x"}}\n}\n'
+    gemini.write_text(original)
+    m = MCPManager()
+    monkeypatch.setattr(m, "_get_subprocess_servers", lambda: {"fs": {"command": "npx"}})
+    m.sync_native_mcp_configs()
+    assert gemini.read_text() == original
