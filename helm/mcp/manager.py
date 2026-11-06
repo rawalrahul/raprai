@@ -517,26 +517,32 @@ class MCPManager:
             os.makedirs(gemini_dir, exist_ok=True)
             gemini_path = os.path.join(gemini_dir, "settings.json")
 
-            # Preserve existing settings
+            # Preserve existing settings. A file we can't read as a JSON object
+            # is left untouched rather than replaced with only our servers.
             existing: dict = {}
             if os.path.isfile(gemini_path):
-                try:
-                    with open(gemini_path, "r", encoding="utf-8") as f:
-                        existing = json.load(f)
-                except Exception:
-                    existing = {}
+                with open(gemini_path, "r", encoding="utf-8") as f:
+                    text = f.read()
+                if text.strip():
+                    existing = json.loads(text)
+                    if not isinstance(existing, dict):
+                        raise ValueError("settings.json is not a JSON object")
 
-            # Build mcpServers — same format as Claude (Gemini uses identical schema)
-            if servers:
-                existing["mcpServers"] = servers
-            else:
-                mcp = existing.get("mcpServers")
-                for sid in removed:
-                    if isinstance(mcp, dict):
-                        mcp.pop(sid, None)
+            # Only RAPR's own entries are touched: ids it wrote last time (kept
+            # in a marker file) plus the ones it writes now. Servers the user
+            # added to Gemini themselves are left alone.
+            owned = _read_owned(gemini_dir)
+            mcp = existing.get("mcpServers")
+            if not isinstance(mcp, dict):
+                mcp = {}
+            for sid in (owned | set(removed)) - set(servers):
+                mcp.pop(sid, None)
+            mcp.update(servers)        # same format as Claude (Gemini uses identical schema)
+            existing["mcpServers"] = mcp
             with open(gemini_path, "w", encoding="utf-8") as f:
                 json.dump(existing, f, indent=2, ensure_ascii=False)
                 f.write("\n")
+            _write_owned(gemini_dir, servers)
             logger.info("Gemini MCP config synced: %s (%d servers)", gemini_path, len(servers))
         except Exception as exc:
             logger.warning("Failed to sync Gemini MCP config: %s", exc)
@@ -559,13 +565,14 @@ class MCPManager:
                     return name[1:].split('"', 1)[0]
                 return name.split(".", 1)[0]
 
-            # Strip existing [mcp_servers.*] blocks (we'll rewrite them)
+            # Strip only RAPR's own [mcp_servers.*] blocks (we'll rewrite them);
+            # servers the user configured in Codex themselves are kept.
+            ours = _read_owned(codex_dir) | set(removed) | set(servers)
             cleaned: list[str] = []
             in_mcp_block = False
             for line in existing_lines:
                 stripped = line.strip()
-                if stripped.startswith("[mcp_servers.") and (
-                        servers or _block_name(stripped) in removed):
+                if stripped.startswith("[mcp_servers.") and _block_name(stripped) in ours:
                     in_mcp_block = True
                     continue
                 if in_mcp_block:
@@ -611,6 +618,7 @@ class MCPManager:
                 if mcp_lines:
                     f.write("\n".join(mcp_lines))
                     f.write("\n")
+            _write_owned(codex_dir, servers)
             logger.info("Codex MCP config synced: %s (%d servers)", codex_path, len(servers))
         except Exception as exc:
             logger.warning("Failed to sync Codex MCP config: %s", exc)
@@ -623,6 +631,33 @@ class MCPManager:
             if tool_name in (f"{server_id}_list_tools", f"{server_id}_call"):
                 return True
         return False
+
+
+# ---------------------------------------------------------------------------
+# Native CLI config ownership
+# ---------------------------------------------------------------------------
+
+_OWNED_FILE = ".rapr_mcp_servers.json"
+
+
+def _read_owned(cli_dir: str) -> set[str]:
+    """Ids of the MCP servers RAPR wrote into this CLI's config last time."""
+    import json, os
+    try:
+        with open(os.path.join(cli_dir, _OWNED_FILE), "r", encoding="utf-8") as f:
+            ids = json.load(f)
+        return {str(i) for i in ids} if isinstance(ids, list) else set()
+    except Exception:
+        return set()
+
+
+def _write_owned(cli_dir: str, servers: dict) -> None:
+    import json, os
+    try:
+        with open(os.path.join(cli_dir, _OWNED_FILE), "w", encoding="utf-8") as f:
+            json.dump(sorted(servers), f)
+    except Exception as exc:
+        logger.warning("Could not record RAPR's MCP servers in %s: %s", cli_dir, exc)
 
 
 # ---------------------------------------------------------------------------
