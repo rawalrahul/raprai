@@ -232,7 +232,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         from helm.auth import client_ip
         ip = client_ip(request, default="127.0.0.1")
 
-        # On this computer every tab, reload, Kelvin and VS Code share 127.0.0.1, so the
+        # On this computer every tab, reload and Kelvin share 127.0.0.1, so the
         # general limit counted all of them as one visitor. Keep only the strict limits
         # (PIN, setup, plugins…) for the local owner.
         if _local_owner(ip) and _rate_limiter.bucket(path) == "_default":

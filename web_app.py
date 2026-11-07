@@ -604,13 +604,6 @@ async def _main():
     except Exception as exc:
         logger.warning("WhatsApp autostart failed: %s", exc)
 
-    # Cloud tasks: keep watching Codex cloud tasks that were running before a restart.
-    try:
-        from helm.cloud_tasks import resume_watching as _cloud_resume
-        _cloud_resume()
-    except Exception as exc:
-        logger.warning("Cloud task watch not resumed: %s", exc)
-
     # Discord and Slack bots, when their tokens are set (see .env.example).
     try:
         from helm.chat_adapters.startup import start_configured as _start_chat_apps

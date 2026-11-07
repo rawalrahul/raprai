@@ -94,7 +94,7 @@ def test_the_page_itself_is_never_a_rate_limit_error(monkeypatch):
 
 
 def test_the_local_owner_isnt_limited_but_pin_tries_are(monkeypatch):
-    """On this computer every tab, Kelvin and VS Code arrive from 127.0.0.1: one shared
+    """On this computer every tab and Kelvin arrive from 127.0.0.1: one shared
     limit. Only the strict limits (PIN, setup) apply there."""
     monkeypatch.delenv("RAPR_BEHIND_TUNNEL", raising=False)
     c = _limited_app(monkeypatch, ("127.0.0.1", 50000))

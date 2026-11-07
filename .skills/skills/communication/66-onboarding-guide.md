@@ -166,7 +166,7 @@ Make this specific to your company. Generic checklist doesn't help.
 **Development**:
 - Laptop setup (OS, installed languages, tools)
 - Repository access and local environment (can run tests, build project)
-- Code editor setup (VSCode, IDE, etc.)
+- Code editor setup (editor, IDE, etc.)
 - GitHub/GitLab access and permissions
 - Test environment access (ability to deploy to staging)
 

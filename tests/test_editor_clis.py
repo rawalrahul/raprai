@@ -1,4 +1,4 @@
-"""Claude Code and Codex that came only with a VS Code (or Cursor, Windsurf…) extension."""
+"""Claude Code and Codex that came only with a Cursor or Windsurf extension."""
 import os
 import sys
 from pathlib import Path
@@ -19,9 +19,9 @@ def make(home: Path, rel: str) -> Path:
 
 
 def test_finds_the_newest_extension_copy(tmp_path):
-    make(tmp_path, f".vscode/extensions/anthropic.claude-code-2.1.9-win32-x64/resources/native-binary/claude{EXE}")
-    new = make(tmp_path, f".vscode/extensions/anthropic.claude-code-2.1.10-win32-x64/resources/native-binary/claude{EXE}")
-    make(tmp_path, f".vscode/extensions/anthropic.claude-code-2.1.10-win32-x64/node_modules/x/claude{EXE}")
+    make(tmp_path, f".windsurf/extensions/anthropic.claude-code-2.1.9-win32-x64/resources/native-binary/claude{EXE}")
+    new = make(tmp_path, f".cursor/extensions/anthropic.claude-code-2.1.10-win32-x64/resources/native-binary/claude{EXE}")
+    make(tmp_path, f".cursor/extensions/anthropic.claude-code-2.1.10-win32-x64/node_modules/x/claude{EXE}")
     assert ec.find_in_editors("claude", tmp_path) == new
 
 
@@ -34,7 +34,7 @@ def test_finds_codex_in_cursor_and_ignores_other_tools(tmp_path):
 
 
 def test_prefers_this_machines_build(tmp_path, monkeypatch):
-    base = ".vscode/extensions/openai.chatgpt-26.5.1/bin"
+    base = ".cursor/extensions/openai.chatgpt-26.5.1/bin"
     arm = make(tmp_path, f"{base}/macos-aarch64/codex{EXE}")
     intel = make(tmp_path, f"{base}/macos-x86_64/codex{EXE}")
     monkeypatch.setattr(ec.platform, "machine", lambda: "arm64")
@@ -44,8 +44,8 @@ def test_prefers_this_machines_build(tmp_path, monkeypatch):
 
 
 def test_add_to_path_only_when_not_installed(tmp_path, monkeypatch):
-    claude = make(tmp_path, f".vscode/extensions/anthropic.claude-code-2.1.10/resources/native-binary/claude{EXE}")
-    make(tmp_path, f".vscode/extensions/openai.chatgpt-26.5.1/bin/linux-x86_64/codex{EXE}")
+    claude = make(tmp_path, f".cursor/extensions/anthropic.claude-code-2.1.10/resources/native-binary/claude{EXE}")
+    make(tmp_path, f".cursor/extensions/openai.chatgpt-26.5.1/bin/linux-x86_64/codex{EXE}")
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
     monkeypatch.setattr(ec, "_on_path", lambda name: name == "codex")   # codex installed on its own
     assert ec.add_to_path(tmp_path) == {"claude": str(claude)}

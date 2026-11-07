@@ -121,7 +121,7 @@
     }
     if(!narrow()){
       const collapsed = sidebar.classList.contains('collapsed');
-      // Clicking the section that's already showing tucks the panel away, like VS Code.
+      // Clicking the section that's already showing tucks the panel away.
       if(opts.fromRail && !collapsed && sb().active === id){ setCollapsed(true); return; }
       if(collapsed) setCollapsed(false);
     }

@@ -32,7 +32,3 @@ version = {attr = "helm.version.APP_VERSION"}
 [tool.setuptools.packages.find]
 include = ["helm", "helm.*", "integrations"]
 namespaces = false
-
-# The RAPR Bridge for VS Code (vscode-bridge/), which RAPR installs into VS Code itself.
-[tool.setuptools.package-data]
-"helm.vscode_bridge" = ["*.vsix"]

@@ -32,7 +32,7 @@ _SPECIFICITY_ORDER = [
 
 KNOWN_APPS = [
     "chrome", "firefox", "edge", "excel", "word", "notepad", "gmail",
-    "outlook", "vscode", "terminal", "explorer", "slack", "discord",
+    "outlook", "terminal", "explorer", "slack", "discord",
     "spotify", "zoom", "teams", "photoshop", "figma",
 ]
 

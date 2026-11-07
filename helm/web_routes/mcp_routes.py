@@ -840,7 +840,7 @@ def _custom_add_page() -> str:
     }
   }
 }'></textarea>
-    <div class="hint">Paste the snippet an app gives you for Claude Desktop, Cursor or VS Code. URL servers without
+    <div class="hint">Paste the snippet an app gives you for Claude Desktop or Cursor. URL servers without
       headers sign in with your account.</div>
   </div>
 

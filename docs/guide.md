@@ -358,7 +358,7 @@ Finished bake-offs are kept (the numbers only, not the code), so they count towa
 
 RAPR is also an MCP server, so the AI you're coding with can call the others. The `rapr mcp` command comes with the Windows and Mac installs; from a source checkout, use `python /path/to/raprai/rapr_mcp.py` wherever you see `rapr mcp` below.
 
-The other AIs need their own command-line tools on this computer. If Claude Code or Codex came only with its extension for VS Code, Cursor or Windsurf, RAPR uses the copy inside the extension. A separate install of the command-line tool, when you have one, comes first, except when RAPR runs under VS Code (the Claude Code extension started it): then the extension's own copy comes first, so RAPR uses the same tools as your editor. In a VS Code window connected to WSL (or SSH, a container), that's the copy in `~/.vscode-server`, where the extensions run.
+The other AIs need their own command-line tools on this computer. If Claude Code or Codex came only with its extension for Cursor or Windsurf, RAPR uses the copy inside the extension. A separate install of the command-line tool, when you have one, comes first.
 
 ### Without installing the app
 
@@ -428,7 +428,7 @@ A sign-in is only read, never refreshed (that would replace the AI's own and cou
 
 A window whose reset time has passed shows 0% until the AI reports again. Three places show it:
 
-- **In Claude Code**, a band above the prompt. Add it with `/plugin marketplace add rawalrahul/raprai`, then `/plugin install rapr-usage@raprai`. Claude's windows and this session's cost come straight from Claude Code (`$.session.usage()`); Codex's and what RAPR ran today come from the file. `/rapr-usage band` hides or shows it; `/rapr-usage details` adds reset times and a row per AI. It needs Claude Code 2.1.290 or later, in the terminal or the desktop app: Claude Code draws no band in the VS Code panel (nor under `claude -p`).
+- **In Claude Code**, a band above the prompt. Add it with `/plugin marketplace add rawalrahul/raprai`, then `/plugin install rapr-usage@raprai`. Claude's windows and this session's cost come straight from Claude Code (`$.session.usage()`); Codex's and what RAPR ran today come from the file. `/rapr-usage band` hides or shows it; `/rapr-usage details` adds reset times and a row per AI. It needs Claude Code 2.1.290 or later, in the terminal or the desktop app (not under `claude -p`).
 - **In any MCP client**, the `usage` tool answers with the same numbers as text.
 - **In the RAPR app**, the ribbon above the message box once you're in a session (click it for every AI, asked live), and the Usage panel.
 
@@ -507,30 +507,9 @@ Free WhatsApp control through [neonize](https://github.com/krypton-byte/neonize)
 | `/brief`, `/brief now` | Your latest brief, or a fresh one |
 | `/do 2`, `/skip 2` | Hand brief item 2 to its AI, or drop it |
 | `/approvals`, `/approve <id>`, `/deny <id>` | Actions waiting for your OK |
-| `/cloud claude <task>`, `/cloud codex <task>` | Run it in Claude's or Codex's own cloud (see [Cloud tasks](#cloud-tasks-claude-and-codex)) |
 | `/status`, `/help` | What's running; the command list |
 
 RAPR only acts on your "Message yourself" chat and on numbers you add under **Also accept messages from** (for when RAPR is linked to a spare number). Chats with other people, groups and statuses are ignored. **Unlink** in Settings, or removing the device on your phone, disconnects it. WhatsApp's terms don't cover unofficial clients, so a dedicated or spare number is the safest choice.
-
-### Cloud tasks (Claude and Codex)
-
-Claude Code and Codex can run a task on their own company's servers, against your GitHub repo. Once it has started, nothing has to keep running on your computer for the work to go on. From WhatsApp, Discord or Slack:
-
-| Message | What it does |
-|---------|-------------|
-| `/cloud claude <task>` | Starts a Claude Code cloud session (`claude --cloud`) on the repo of `CLOUD_CLAUDE_FOLDER`, or of the focused session's folder |
-| `/cloud codex <task>` | Starts a Codex cloud task (`codex cloud exec`) in the environment `CODEX_CLOUD_ENV` (branch `CODEX_CLOUD_BRANCH` if set) |
-| `/cloud list` | The cloud tasks you started |
-| `/cloud status <n>` | Codex: the task's status. Claude: its link |
-| `/cloud diff <n>` | The changes Codex made |
-| `/cloud reply <n> <text>` | A follow-up message to Claude cloud session n |
-| `/cloud setup` | What's ready and what's missing |
-
-RAPR tells you in the same chat when a Codex task finishes. Claude's link opens the session in the Claude app, which notifies you itself.
-
-**Setup:** sign in once on the machine RAPR runs on (`claude`, then `/login`; `codex login`). For Codex, make a cloud environment for your repo at chatgpt.com/codex and put its id (`codex cloud` lists them) in `CODEX_CLOUD_ENV`. For Claude, point `CLOUD_CLAUDE_FOLDER` at a folder cloned from GitHub, or leave it empty to use the focused session's folder.
-
-**Good to know:** cloud tasks run on your Claude or ChatGPT plan and use that company's connectors (Gmail, Drive, …) and permission rules, not the MCP servers on your computer. RAPR's *ask before acting* can't see inside them. The chat app still has to reach RAPR, so to message it with your laptop closed, run RAPR on [your own server](../README.md).
 
 ---
 
@@ -638,7 +617,7 @@ Any app that has an MCP server can be connected without waiting for RAPR to supp
   - *Sign in with a code*: for a RAPR running on a server with no browser (the app must support the OAuth device flow).
   - *No sign-in needed*.
 - **Command**: a server RAPR starts on this computer (for example `npx -y @modelcontextprotocol/server-github`), with environment variables for its API keys.
-- **Paste JSON**: the `mcpServers` snippet apps publish for Claude Desktop, Cursor or VS Code. Every server in it is added.
+- **Paste JSON**: the `mcpServers` snippet apps publish for Claude Desktop or Cursor. Every server in it is added.
 
 Once a server is connected, every AI in RAPR can use its tools: Claude Code gets it through `--mcp-config`, Codex and Gemini through their own config files, and Ollama and the API AIs (Groq, OpenRouter...) through RAPR's tool calling. Each server's card shows its status, the reason if it couldn't connect, and **Reconnect** / **Sign in again** and **Remove** buttons.
 

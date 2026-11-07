@@ -211,8 +211,7 @@ def run_agent(agent: str, prompt: str, cwd: str, model: Optional[str] = None, *,
     (not commands). The other AIs' commands already let them edit.
 
     in_copy: cwd is a copy of the project (a scratch copy, worktree or relay workspace),
-    not the person's own folder. Copilot through the RAPR Bridge, whose tools RAPR runs,
-    may then run commands too; in the real project it may only edit files (RAPR_AGENT_MODE).
+    not the person's own folder.
     """
     from helm.council.runner import _build_cmd_for_session, _run_subprocess_blocking, failed
     _load()
@@ -223,9 +222,6 @@ def run_agent(agent: str, prompt: str, cwd: str, model: Optional[str] = None, *,
         raise ToolError(str(exc)) from exc
     if edits and agent == "claude":
         cmd[1:1] = ["--permission-mode", "acceptEdits"]
-    # For AIs whose tools RAPR runs itself (Copilot through the RAPR Bridge): what they may do.
-    extra_env = {**(extra_env or {}),
-                 "RAPR_AGENT_MODE": "read" if not edits else ("edit+run" if in_copy else "edit")}
     streamed = False
     if agent == "claude":
         # stream-json carries what json leaves out: the plan's 5-hour and weekly usage
@@ -532,25 +528,11 @@ def signed_out() -> list[str]:
     return [name for name in SIGN_IN if name not in have and status(name) is False]
 
 
-COPILOT_CLI = ("GitHub Copilot is installed in VS Code. RAPR can use it with your VS Code sign-in, with "
-               "nothing else to install: call connect_vscode_copilot (it adds the small RAPR Bridge extension "
-               "to VS Code). Copilot then takes any role: second opinions, questions, bake-offs, relays and "
-               "teams, editing and testing code. It works while VS Code is open; for Copilot without VS Code, "
-               "install Copilot CLI instead: `npm install -g @github/copilot`, then `copilot login`.")
-
-
 def tool_list_agents(args: dict, ctx: "Server") -> str:
     have = agents()
     out = signed_out()
     note = "".join(f"\n{name} is installed but not signed in: run `{SIGN_IN[name]}` in a terminal."
                    for name in out)
-    if "copilot" not in have and "copilot_vscode" not in have and not _found("copilot"):
-        from helm import vscode_bridge
-        if vscode_bridge.installed():
-            note += "\nCopilot (VS Code): " + vscode_bridge.status_text()
-        elif vscode_bridge.copilot_in_vscode():
-            where = vscode_bridge.where_copilot()
-            note += "\n" + COPILOT_CLI + (f" (Found: Copilot {where}.)" if where else "")
     edit_free = [v for k, v in have.items() if answers_only(k)]
     if edit_free:
         note += "\n" + ", ".join(edit_free) + " answers questions but can't edit files."
@@ -559,42 +541,6 @@ def tool_list_agents(args: dict, ctx: "Server") -> str:
                 "npm i -g @openai/codex) and sign in, then try again." + note)
     return ("AIs available through RAPR on this computer:\n"
             + "\n".join(f"- {k} ({v})" for k, v in have.items()) + ("\n" + note if note else ""))
-
-
-def tool_connect_vscode_copilot(args: dict, ctx: "Server") -> str:
-    """Let RAPR use GitHub Copilot through the person's VS Code sign-in (helm/vscode_bridge)."""
-    global _agents_cache
-    from helm import vscode_bridge as vb
-    found = vb.copilot_in_vscode(fresh=True)      # it may have been installed a moment ago
-    if not found and not vb.installed() and not args.get("anyway"):
-        return vb.NOT_FOUND
-    steps = []
-    where = vb.where_copilot()
-    if where:
-        steps.append(f"Found GitHub Copilot: {where}.")
-    elif not found:
-        steps.append("Connecting anyway: RAPR found no Copilot on disk, so the bridge will ask VS Code directly.")
-    old = vb.installed_version() if vb.installed() else ""
-    if not vb.installed() or args.get("reinstall") or vb.outdated():
-        try:
-            vb.install()
-        except vb.BridgeError as exc:
-            raise ToolError(str(exc)) from exc
-        steps.append(f"Updated the RAPR Bridge in VS Code from {old} to {vb.bundled_version()}." if old and old != vb.bundled_version()
-                     else f"Installed the RAPR Bridge {vb.bundled_version()} in VS Code.")
-        if vb.healthy():
-            steps.append("Reload the VS Code window (Ctrl+Shift+P, \"Developer: Reload Window\") so the new bridge runs.")
-    _agents_cache = (0.0, {})          # it may be ready now
-    if not vb.healthy():
-        steps.append("Next, in VS Code: reload the window (Ctrl+Shift+P, \"Developer: Reload Window\"), then run "
-                     f"\"{vb.CONNECT_COMMAND}\" and press Allow when VS Code asks whether RAPR Bridge may use "
-                     "Copilot. Then call list_agents: copilot_vscode appears.")
-        return "\n".join(steps)
-    steps.append(vb.status_text())
-    steps.append("Use it as copilot_vscode in any tool: second_opinion, ask_agent, start_bakeoff, start_relay "
-                 "(any role), start_team. If a question says "
-                 f"VS Code hasn't allowed it yet, run \"{vb.CONNECT_COMMAND}\" in VS Code and press Allow.")
-    return "\n".join(steps)
 
 
 def tool_latest_brief(args: dict, ctx: "Server") -> str:
@@ -1241,21 +1187,6 @@ TOOLS: dict[str, tuple[dict, Callable[[dict, "Server"], str]]] = {
         "inputSchema": {"type": "object", "properties": {}},
         "annotations": {"readOnlyHint": True},
     }, tool_list_agents),
-    "connect_vscode_copilot": ({
-        "description": "Let RAPR use GitHub Copilot from VS Code with the user's VS Code sign-in (no Copilot CLI "
-                       "needed): installs the small RAPR Bridge extension into VS Code if it isn't there, and says "
-                       "the one step left in VS Code (run \"RAPR: Connect Copilot\" and press Allow). Copilot then "
-                       "shows up as copilot_vscode and can take any role: reviews, questions, bake-offs, relays, "
-                       "teams (it reads, edits and tests code with tools RAPR runs). Also updates an older bridge.",
-        "inputSchema": {"type": "object", "properties": {
-            "reinstall": {"type": "boolean", "default": False,
-                          "description": "Install RAPR's copy again even if a bridge is installed (to update it)."},
-            "anyway": {"type": "boolean", "default": False,
-                       "description": "Install the bridge even though RAPR found no Copilot on disk (Copilot works "
-                                      "in VS Code but is installed somewhere unusual)."},
-        }},
-        "annotations": {"idempotentHint": True, "openWorldHint": False},
-    }, tool_connect_vscode_copilot),
     "latest_brief": ({
         "description": "What needs the user right now, from their latest RAPR brief: approvals waiting, "
                        "unfinished sessions, scheduled-task results, and what each of their AIs found in the "
