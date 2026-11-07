@@ -528,19 +528,11 @@ def signed_out() -> list[str]:
     return [name for name in SIGN_IN if name not in have and status(name) is False]
 
 
-COPILOT_CLI = ("GitHub Copilot is installed in your editor, but RAPR runs AIs through their "
-               "command-line tools, and Copilot Chat isn't one. To add Copilot, install Copilot CLI: "
-               "`npm install -g @github/copilot`, then `copilot login`.")
-
-
 def tool_list_agents(args: dict, ctx: "Server") -> str:
     have = agents()
     out = signed_out()
     note = "".join(f"\n{name} is installed but not signed in: run `{SIGN_IN[name]}` in a terminal."
                    for name in out)
-    from helm.editor_clis import has_extension
-    if "copilot" not in have and has_extension("github.copilot-chat-") and not _found("copilot"):
-        note += "\n" + COPILOT_CLI
     edit_free = [v for k, v in have.items() if answers_only(k)]
     if edit_free:
         note += "\n" + ", ".join(edit_free) + " answers questions but can't edit files."

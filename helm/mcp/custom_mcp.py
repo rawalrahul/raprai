@@ -284,7 +284,7 @@ def add_server(spec: dict) -> dict:
 def import_json(text: str) -> dict:
     """Add every server from a pasted MCP config snippet.
 
-    Accepts the format most MCP docs hand out (Claude Desktop, Cursor, VS Code):
+    Accepts the format most MCP docs hand out (Claude Desktop, Cursor):
         {"mcpServers": {"name": {"command": "npx", "args": [...], "env": {...}}}}
         {"mcpServers": {"name": {"url": "https://...", "headers": {...}}}}
     A bare {"name": {...}} map, or a single server object, works too.

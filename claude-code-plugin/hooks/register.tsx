@@ -7,9 +7,9 @@
 //   - what the AIs RAPR ran for you (the `rapr` MCP server) did today.
 // The last two come from ~/.config/rapr/mcp-usage.json, which helm/mcp_usage.py writes.
 //
-// The band shows in the terminal and the desktop app; Claude Code draws no band in VS Code.
-// There (and everywhere), /rapr-usage asks the `rapr` MCP server for every AI's usage live,
-// prints it, and opens a RAPR usage pane that keeps itself current.
+// The band shows in the terminal and the desktop app. Anywhere, /rapr-usage asks the `rapr`
+// MCP server for every AI's usage live, prints it, and opens a RAPR usage pane that keeps
+// itself current.
 //
 // /rapr-usage                 usage now, in the chat and a pane beside it
 // /rapr-usage band [on|off]   show or hide the band (terminal, desktop app)
@@ -220,7 +220,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'rapr-usage',
-      description: "Every AI's real usage now, in the chat and a pane (works in VS Code); 'band' shows or hides the band",
+      description: "Every AI's real usage now, in the chat and a pane; 'band' shows or hides the band",
     })
     await refresh($)
     $.clock.every(REFRESH_MS, () => {
@@ -243,7 +243,7 @@ export const register: Register = on => {
       await refresh($)
       $.ui.invalidate('ui.render')
       return { text: hidden ? 'RAPR usage band hidden. /rapr-usage band brings it back.'
-                            : 'RAPR usage band shown (terminal and desktop app; in VS Code use /rapr-usage).' }
+                            : 'RAPR usage band shown (terminal and desktop app).' }
     }
     // Usage now: asked live of every AI by RAPR's MCP server, in the chat and a pane.
     const text = await askRapr($)
@@ -350,7 +350,7 @@ export const register: Register = on => {
       </Box>
     )
   })
-  // The pane: drawn on every surface, VS Code included (Claude Code draws no band there).
+  // The pane: drawn on every surface.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
     const v = await read($, view)

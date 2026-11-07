@@ -411,20 +411,6 @@ def test_loading_the_ais_does_not_import_the_web_app():
     assert out.stdout.strip().splitlines()[-1] == "False", out.stderr[-2000:]
 
 
-def test_list_agents_explains_copilot_chat_is_not_a_cli(monkeypatch, tmp_path):
-    import helm.editor_clis as ec
-    (tmp_path / ".vscode" / "extensions" / "github.copilot-chat-0.40.0").mkdir(parents=True)
-    monkeypatch.setattr(ec.Path, "home", lambda: tmp_path)
-    monkeypatch.setattr(mcp, "agents", lambda: {"claude": "Claude Code"})
-    monkeypatch.setattr(mcp, "signed_out", lambda: [])
-    monkeypatch.setattr(mcp, "_found", lambda exe: False)
-    text = mcp.Server(out=None).call_tool("list_agents", {})["content"][0]["text"]
-    assert "npm install -g @github/copilot" in text
-    monkeypatch.setattr(mcp, "agents", lambda: {"claude": "Claude Code", "copilot": "Copilot"})
-    text = mcp.Server(out=None).call_tool("list_agents", {})["content"][0]["text"]
-    assert "npm install" not in text
-
-
 # ── Robustness: failures, output size, cancellation, progress, cleanup ──────
 
 def test_shared_runner_never_hands_the_ai_our_stdin_and_reports_errors(tmp_path):
