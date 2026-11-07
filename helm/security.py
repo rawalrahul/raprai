@@ -78,12 +78,16 @@ class RateLimiter:
             "_default":       (int(os.environ.get("RAPR_RATE_LIMIT", "120")), 60),
         }
 
+    def bucket(self, path: str) -> str:
+        """The limit a path counts against: its prefix, or "_default"."""
+        for prefix in self.limits:
+            if prefix != "_default" and path.startswith(prefix):
+                return prefix
+        return "_default"
+
     def _get_limit(self, path: str) -> tuple[int, int]:
         """Find the most specific rate limit for a path."""
-        for prefix, limit in self.limits.items():
-            if prefix != "_default" and path.startswith(prefix):
-                return limit
-        return self.limits["_default"]
+        return self.limits[self.bucket(path)]
 
     def check(self, ip: str, path: str) -> Optional[int]:
         """
@@ -91,18 +95,12 @@ class RateLimiter:
 
         Returns None if allowed, or seconds until reset if limited.
         """
-        max_req, window = self._get_limit(path)
+        bucket_key = self.bucket(path)
+        max_req, window = self.limits[bucket_key]
         now = time.time()
         cutoff = now - window
 
         with self._lock:
-            # Find the matching bucket
-            bucket_key = "_default"
-            for prefix in self.limits:
-                if prefix != "_default" and path.startswith(prefix):
-                    bucket_key = prefix
-                    break
-
             hits = self._hits[ip][bucket_key]
             # Prune old entries
             hits[:] = [t for t in hits if t > cutoff]
@@ -202,6 +200,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 _RATE_LIMIT_EXEMPT = ("/static", "/health", "/ws", "/mcp/gate",
                       "/js/", "/css/", "/assets/", "/sw.js", "/manifest.json")
 
+_LOOPBACK = ("127.0.0.1", "::1", "localhost")
+
+
+def _local_owner(ip: str) -> bool:
+    """The person at this computer: a request from loopback, not through the cloud tunnel
+    (there, cloudflared connects from loopback on every visitor's behalf)."""
+    from helm.auth import behind_tunnel
+    return (ip in _LOOPBACK or ip.startswith("::ffff:127.")) and not behind_tunnel()
+
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Enforce per-IP rate limits on API endpoints."""
@@ -213,12 +220,24 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if any(path.startswith(p) for p in _RATE_LIMIT_EXEMPT):
             return await call_next(request)
 
+        # The page itself: limited, it showed as a bare JSON error instead of the app
+        # (a launch after an update reloads every open tab, some more than once).
+        if path == "/" and request.method == "GET":
+            return await call_next(request)
+
         # Skip WebSocket upgrades
         if request.headers.get("upgrade", "").lower() == "websocket":
             return await call_next(request)
 
         from helm.auth import client_ip
         ip = client_ip(request, default="127.0.0.1")
+
+        # On this computer every tab, reload, Kelvin and VS Code share 127.0.0.1, so the
+        # general limit counted all of them as one visitor. Keep only the strict limits
+        # (PIN, setup, plugins…) for the local owner.
+        if _local_owner(ip) and _rate_limiter.bucket(path) == "_default":
+            return await call_next(request)
+
         retry_after = _rate_limiter.check(ip, path)
 
         if retry_after is not None:

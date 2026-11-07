@@ -66,3 +66,44 @@ def test_ui_files_dont_use_up_the_rate_limit(monkeypatch):
     # API calls are still limited
     codes = [c.get("/history").status_code for _ in range(130)]
     assert 429 in codes
+
+
+def _limited_app(monkeypatch, client):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from helm import security
+
+    monkeypatch.setattr(security, "_rate_limiter", security.RateLimiter())
+    app = FastAPI()
+    app.add_middleware(security.RateLimitMiddleware)
+    app.get("/")(lambda: "page")
+    app.get("/history")(lambda: "ok")
+    app.post("/login")(lambda: "ok")
+
+    async def from_client(scope, receive, send):      # requests arrive from this address
+        await app({**scope, "client": client}, receive, send)
+    return TestClient(from_client)
+
+
+def test_the_page_itself_is_never_a_rate_limit_error(monkeypatch):
+    """Launched after an update, every open tab reloads (some more than once): a
+    limited page showed {"error":"Too many requests..."} instead of RAPR."""
+    c = _limited_app(monkeypatch, ("203.0.113.5", 50000))
+    assert all(c.get("/").status_code == 200 for _ in range(200))
+    assert 429 in [c.get("/history").status_code for _ in range(130)]   # API calls still limited
+
+
+def test_the_local_owner_isnt_limited_but_pin_tries_are(monkeypatch):
+    """On this computer every tab, Kelvin and VS Code arrive from 127.0.0.1: one shared
+    limit. Only the strict limits (PIN, setup) apply there."""
+    monkeypatch.delenv("RAPR_BEHIND_TUNNEL", raising=False)
+    c = _limited_app(monkeypatch, ("127.0.0.1", 50000))
+    assert all(c.get("/history").status_code == 200 for _ in range(300))
+    assert 429 in [c.post("/login").status_code for _ in range(20)]
+
+
+def test_behind_the_tunnel_loopback_is_still_limited(monkeypatch):
+    """On a cloud server cloudflared connects from loopback for every visitor."""
+    monkeypatch.setenv("RAPR_BEHIND_TUNNEL", "1")
+    c = _limited_app(monkeypatch, ("127.0.0.1", 50000))
+    assert 429 in [c.get("/history").status_code for _ in range(130)]
