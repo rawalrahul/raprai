@@ -38,3 +38,23 @@ def test_nothing_ready_means_no_pick(monkeypatch):
     _setup(monkeypatch, set(), {"ollama": {"ok": False}})
     from helm import smart_routing as sr
     assert sr.decide("hello", routing_routes._ready_ais()).ai is None
+
+
+def _info(ready):
+    return {"build_command": lambda prompt, model=None: ["claude", "-p"], "env_vars": [], "ready": ready}
+
+
+def test_an_integrations_own_ready_check_counts(monkeypatch):
+    """Claude Code (Ollama) showed as Ready in Settings whenever `claude` was
+    installed, even with no Ollama: its READY() (is Ollama answering?) was only
+    asked by the MCP server and the runner."""
+    real = session_routes._integration_ready
+    monkeypatch.setattr(session_routes, "_command_binary_found", lambda cmd: True)
+    assert real("claude_ollama", _info(lambda: False)) is False
+    assert real("claude_ollama", _info(lambda: True)) is True
+    assert real("claude_ollama", _info(None)) is True                 # no check of its own
+    def broken():
+        raise OSError("no Ollama")
+    assert real("claude_ollama", _info(broken)) is False
+    monkeypatch.setattr(session_routes, "_command_binary_found", lambda cmd: False)
+    assert real("claude_ollama", _info(lambda: True)) is False        # still needs the command

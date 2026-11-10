@@ -1,6 +1,7 @@
 name: Mac check
 
-# Installs RAPR on a real Mac (Apple Silicon) with scripts/install-mac.sh, opens
+# Installs RAPR on a real Mac (Apple Silicon, macOS 15; GitHub retired the
+# macOS 14 runners in November 2026) with scripts/install-mac.sh, opens
 # the "RAPR AI" app, checks RAPR answers and its page loads, quits the app, and runs
 # the tests. Runs for any change to RAPR's code.
 # Free for public repositories.
@@ -35,7 +36,7 @@ concurrency:
 
 jobs:
   mac:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
