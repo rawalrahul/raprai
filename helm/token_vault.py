@@ -116,6 +116,25 @@ def store_token(env_key: str, plaintext: str) -> None:
     os.environ[env_key] = plaintext  # runtime availability
 
 
+def _env_file_values() -> dict[str, str]:
+    """The keys written in RAPR's own .env file (in its data folder).
+
+    Only these are ever moved into the vault. A key that is merely set in the
+    shell RAPR was started from (ANTHROPIC_API_KEY, GITHUB_TOKEN...) belongs to
+    the user's environment: RAPR may use it while it's set, but never copies it.
+    """
+    try:
+        from dotenv import dotenv_values
+        from helm.paths import user_data_dir
+        path = user_data_dir() / ".env"
+        if not path.exists():
+            return {}
+        return {k: v for k, v in dotenv_values(path).items() if v}
+    except Exception:
+        logger.warning("token_vault: couldn't read .env", exc_info=True)
+        return {}
+
+
 def load_token(env_key: str) -> str:
     """Load and decrypt a token. Returns empty string if not found."""
     # 1. Try SQLite vault
@@ -144,9 +163,10 @@ def load_token(env_key: str) -> str:
     except Exception as exc:
         logger.warning("token_vault: load failed for %s: %s", env_key, exc)
 
-    # 2. Fallback: check .env / os.environ (legacy migration)
+    # 2. Fallback: the environment. Moved into the vault only when it came
+    # from RAPR's own .env file (legacy migration), never from the shell.
     val = os.environ.get(env_key, "")
-    if val:
+    if val and val != "vault-managed" and _env_file_values().get(env_key) == val:
         try:
             store_token(env_key, val)   # auto-migrate; the value keeps working either way
         except Exception:
@@ -202,7 +222,7 @@ def load_all_tokens() -> dict[str, str]:
 
 
 def migrate_env_tokens(token_env_keys: list[str], scrub_env: bool = True) -> int:
-    """Migrate plaintext tokens from .env / os.environ into the vault.
+    """Migrate plaintext tokens from RAPR's .env file into the vault.
 
     Call once at startup with the list of all plugin/core token env-var names.
     Returns the number of tokens migrated.
@@ -212,8 +232,9 @@ def migrate_env_tokens(token_env_keys: list[str], scrub_env: bool = True) -> int
     the pattern used by plugin_routes and plugin_oauth.
     """
     count = 0
+    in_file = _env_file_values()
     for key in token_env_keys:
-        val = os.environ.get(key, "")
+        val = in_file.get(key, "")
         if val and val != "vault-managed":
             # Check if already in vault
             try:

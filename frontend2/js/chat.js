@@ -381,10 +381,62 @@ function send(){
     _pendingContext = '';
   }
   if(_viewingHistory) returnToLive();
-  ws.send(JSON.stringify({type:'message', content:content}));
   inp.value = '';
   inp.style.height = 'auto';
   _updateComposer();
+  if(!_hasLiveSession()){
+    // Nothing to send to yet: start a chat with the AI Auto picks, then send.
+    _startSessionThenSend(content);
+    return;
+  }
+  ws.send(JSON.stringify({type:'message', content:content}));
+}
+
+function _hasLiveSession(){
+  if(!_focusedId) return false;
+  const s = (_sessions || []).find(x => x.id === _focusedId);
+  return !s || s.status !== 'stopped';
+}
+
+// A first message typed before any AI was picked used to be thrown away
+// ("No active session"). Start a session with the AI Auto would pick for the
+// message (the strongest ready one for coding, a free local one for easy
+// work) and send it there as soon as the session is focused.
+let _startingSession = false;
+async function _startSessionThenSend(content){
+  if(_startingSession) return;
+  _startingSession = true;
+  const inp = document.getElementById('inp');
+  const giveBack = (msg) => {
+    if(inp && !inp.value.trim()){ inp.value = content; _updateComposer(); }
+    if(msg && typeof Toast !== 'undefined') Toast.warning(msg);
+    const picker = document.getElementById('ai-picker');
+    if(picker) picker.click();             // show the AIs to pick from
+  };
+  try {
+    let ai = null;
+    try {
+      const r = await fetch('/api/routing/decide', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text: content}),
+      });
+      ai = (await r.json()).ai || null;
+    } catch(_e) { ai = null; }
+    if(!ai){ giveBack('No AI is set up yet. Pick one, or add one with "Add more AIs".'); return; }
+    const before = _focusedId;
+    cmd('new_session:' + ai);
+    for(let i = 0; i < 100; i++){            // up to 10 s for the session to start
+      await new Promise(res => setTimeout(res, 100));
+      if(_focusedId && _focusedId !== before && _hasLiveSession()){
+        if(!ws || ws.readyState !== 1) break;
+        ws.send(JSON.stringify({type:'message', content:content}));
+        return;
+      }
+    }
+    giveBack('The chat didn\'t start in time. Your message is back in the box.');
+  } finally {
+    _startingSession = false;
+  }
 }
 
 // --- Composer primary button -----------------------------------------------------------------------------------

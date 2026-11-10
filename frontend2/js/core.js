@@ -289,11 +289,9 @@ renderHeaderIcons();
 
 let _onboardingStep = 0;
 const _onboardingSteps = [
-  {title: 'Welcome to RAPR AI!', content: 'Your personal AI assistant with multi-session support, integrated terminal, and chat history.'},
-  {title: '📂 History Panel', content: 'Click the menu icon (☰) on the left to see your past sessions and scheduled tasks.'},
-  {title: '⚙️ Settings', content: 'Customize timeouts, model defaults, security settings, and more. Click the gear icon.'},
-  {title: '💬 Start Chatting', content: 'Pick an AI from the dropdown, type your message, and press Enter or click Send.'},
-  {title: 'All Set! 🚀', content: 'You\'re ready to go! Type a message to begin, or explore the settings.'}
+  {title: 'Welcome to RAPR AI', content: 'Every AI you use, on one team. Type a message below and press Enter: RAPR starts a chat with the best AI you have set up. "Pick an AI" chooses one yourself.'},
+  {title: 'Use them together', content: 'Group chat puts several AIs in one conversation. Bake-off (in the AI menu) gives them all the same task so you can keep the best result.'},
+  {title: 'It comes to you', content: 'Needs you (the bell on the left) lists approvals and your morning brief. Before an AI sends, posts or merges anything in a connected app, it asks you here first.'},
 ];
 
 function initOnboarding(){

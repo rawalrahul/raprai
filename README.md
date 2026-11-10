@@ -67,7 +67,7 @@ An assistant from one AI company sees that company's connectors, runs that compa
 
 ## Works with
 
-**Coding agents** (they use your own sign-in): Claude Code · Codex · Antigravity · Grok · Cursor · OpenCode · Droid · Qwen Code · Kiro (Amazon Q) · Aider · Goose · Kilo Code · OpenClaw · Open Interpreter
+**Coding agents** (they use your own sign-in): Claude Code · Codex · Antigravity · Copilot CLI · Grok · Cursor · OpenCode · Droid · Qwen Code · Kiro (Amazon Q) · Aider · Goose · Kilo Code · OpenClaw · Open Interpreter
 
 **Free and local:** Claude Code and Codex on a local model through Ollama, plus Ollama on its own
 

@@ -481,3 +481,12 @@ html #customize-drawer .cz-danger { margin-left: auto; }
 html #customize-drawer .cz-danger:hover { color: var(--color-danger, #ef4444) !important; }
 #customize-drawer .cz-link .ico { width: 14px; height: 14px; }
 #customize-drawer .cz-foot { display: flex; align-items: center; gap: 4px; padding: 10px 12px; border-top: 1px solid var(--border-dim); }
+
+/* ── Phones and narrow windows ─────────────────────────────────────────────
+   The sidebars are drawers there: closed until opened from the header.
+   (overhaul.css sets display:flex !important on #left-sidebar, which used to
+   leave the panel covering the chat on every phone.) */
+@media (max-width: 900px) {
+  html #left-sidebar:not(.open),
+  html #right-sidebar:not(.open) { display: none !important; }
+}

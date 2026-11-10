@@ -21,7 +21,7 @@
 <link rel="stylesheet" href="/css/kelvin.css?v=7">
 <link rel="stylesheet" href="/css/groupchat.css?v=5">
 <link rel="stylesheet" href="/css/header.css?v=3">
-<link rel="stylesheet" href="/css/sidebar.css?v=1">
+<link rel="stylesheet" href="/css/sidebar.css?v=2">
 <link rel="stylesheet" href="/css/needs.css?v=1">
 <link rel="stylesheet" href="/css/composer.css?v=5">
 <link rel="stylesheet" href="/css/picker.css?v=1">
@@ -1513,7 +1513,7 @@ Example:
   <div id="kelvin-hello">
     <span class="kelvin-slot" id="kelvin-hello-art"></span>
     <div class="kelvin-hello-title">Kelvin is here</div>
-    <div class="kelvin-hello-sub">Choose your project at the top, then pick an AI below and say hello. Kelvin shows what it's doing while it works.</div>
+    <div class="kelvin-hello-sub">Choose your project at the top and say hello below. RAPR picks an AI for you, or choose one with &ldquo;Pick an AI&rdquo;. Kelvin shows what it's doing while it works.</div>
   </div>
 </div>
 <div id="thinking" role="status" aria-live="polite">
@@ -1552,10 +1552,11 @@ Example:
         <button class="ai-menu-item" id="auto-menu-btn" onclick="autoNewSession();closeAiMenu()" role="menuitem" title="RAPR picks the cheapest AI that can do the task">
           <span class="menu-dot" aria-hidden="true">✨</span>Auto (pick for my task)</button>
         <button class="ai-menu-item" onclick="openBakeoffModal();closeAiMenu()" role="menuitem" title="Same task, several AIs, then pick the best result"><span class="menu-dot" aria-hidden="true">🧪</span>Bake-off (compare AIs)</button>
-        <button class="ai-menu-item" onclick="openRecap();closeAiMenu()" role="menuitem" title="Your month with RAPR, as a card you can share"><span class="menu-dot" aria-hidden="true">🐧</span>Your month (recap)</button>
         <!-- integration "New: ..." buttons inserted here by loadIntegrations() -->
         <button class="ai-menu-item" id="shell-mode-btn" onclick="cmd('new_session:');closeAiMenu()" role="menuitem">
           <span class="menu-dot shell" aria-hidden="true"></span>Shell</button>
+        <div class="ai-menu-divider" role="presentation"></div>
+        <button class="ai-menu-item" onclick="openRecap();closeAiMenu()" role="menuitem" title="Your month with RAPR, as a card you can share"><span class="menu-dot" aria-hidden="true">🐧</span>Your month (recap)</button>
         <div class="ai-menu-divider" role="presentation"></div>
         <div class="ai-menu-section" role="presentation">This chat</div>
         <button class="ai-menu-item" onclick="cmd('clear');closeAiMenu()" role="menuitem">↺ Clear chat</button>

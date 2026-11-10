@@ -59,6 +59,7 @@ def test_no_plain_text_when_the_key_cant_be_loaded(data, monkeypatch):
 
 def test_moving_keys_into_the_vault_never_drops_one(data, monkeypatch):
     """If a key can't be stored, its .env copy must stay (not become "vault-managed")."""
+    (data / ".env").write_text("RAPR_TEST_TOKEN=s3cret\n", encoding="utf-8")
     monkeypatch.setenv("RAPR_TEST_TOKEN", "s3cret")
     scrubbed = []
     import importlib
@@ -67,3 +68,21 @@ def test_moving_keys_into_the_vault_never_drops_one(data, monkeypatch):
     monkeypatch.setattr(token_vault, "_get_or_create_key", lambda: (_ for _ in ()).throw(OSError("no key")))
     assert token_vault.migrate_env_tokens(["RAPR_TEST_TOKEN"]) == 0
     assert scrubbed == []
+
+
+def test_a_key_from_the_shell_is_never_copied(data, monkeypatch):
+    """A key set only in the shell RAPR started from stays the user's: no vault
+    copy, and no .env file (which would also skip the setup wizard)."""
+    monkeypatch.setenv("RAPR_TEST_TOKEN", "from-the-shell")
+    assert token_vault.migrate_env_tokens(["RAPR_TEST_TOKEN"]) == 0
+    assert token_vault.load_token("RAPR_TEST_TOKEN") == "from-the-shell"   # still usable
+    assert _stored("RAPR_TEST_TOKEN") is None
+    assert not (data / ".env").exists()
+
+
+def test_a_key_in_raprs_env_file_moves_into_the_vault(data, monkeypatch):
+    (data / ".env").write_text("RAPR_TEST_TOKEN=s3cret\n", encoding="utf-8")
+    monkeypatch.setenv("RAPR_TEST_TOKEN", "s3cret")
+    assert token_vault.migrate_env_tokens(["RAPR_TEST_TOKEN"]) == 1
+    assert token_vault.load_token("RAPR_TEST_TOKEN") == "s3cret"
+    assert "RAPR_TEST_TOKEN=vault-managed" in (data / ".env").read_text(encoding="utf-8")
