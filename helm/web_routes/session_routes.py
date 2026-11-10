@@ -58,7 +58,19 @@ def _integration_ready(key: str, info: dict) -> bool:
         command_ok = _command_binary_found(info["build_command"]("test", model=None))
     except Exception:
         command_ok = False
-    return command_ok and env_vars_ok
+    if not (command_ok and env_vars_ok):
+        return False
+    # The integration's own check, when it has one (READY() in its module):
+    # Claude Code (Ollama) and Codex (Ollama) are ready only while Ollama
+    # answers, not just because `claude` or `codex` is installed. The MCP
+    # server and the runner already asked it; Settings and the AI menu didn't.
+    ready = info.get("ready")
+    if callable(ready):
+        try:
+            return bool(ready())
+        except Exception:
+            return False
+    return True
 
 
 # ---------------------------------------------------------------------------
