@@ -190,8 +190,7 @@ select option{background:var(--surface);color:var(--text)}
       <div class="step-title">Telegram Bot <span style="color:var(--muted);font-size:12px;font-weight:400">(optional)</span></div>
       <div class="step-desc">
         Connect a Telegram bot to control RAPR AI remotely from your phone — launch sessions,
-        send prompts, and get AI responses via chat. You can skip this and configure it later
-        by editing your <code>.env</code> file.
+        send prompts, and get AI responses via chat. You can skip this and add it later from the app.
       </div>
       <div class="field">
         <label>Bot Token</label>
@@ -213,10 +212,11 @@ select option{background:var(--surface);color:var(--text)}
 
     <!-- ─── STEP 3: Claude + Codex (optional) ─── -->
     <div class="step" id="step3">
-      <div class="step-title">More AI Integrations <span style="color:var(--muted);font-size:12px;font-weight:400">(optional)</span></div>
+      <div class="step-title">Your AIs <span style="color:var(--muted);font-size:12px;font-weight:400">(optional)</span></div>
       <div class="step-desc">
-        Add Claude and Codex as extra AI backends alongside Antigravity. Both need their own CLI
-        tools and credentials. You can skip this entirely and add them later via your <code>.env</code> file.
+        RAPR works with the AI tools on this computer, using your own sign-ins and plans.
+        Install any of these and sign in once, then press <strong>Check again</strong>.
+        You can add more later from <strong>Pick an AI → Add more AIs</strong>.
       </div>
 
       <div class="integ-card">
@@ -225,12 +225,11 @@ select option{background:var(--surface);color:var(--text)}
           <span class="integ-name">Claude (Anthropic)</span>
           <span class="integ-badge off" id="claude-badge-2">not configured</span>
         </div>
-        <div style="font-size:12px;color:var(--dim);margin-bottom:6px;font-weight:600">Install CLI:</div>
+        <div id="claude-steps">
+        <div style="font-size:12px;color:var(--dim);margin-bottom:6px;font-weight:600">Install:</div>
         <div class="code-block">npm install -g @anthropic-ai/claude-code<button class="code-copy" onclick="copyCode(this)">copy</button></div>
-        <div style="font-size:12px;color:var(--dim);margin-bottom:6px;font-weight:600">Then authenticate:</div>
-        <div class="code-block">claude login<button class="code-copy" onclick="copyCode(this)">copy</button></div>
-        <div class="alert alert-info" style="margin-top:8px;font-size:11px">
-          After installing and authenticating, <strong>relaunch RAPR AI</strong> to detect Claude.
+        <div style="font-size:12px;color:var(--dim);margin-bottom:6px;font-weight:600">Then sign in with your Claude account:</div>
+        <div class="code-block">claude<button class="code-copy" onclick="copyCode(this)">copy</button></div>
         </div>
       </div>
 
@@ -240,12 +239,16 @@ select option{background:var(--surface);color:var(--text)}
           <span class="integ-name">OpenAI Codex</span>
           <span class="integ-badge off" id="codex-badge-2">not configured</span>
         </div>
-        <div style="font-size:12px;color:var(--dim);margin-bottom:6px;font-weight:600">Install CLI:</div>
+        <div id="codex-steps">
+        <div style="font-size:12px;color:var(--dim);margin-bottom:6px;font-weight:600">Install:</div>
         <div class="code-block">npm install -g @openai/codex<button class="code-copy" onclick="copyCode(this)">copy</button></div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:6px;font-weight:600">Then sign in with your ChatGPT account:</div>
+        <div class="code-block">codex login<button class="code-copy" onclick="copyCode(this)">copy</button></div>
         <div class="field" style="margin-top:8px;margin-bottom:0">
-          <label>OPENAI_API_KEY</label>
+          <label>Or use an OpenAI API key (optional)</label>
           <input id="codex-key" type="password" placeholder="sk-..." autocomplete="off">
           <small>Get one at <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com/api-keys</a></small>
+        </div>
         </div>
       </div>
 
@@ -268,19 +271,18 @@ select option{background:var(--surface);color:var(--text)}
         </div>
         <div id="ollama-install-hint" style="display:none">
           <div style="font-size:12px;color:var(--dim);margin-bottom:6px;font-weight:600">Install Ollama:</div>
-          <div class="code-block">winget install Ollama.Ollama<button class="code-copy" onclick="copyCode(this)">copy</button></div>
+          <div class="code-block"><span id="ollama-install-cmd">winget install Ollama.Ollama</span><button class="code-copy" onclick="copyCode(this)">copy</button></div>
           <div style="font-size:12px;color:var(--dim);margin:8px 0 4px;font-weight:600">Then pull a model:</div>
           <div class="code-block">ollama pull qwen3:4b<button class="code-copy" onclick="copyCode(this)">copy</button></div>
-          <div class="alert alert-info" style="margin-top:8px;font-size:11px">
-            After installing, <strong>relaunch RAPR AI</strong> to detect Ollama.
-          </div>
+
         </div>
       </div>
 
       <div id="optional-msg"></div>
       <div class="btn-row">
         <button class="btn btn-secondary" onclick="goStep(2)">← Back</button>
-        <button class="btn btn-primary" onclick="saveOptional()">Save & Continue →</button>
+        <button class="btn btn-secondary" id="recheck-btn" onclick="recheckAIs()">⟳ Check again</button>
+        <button class="btn btn-primary" onclick="saveOptional()">Continue →</button>
         <button class="btn-skip" onclick="goStep(4)">Skip for now →</button>
       </div>
     </div>
@@ -387,7 +389,7 @@ async function checkAntigravity() {
       <div class="alert alert-info">
         Install the Antigravity CLI from
         <a href="https://antigravity.google/docs/cli-using" target="_blank">antigravity.google/docs/cli-using</a>,
-        run <code>agy</code> once to sign in, then <strong>relaunch RAPR AI</strong> to detect it.
+        run <code>agy</code> once to sign in, then press <strong>Continue</strong> to check again.
         You can skip this step for now and come back later.
       </div>`;
   }
@@ -397,6 +399,7 @@ async function checkAntigravity() {
 async function continueFromAntigravity() {
   const msg = document.getElementById('agy-msg');
   msg.innerHTML = '';
+  try { await fetch('/integrations/rescan'); } catch (e) {}   // it may have just been installed
   const st = await checkAntigravity();
   if (st.ready) {
     goStep(2);
@@ -417,12 +420,16 @@ async function checkOptionalIntegrations() {
     if (cr.ready) {
       const el = document.getElementById('claude-badge-2');
       if (el) { el.textContent = '✓ ready'; el.className = 'integ-badge ok'; }
+      const steps = document.getElementById('claude-steps');
+      if (steps) steps.style.display = 'none';
       _saved.claude = true;
     }
     for (const integ of ir) {
       if (integ.key === 'codex' && integ.ready) {
         const el = document.getElementById('codex-badge-2');
         if (el) { el.textContent = '✓ ready'; el.className = 'integ-badge ok'; }
+        const steps = document.getElementById('codex-steps');
+        if (steps) steps.style.display = 'none';
         _saved.codex = true;
       }
     }
@@ -456,6 +463,25 @@ async function checkOptionalIntegrations() {
   } catch (e) {}
 }
 
+// The install command for Ollama on the computer the browser is on (RAPR
+// usually runs on the same one).
+(function () {
+  const el = document.getElementById('ollama-install-cmd');
+  if (!el) return;
+  const p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || '';
+  if (/mac/i.test(p)) el.textContent = 'brew install ollama';
+  else if (/linux|x11/i.test(p)) el.textContent = 'curl -fsSL https://ollama.com/install.sh | sh';
+})();
+
+// Look for newly installed or signed-in AIs without restarting RAPR.
+async function recheckAIs() {
+  const btn = document.getElementById('recheck-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+  try { await fetch('/integrations/rescan'); } catch (e) {}
+  await checkOptionalIntegrations();
+  if (btn) { btn.disabled = false; btn.textContent = '⟳ Check again'; }
+}
+
 // ── CSRF helper ──────────────────────────────────────────────
 function csrfToken() {
   const m = document.cookie.match(/(?:^|;\\s*)hq_csrf=([^;]*)/);
@@ -482,7 +508,7 @@ async function saveTelegram() {
     try {
       await apiSave({TELEGRAM_BOT_TOKEN: token, ALLOWED_USER_IDS: users});
       _saved.tg = !!token;
-      msg.innerHTML = '<div class="alert alert-ok">✓ Saved to .env</div>';
+      msg.innerHTML = '<div class="alert alert-ok">✓ Saved</div>';
     } catch (e) {
       msg.innerHTML = '<div class="alert alert-warn">⚠ Could not save — check file permissions.</div>';
     }
@@ -504,7 +530,7 @@ async function saveOptional() {
   if (Object.keys(payload).length) {
     try {
       await apiSave(payload);
-      msg.innerHTML = '<div class="alert alert-ok">✓ Saved to .env</div>';
+      msg.innerHTML = '<div class="alert alert-ok">✓ Saved</div>';
     } catch (e) {
       msg.innerHTML = '<div class="alert alert-warn">⚠ Could not save — check file permissions.</div>';
     }
@@ -611,7 +637,12 @@ async function buildSummary() {
     </div>`).join('');
 }
 
-function launch() { window.location.href = '/'; }
+async function launch() {
+  // Mark setup as done, so the app opens even when every step was skipped
+  // (RAPR shows this wizard until its settings file exists).
+  try { await apiSave({SETUP_DONE: '1'}); } catch (e) {}
+  window.location.href = '/';
+}
 
 function copyCode(btn) {
   const text = btn.parentElement.childNodes[0].textContent.trim();

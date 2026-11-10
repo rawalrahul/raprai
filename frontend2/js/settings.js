@@ -3,10 +3,24 @@
 
 function openAiCatalog(){
   openSettings();
-  setTimeout(() => {
+  // Settings fills its sections in as their data arrives, which pushes the AI
+  // list further down after the first scroll. Keep it in view until the page
+  // settles (about 2 s), unless the user starts scrolling themselves.
+  const body = document.querySelector('#settings-modal .modal-body');
+  let userScrolled = false;
+  const stop = () => { userScrolled = true; };
+  if(body){
+    body.addEventListener('wheel', stop, {once: true, passive: true});
+    body.addEventListener('touchstart', stop, {once: true, passive: true});
+    body.addEventListener('keydown', stop, {once: true});
+  }
+  let n = 0;
+  const tick = () => {
     const el = document.getElementById('ai-int-list');
-    if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
-  }, 150);
+    if(el && !userScrolled) (el.previousElementSibling || el).scrollIntoView({block:'start'});   // its heading
+    if(++n < 10 && !userScrolled) setTimeout(tick, 200);
+  };
+  setTimeout(tick, 100);
 }
 
 function openSettings(){

@@ -4,10 +4,10 @@ Thanks for your interest in RAPR AI.
 
 ## Getting started
 
-1. Install Python 3.11+ and at least one AI CLI (Claude Code, Gemini, Codex or Ollama).
+1. Install Python 3.12 and at least one AI CLI (Claude Code, Codex, Antigravity or Ollama).
 2. `pip install -r requirements.txt`
-3. Copy `.env.example` to `.env` and fill in what you need.
-4. `python web_app.py`, then open http://localhost:8000.
+3. `python web_app.py`, then open http://localhost:8000. The setup page asks for what it needs;
+   `.env.example` lists the optional settings.
 
 See `README.md` for configuration and troubleshooting.
 
