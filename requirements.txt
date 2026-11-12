@@ -14,7 +14,7 @@ aiofiles>=23.0
 
 # Security
 cryptography>=41.0
-bcrypt>=4.0
+bcrypt>=5.0.0
 
 # System tray icon (Windows desktop feel)
 pystray>=0.19
