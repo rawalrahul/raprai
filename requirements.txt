@@ -31,7 +31,7 @@ reportlab>=4.0
 # Computer Use (desktop control — opt-in via COMPUTER_USE=true)
 # ─────────────────────────────────────────────────────────
 pyautogui>=0.9.54
-mss>=9.0.1
+mss>=10.2.0
 pygetwindow>=0.0.9
 pyperclip>=1.8.2
 pywin32>=312; sys_platform == "win32"
