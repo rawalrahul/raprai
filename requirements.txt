@@ -18,7 +18,7 @@ bcrypt>=4.0
 
 # System tray icon (Windows desktop feel)
 pystray>=0.19
-Pillow>=10.0
+Pillow>=12.3.0
 
 # Document generation
 openpyxl>=3.1.5
