@@ -49,7 +49,7 @@ openai>=1.50.0
 # Always available when COMPUTER_USE=true on Windows.
 # ─────────────────────────────────────────────────────────
 pywinauto>=0.6.8; sys_platform == "win32"
-comtypes>=1.2.0; sys_platform == "win32"
+comtypes>=1.4.17; sys_platform == "win32"
 
 # ─────────────────────────────────────────────────────────
 # Computer Use — OmniParser (opt-in via OMNIPARSER_ENABLED=true)
