@@ -332,6 +332,31 @@ def evaluate_condition(pipeline: dict, step: dict) -> bool:
     return True
 
 
+# Pipeline lifecycle. After planning, every status change goes through transition(),
+# so the web routes, Telegram and the executor all follow the same rules.
+PIPELINE_TRANSITIONS: dict[str, frozenset] = {
+    "planning":          frozenset({"awaiting_approval", "failed", "cancelled"}),
+    "awaiting_approval": frozenset({"running", "cancelled"}),
+    "running":           frozenset({"paused", "completed", "failed", "cancelled"}),
+    "paused":            frozenset({"running", "cancelled"}),
+    "failed":            frozenset({"running", "cancelled"}),   # retry failed steps
+    "completed":         frozenset(),
+    "cancelled":         frozenset(),
+}
+
+
+def can_transition(pipeline: dict, to: str) -> bool:
+    return to in PIPELINE_TRANSITIONS.get(pipeline.get("status", ""), frozenset())
+
+
+def transition(pipeline: dict, to: str) -> bool:
+    """Move the pipeline to status `to` if that's allowed from where it is. Returns True if it moved."""
+    if not can_transition(pipeline, to):
+        return False
+    pipeline["status"] = to
+    return True
+
+
 def ready_steps(pipeline: dict) -> list[dict]:
     """Return steps that are pending and have all dependencies completed.
     Also evaluates conditional branching — skips steps whose conditions are not met.

@@ -540,21 +540,27 @@ async function handleFileUpload(inputEl){
 // --- Voice Recording --------------------------------------------------------------------------------------------
 let _mediaRec = null;
 let _audioChunks = [];
-let _isRecording = false;
+// 'idle' → 'starting' (waiting for the mic permission) → 'recording' → 'idle'.
+// Clicks while 'starting' are ignored: a second click there used to start a second
+// recorder and leave the first one holding the microphone.
+let _recState = 'idle';
 let _voiceTargetSession = null; // session that was focused when recording started
 
 function toggleVoiceRec(){
-  if(_isRecording) stopVoiceRec();
-  else startVoiceRec();
+  if(_recState === 'recording') stopVoiceRec();
+  else if(_recState === 'idle') startVoiceRec();
 }
 
 async function startVoiceRec(){
+  if(_recState !== 'idle') return;
+  _recState = 'starting';
   const btn = document.getElementById('mic-btn');
   // Capture the focused session at recording start so the message
   // goes to the right session even if user switches during transcription
   _voiceTargetSession = _focusedId || null;
+  let stream = null;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    stream = await navigator.mediaDevices.getUserMedia({audio:true});
     _mediaRec = new MediaRecorder(stream, {mimeType: getSupportedMime()});
     _audioChunks = [];
     _mediaRec.ondataavailable = e => { if(e.data.size>0) _audioChunks.push(e.data); };
@@ -565,10 +571,12 @@ async function startVoiceRec(){
       await transcribeAndInsert(blob);
     };
     _mediaRec.start();
-    _isRecording = true;
+    _recState = 'recording';
     btn.classList.add('recording');
     btn.title = 'Click to stop recording';
   } catch(err) {
+    _recState = 'idle';
+    if(stream) stream.getTracks().forEach(t=>t.stop());   // don't leave the mic on
     console.error('Microphone access denied:', err);
     alert('Microphone access denied. Please allow microphone in your browser settings.');
   }
@@ -577,7 +585,7 @@ async function startVoiceRec(){
 function stopVoiceRec(){
   const btn = document.getElementById('mic-btn');
   if(_mediaRec && _mediaRec.state !== 'inactive') _mediaRec.stop();
-  _isRecording = false;
+  _recState = 'idle';
   btn.classList.remove('recording');
   btn.title = 'Click to record voice message';
 }

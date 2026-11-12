@@ -4,7 +4,6 @@ helm/web_routes/pipeline_routes.py — Pipeline REST API endpoints.
 Handles pipeline CRUD, approval, execution control, and step management.
 """
 
-import asyncio
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -17,6 +16,7 @@ from helm.pipeline.models import (
 )
 from helm.pipeline.executor import (
     broadcast_pipeline_update, retry_step, reassign_step, skip_step,
+    pause_pipeline as _pause, resume_pipeline as _resume, cancel_pipeline as _cancel,
 )
 from helm.pipeline.cost import estimate_pipeline_cost
 
@@ -103,11 +103,14 @@ async def plan_pipeline_endpoint(request: Request):
 @router.post("/api/pipeline/{pipeline_id}/approve")
 async def approve_pipeline(pipeline_id: str, request: Request):
     """Approve a pipeline plan and start execution."""
-    from helm.pipeline.executor import execute_pipeline
+    from helm.pipeline.executor import approve_pipeline
 
     pl = _st.pipelines.get(pipeline_id)
     if not pl:
         return JSONResponse({"error": "Pipeline not found"}, status_code=404)
+    # Read the body first: from the status check to the start there must be no await,
+    # or two approvals (web + Telegram) could both get through and run it twice.
+    body = await request.json()
     if pl["status"] != "awaiting_approval":
         return JSONResponse(
             {"error": f"Pipeline is '{pl['status']}', expected 'awaiting_approval'"},
@@ -115,7 +118,6 @@ async def approve_pipeline(pipeline_id: str, request: Request):
         )
 
     # Apply any edits from the approval UI (reordered steps, changed AIs, etc.)
-    body = await request.json()
     if "steps" in body:
         # User edited the steps during approval
         for updated in body["steps"]:
@@ -133,7 +135,7 @@ async def approve_pipeline(pipeline_id: str, request: Request):
     compute_edges(pl)
 
     # Start execution in background
-    asyncio.create_task(execute_pipeline(pipeline_id))
+    approve_pipeline(pl)
 
     return JSONResponse({"ok": True, "status": "running"})
 
@@ -148,10 +150,9 @@ async def pause_pipeline(pipeline_id: str):
     pl = _st.pipelines.get(pipeline_id)
     if not pl:
         return JSONResponse({"error": "Pipeline not found"}, status_code=404)
-    if pl["status"] != "running":
+    if not _pause(pl):
         return JSONResponse({"error": f"Cannot pause: status is '{pl['status']}'"}, status_code=400)
 
-    pl["status"] = "paused"
     await broadcast_pipeline_update(pl)
     return JSONResponse({"ok": True, "status": "paused"})
 
@@ -159,16 +160,12 @@ async def pause_pipeline(pipeline_id: str):
 @router.post("/api/pipeline/{pipeline_id}/resume")
 async def resume_pipeline(pipeline_id: str):
     """Resume a paused pipeline."""
-    from helm.pipeline.executor import execute_pipeline
-
     pl = _st.pipelines.get(pipeline_id)
     if not pl:
         return JSONResponse({"error": "Pipeline not found"}, status_code=404)
-    if pl["status"] != "paused":
+    if not _resume(pl):
         return JSONResponse({"error": f"Cannot resume: status is '{pl['status']}'"}, status_code=400)
 
-    pl["status"] = "running"
-    asyncio.create_task(execute_pipeline(pipeline_id))
     await broadcast_pipeline_update(pl)
     return JSONResponse({"ok": True, "status": "running"})
 
@@ -180,11 +177,8 @@ async def cancel_pipeline(pipeline_id: str):
     if not pl:
         return JSONResponse({"error": "Pipeline not found"}, status_code=404)
 
-    pl["status"] = "cancelled"
-    # Mark all pending steps as skipped
-    for step in pl["steps"]:
-        if step["status"] in ("pending",):
-            step["status"] = "skipped"
+    if not _cancel(pl):
+        return JSONResponse({"error": f"Cannot cancel: status is '{pl['status']}'"}, status_code=400)
 
     await broadcast_pipeline_update(pl)
     return JSONResponse({"ok": True, "status": "cancelled"})

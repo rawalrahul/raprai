@@ -242,7 +242,7 @@ async def tg_kelvin(update, context):
 @authorized_only
 async def tg_interrupt(update, context):
     """Interrupt the currently-running AI task."""
-    from helm.session_mgr import focused_session
+    from helm.session_mgr import clear_busy_after_kill, focused_session
     from helm.ai_runner import kill_session_proc
     from helm.broadcast import push_message, push_state, push_thinking
     sess = focused_session()
@@ -253,8 +253,7 @@ async def tg_interrupt(update, context):
         if sess["ai"]:
             # AI session — kill the subprocess
             kill_session_proc(sess)
-            sess["busy"]       = False
-            sess["task_start"] = None
+            clear_busy_after_kill(sess)
             await push_thinking(False, session_id=sess["id"])
             await push_state()
             await push_message("system", "⏹ AI task interrupted (via Telegram).",
@@ -274,7 +273,7 @@ async def tg_interrupt(update, context):
 @authorized_only
 async def tg_stop(update, context):
     """Stop the focused session completely."""
-    from helm.session_mgr import focused_session
+    from helm.session_mgr import clear_busy_after_kill, focused_session
     from helm.ai_runner import kill_session_proc
     from helm.file_tracker import emit_session_end_summary
     from helm.broadcast import push_state, push_thinking
@@ -286,8 +285,7 @@ async def tg_stop(update, context):
     sess["terminal"].stop()
     await emit_session_end_summary(sess, ended_as="stopped", source="telegram")
     sess["status"]    = "stopped"
-    sess["busy"]      = False
-    sess["task_start"] = None
+    clear_busy_after_kill(sess)
     await push_thinking(False, session_id=sess["id"])
     await push_state()
     await update.message.reply_text(

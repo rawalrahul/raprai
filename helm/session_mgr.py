@@ -166,6 +166,21 @@ def session_cwd() -> str:
 _session_cwd = session_cwd  # legacy alias
 
 
+def clear_busy_after_kill(sess: dict) -> None:
+    """Call after killing a session's AI process (interrupt, stop).
+
+    While a run still owns the session (its lock is held), leave busy alone: that run's
+    own `finally` in process_message clears busy and releases the lock as the killed
+    process returns. Clearing it here showed the session idle while the next message
+    would still have to wait for the lock.
+    """
+    lock = sess.get("_lock")
+    if lock is not None and lock.locked():
+        return
+    sess["busy"] = False
+    sess["task_start"] = None
+
+
 def session_status_icon(sess: dict) -> str:
     if sess["status"] == "stopped":
         return "\U0001F534"

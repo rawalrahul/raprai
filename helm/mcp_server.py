@@ -743,8 +743,10 @@ def tool_start_bakeoff(args: dict, ctx: "Server") -> str:
     except (ValueError, RuntimeError) as exc:
         raise ToolError(str(exc)) from exc
 
+    procs = _bakeoff_procs.setdefault(b.id, [])
+
     async def runner(ai: str, prompt: str, cwd: str) -> str:
-        return run_agent(ai, prompt, cwd, edits=True, timeout=BUILD_TIMEOUT)
+        return run_agent(ai, prompt, cwd, edits=True, timeout=BUILD_TIMEOUT, on_start=procs.append)
 
     def go():
         import asyncio
@@ -754,12 +756,19 @@ def tool_start_bakeoff(args: dict, ctx: "Server") -> str:
             for a in b.attempts:
                 a.error = a.error or f"bake-off stopped: {exc}"
             b.status = "done" if b.status == "running" else b.status
-        _save(b)
+        finally:
+            _bakeoff_procs.pop(b.id, None)
+        if b.status != "discarded":   # discarded mid-run: not a result
+            _save(b)
 
     ctx.bakeoffs[b.id] = b
     threading.Thread(target=go, daemon=True, name=f"bakeoff-{b.id}").start()
     return (f"Started bake-off {b.id}: {', '.join(ais)} are each working in their own copy of {folder}. "
             f"This usually takes a few minutes. Call bakeoff_status with id {b.id!r} to wait for the results.")
+
+
+# Bake-off id -> the AI processes working on it, so discard can stop them.
+_bakeoff_procs: dict[str, list] = {}
 
 
 def _save(b) -> None:
@@ -808,10 +817,23 @@ def tool_merge_bakeoff(args: dict, ctx: "Server") -> str:
                "The changes are in your files on top of your own uncommitted work, not staged or committed."))
 
 
+def _stop_bakeoff_agents(b) -> None:
+    """Stop AIs still working on a bake-off's copies (it was discarded mid-run)."""
+    for proc in _bakeoff_procs.pop(b.id, []):
+        try:
+            if proc.poll() is None:
+                proc.kill()
+        except OSError:
+            pass
+
+
 def tool_discard_bakeoff(args: dict, ctx: "Server") -> str:
     import helm.bakeoff as bakeoff
     b = _get_bakeoff(args, ctx)
+    if b.status == "merged":
+        raise ToolError(f"Bake-off {b.id} was already merged into your project; there's nothing to discard.")
     finished = b.status == "done"
+    _stop_bakeoff_agents(b)
     bakeoff.discard(b)
     if finished:
         _save(b)

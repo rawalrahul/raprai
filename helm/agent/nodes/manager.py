@@ -298,14 +298,11 @@ async def execute_manager_node(node: dict, run: dict, context: str) -> str:
     except Exception:
         logger.warning("Agent manager: couldn't post its question to the chat", exc_info=True)
 
-    run["status"] = "waiting_input"
-
     timeout = node.get("input_timeout", 3600)
     user_reply = await wait_for_input(run["id"], timeout=timeout, node_id=node["id"])
     manager_session.pop("agent_manager_waiting_run_id", None)
     manager_session.pop("agent_manager_waiting_kind", None)
     manager_session.pop("agent_manager_waiting_node_id", None)
-    run["status"] = "running"
 
     if not user_reply or "timed out" in user_reply.lower():
         return "TIMEOUT"

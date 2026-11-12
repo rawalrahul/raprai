@@ -139,6 +139,8 @@ async def discard(bid: str):
     b = _runs.get(bid)
     if not b:
         return JSONResponse({"error": "not found"}, status_code=404)
+    if b.status == "merged":
+        return JSONResponse({"error": "already merged into your project; nothing to discard"}, status_code=400)
     finished = b.status == "done"   # one stopped partway isn't a result
     _stop_running(b)
     bakeoff.discard(b)

@@ -265,6 +265,10 @@ def cleanup(bo: BakeOff) -> None:
 
 
 def discard(bo: BakeOff) -> None:
+    """Remove every copy without touching the project. A merged bake-off can't be discarded:
+    its winner is already in the project."""
+    if bo.status == "merged":
+        raise ValueError("this bake-off was already merged into your project, so there's nothing to discard")
     cleanup(bo)
     bo.status = "discarded"
 

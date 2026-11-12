@@ -201,8 +201,7 @@ async def gate(tool_name: str, arguments: Optional[dict] = None,
     req = appr.create_request(session_id or "", "outward_action", description, details=details)
     if req["status"] == "pending":
         await appr.broadcast_approval(req)
-        outcome = await appr.wait(req["id"], timeout=wait_seconds())
-        await appr.broadcast_resolution(req)
+        outcome = await appr.wait(req["id"], timeout=wait_seconds())   # announces its outcome
     else:
         outcome = req["status"]
 

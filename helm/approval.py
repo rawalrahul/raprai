@@ -92,7 +92,23 @@ def resolve(req_id: str, status: str, source: str = "web") -> bool:
     from helm import audit
     audit.record("approval_resolved", id=req_id, action=status, description=req.get("description"),
                  source=source, session_id=req.get("session_id"))
+    _announce(req)
     return True
+
+
+def _announce(req: dict) -> None:
+    """Tell the web UI a request was decided, whichever channel decided it (web, Telegram,
+    WhatsApp/Discord/Slack /approve). Callers don't broadcast it themselves."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return   # no event loop (e.g. a sync test): nobody to tell
+    task = loop.create_task(broadcast_resolution(req))
+    _announcing.add(task)
+    task.add_done_callback(_announcing.discard)
+
+
+_announcing: set = set()   # keeps announcement tasks alive until they finish
 
 
 async def wait(req_id: str, timeout: float = 300.0) -> str:
@@ -103,10 +119,18 @@ async def wait(req_id: str, timeout: float = 300.0) -> str:
     try:
         await asyncio.wait_for(req["_event"].wait(), timeout=timeout)
     except asyncio.TimeoutError:
+        if req["status"] != "pending":   # resolved just as the wait ran out
+            return req["status"]
         req["status"] = "timeout"
         req["resolved_at"] = time.time()
         req["resolved_by"] = "system"
         logger.warning("Approval %s timed out after %.0fs", req_id, timeout)
+        # Logged and announced like any other outcome: the audit log covers every
+        # decision, and the banner / Needs-you list must drop the expired request.
+        from helm import audit
+        audit.record("approval_resolved", id=req_id, action="timeout", description=req.get("description"),
+                     source="system", session_id=req.get("session_id"))
+        _announce(req)
         return "timeout"
     return req["status"]
 
@@ -171,13 +195,16 @@ async def broadcast_approval(req: dict):
 
 
 async def broadcast_resolution(req: dict):
-    """Notify UI and Telegram that an approval was resolved."""
+    """Notify the web UI that an approval was resolved. resolve() and wait() call this."""
     from helm.broadcast import broadcast
 
-    await broadcast({
-        "type": "approval_resolved",
-        "approval": payload(req),
-    })
+    try:
+        await broadcast({
+            "type": "approval_resolved",
+            "approval": payload(req),
+        })
+    except Exception as exc:
+        logger.debug("Couldn't announce approval %s: %s", req.get("id"), exc)
 
 
 async def _send_approval_to_telegram(req: dict):
