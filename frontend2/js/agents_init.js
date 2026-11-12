@@ -152,21 +152,26 @@ document.addEventListener('keydown',function(e){
       if(parent) parent.appendChild(btn);
     }
 
-    let mediaRec=null, chunks=[], recording=false;
+    // recState: 'idle' → 'starting' (mic permission prompt) → 'recording' → 'idle'.
+    // A click while 'starting' is ignored, so it can't start a second recorder.
+    let mediaRec=null, chunks=[], recState='idle';
     btn.addEventListener('click', async ()=>{
-      if(recording){
+      if(recState==='starting') return;
+      if(recState==='recording'){
         if(mediaRec && mediaRec.state!=='inactive') mediaRec.stop();
         return;
       }
+      recState='starting';
+      let stream=null;
       try {
-        const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+        stream=await navigator.mediaDevices.getUserMedia({audio:true});
         const mime=_pickSupportedMime();
         mediaRec=new MediaRecorder(stream, mime?{mimeType:mime}:undefined);
         chunks=[];
         mediaRec.ondataavailable=e=>{ if(e.data && e.data.size>0) chunks.push(e.data); };
         mediaRec.onstop=async()=>{
           stream.getTracks().forEach(t=>t.stop());
-          recording=false;
+          recState='idle';
           btn.classList.remove('recording');
           btn.title='Click to record voice — Whisper will transcribe into this field';
           if(chunks.length===0) return;
@@ -174,10 +179,12 @@ document.addEventListener('keydown',function(e){
           await _transcribeIntoField(blob, target, btn);
         };
         mediaRec.start();
-        recording=true;
+        recState='recording';
         btn.classList.add('recording');
         btn.title='Click to stop recording';
       } catch(err) {
+        recState='idle';
+        if(stream) stream.getTracks().forEach(t=>t.stop());
         console.error('Mic access denied:',err);
         alert('Microphone access denied. Allow microphone in browser settings.');
       }

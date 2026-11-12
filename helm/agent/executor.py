@@ -199,10 +199,7 @@ async def _execute_node(run: dict, node: dict, semaphore: asyncio.Semaphore):
             elif node_type == "join":
                 output = await execute_join_node(node, context=context)
             elif node_type == "manager":
-                run["status"] = "waiting_input"
-                await broadcast_run_update(run)
-                output = await execute_manager_node(node, run=run, context=context)
-                run["status"] = "running"
+                output = await _waiting_for_person(run, execute_manager_node(node, run=run, context=context))
                 if output == "RERUN":
                     run["_workflow_output_cleanup_done"] = False
                     node["status"] = "pending"
@@ -212,10 +209,7 @@ async def _execute_node(run: dict, node: dict, semaphore: asyncio.Semaphore):
                 if not parent_nodes(run["nodes"], node["id"], include_manager=False) and run.get("input_data"):
                     output = run["input_data"]
                 else:
-                    run["status"] = "waiting_input"
-                    await broadcast_run_update(run)
-                    output = await execute_input_node(node, run=run, context=context)
-                    run["status"] = "running"
+                    output = await _waiting_for_person(run, execute_input_node(node, run=run, context=context))
             elif node_type == "loop":
                 items = parse_list_from_output(context, max_items=node.get("loop_max", 10))
                 output = "\n".join(f"{i + 1}. {item}" for i, item in enumerate(items))
@@ -480,6 +474,51 @@ def _expand_loop_children(loop_node: dict, all_nodes: list[dict]) -> list[dict]:
 
     loop_node["children"] = new_child_ids
     return keep
+
+
+# ---------------------------------------------------------------------------
+# Run lifecycle: running ⇄ waiting_input → completed | failed | cancelled
+# ---------------------------------------------------------------------------
+
+_run_tasks: dict[str, asyncio.Task] = {}   # run id -> its execute_agent_run task
+
+
+def start_run(run_id: str) -> asyncio.Task:
+    """Start executing a run, keeping its task so cancel_run can stop it."""
+    task = asyncio.create_task(execute_agent_run(run_id))
+    _run_tasks[run_id] = task
+    task.add_done_callback(lambda _t: _run_tasks.pop(run_id, None))
+    return task
+
+
+def cancel_run(run: dict) -> bool:
+    """Cancel a run that hasn't ended, including one waiting for the person's input.
+    Stops its node tasks. Returns False if it had already ended."""
+    if run["status"] not in ("running", "waiting_input"):
+        return False
+    run["status"] = "cancelled"
+    for n in run["nodes"]:
+        if n["status"] in ("pending", "running"):
+            n["status"] = "skipped"
+    task = _run_tasks.get(run["id"])
+    if task and not task.done():
+        task.cancel()
+    return True
+
+
+async def _waiting_for_person(run: dict, wait):
+    """Await an input or manager node's question. Nodes run in parallel, so the run stays
+    "waiting_input" until the last of its open questions is answered."""
+    run["_waiting"] = run.get("_waiting", 0) + 1
+    if run["status"] == "running":
+        run["status"] = "waiting_input"
+    await broadcast_run_update(run)
+    try:
+        return await wait
+    finally:
+        run["_waiting"] -= 1
+        if not run["_waiting"] and run["status"] == "waiting_input":
+            run["status"] = "running"
 
 
 async def execute_agent_run(run_id: str) -> None:

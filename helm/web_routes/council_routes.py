@@ -70,7 +70,9 @@ async def stop_council(council_id: str):
     council = _st.councils.get(council_id)
     if not council:
         return JSONResponse({"error": "Council not found"}, status_code=404)
-    council["status"] = "stopped"
+    from helm.council.executor import end_council
+    if not end_council(council, "stopped", "user"):
+        return JSONResponse({"error": f"Council already ended ({council['status']})"}, status_code=400)
     return JSONResponse({"ok": True})
 
 

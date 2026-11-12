@@ -31,7 +31,6 @@ async def tg_brief(update, context):
 async def brief_callback(update, context):
     """brief:do:<n>, brief:skip:<n>, brief:ok:<approval id>, brief:no:<approval id>."""
     import helm.approval as appr
-    import helm.state as _st
     from helm import brief
     from helm.ai_runner import forward_to_telegram, process_message
 
@@ -45,10 +44,7 @@ async def brief_callback(update, context):
 
     if verb in ("ok", "no"):
         status = "approved" if verb == "ok" else "denied"
-        if appr.resolve(arg, status, source="telegram"):
-            req = _st.approval_queue.get(arg)
-            if req:
-                await appr.broadcast_resolution(req)
+        if appr.resolve(arg, status, source="telegram"):   # announces it to the web UI
             await query.answer("✅ Approved" if status == "approved" else "❌ Denied")
         else:
             await query.answer("That was already decided.")

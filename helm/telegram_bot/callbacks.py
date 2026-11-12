@@ -26,7 +26,7 @@ except ImportError:
 
 async def action_callback(update, context):
     """Handle all ms:* and action:* inline keyboard button presses."""
-    from helm.session_mgr import focused_session, make_session, session_cwd, usage_summary_text
+    from helm.session_mgr import clear_busy_after_kill, focused_session, make_session, session_cwd, usage_summary_text
     from helm.ai_runner import kill_session_proc
     from helm.file_tracker import emit_session_end_summary
     from helm.broadcast import push_message, push_state
@@ -138,8 +138,7 @@ async def action_callback(update, context):
                 sess["terminal"].stop()
                 await emit_session_end_summary(sess, ended_as="stopped", source="telegram")
                 sess["status"] = "stopped"
-                sess["busy"] = False
-                sess["task_start"] = None
+                clear_busy_after_kill(sess)
                 await push_state()
                 await query.edit_message_text(
                     f"✨ *{sess['name']}* stopped. Sessions:",
@@ -336,7 +335,8 @@ async def pipeline_callback(update, context):
     """Handle all pl:* inline keyboard button presses for pipelines."""
     from helm.pipeline.models import pipeline_progress
     from helm.pipeline.executor import (
-        broadcast_pipeline_update, execute_pipeline,
+        broadcast_pipeline_update, approve_pipeline, cancel_pipeline,
+        pause_pipeline, resume_pipeline,
     )
     from .keyboards import pipeline_controls_keyboard
 
@@ -357,14 +357,12 @@ async def pipeline_callback(update, context):
         return
 
     if verb == "approve":
-        if pl["status"] != "awaiting_approval":
+        if not approve_pipeline(pl):
             await query.edit_message_text(
                 f"Pipeline is already '{pl['status']}'.",
                 reply_markup=pipeline_controls_keyboard(pipeline_id, pl["status"]),
             )
             return
-        # Start execution
-        asyncio.create_task(execute_pipeline(pipeline_id))
         prog = pipeline_progress(pl)
         await query.edit_message_text(
             f"🚀 *Pipeline started!*\n"
@@ -375,10 +373,12 @@ async def pipeline_callback(update, context):
         )
 
     elif verb == "cancel":
-        pl["status"] = "cancelled"
-        for step in pl["steps"]:
-            if step["status"] == "pending":
-                step["status"] = "skipped"
+        if not cancel_pipeline(pl):
+            await query.edit_message_text(
+                f"Pipeline already ended ('{pl['status']}').",
+                reply_markup=pipeline_controls_keyboard(pipeline_id, pl["status"]),
+            )
+            return
         await broadcast_pipeline_update(pl)
         await query.edit_message_text(
             "⚫ Pipeline cancelled.",
@@ -386,29 +386,26 @@ async def pipeline_callback(update, context):
         )
 
     elif verb == "pause":
-        if pl["status"] == "running":
-            pl["status"] = "paused"
+        if pause_pipeline(pl):
             await broadcast_pipeline_update(pl)
+            text = "⏸ Pipeline paused."
+        else:
+            text = f"Can't pause: pipeline is '{pl['status']}'."
         await query.edit_message_text(
-            "⏸ Pipeline paused.",
-            reply_markup=pipeline_controls_keyboard(pipeline_id, "paused"),
+            text, reply_markup=pipeline_controls_keyboard(pipeline_id, pl["status"]),
         )
 
     elif verb == "resume":
-        if pl["status"] in ("paused", "failed"):
-            # For failed pipelines, retry all failed steps
-            if pl["status"] == "failed":
-                for step in pl["steps"]:
-                    if step["status"] == "failed":
-                        step["status"] = "pending"
-                        step["error"] = None
-                        step["retry_count"] = step.get("retry_count", 0) + 1
-            pl["status"] = "running"
-            asyncio.create_task(execute_pipeline(pipeline_id))
+        # A failed pipeline is retried too: each failed step with retries left.
+        if resume_pipeline(pl, retry_failed=True):
             await broadcast_pipeline_update(pl)
+            text = "▶️ Pipeline resumed."
+        elif pl["status"] == "failed":
+            text = "Can't resume: the failed steps have used all their retries. Skip them or reassign them in the app."
+        else:
+            text = f"Can't resume: pipeline is '{pl['status']}'."
         await query.edit_message_text(
-            "▶️ Pipeline resumed.",
-            reply_markup=pipeline_controls_keyboard(pipeline_id, "running"),
+            text, reply_markup=pipeline_controls_keyboard(pipeline_id, pl["status"]),
         )
 
     elif verb == "status":
@@ -519,12 +516,7 @@ async def approval_callback(update, context):
     status = "approved" if verb == "approve" else "denied"
     ok = _appr.resolve(req_id, status, source="telegram")
 
-    if ok:
-        # Broadcast resolution to Web UI
-        req = _st.approval_queue.get(req_id)
-        if req:
-            await _appr.broadcast_resolution(req)
-
+    if ok:   # resolve() announces it to the web UI
         icon = "✅" if status == "approved" else "❌"
         await query.edit_message_text(
             f"{icon} Action **{status}** (via Telegram).",

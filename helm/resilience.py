@@ -290,9 +290,12 @@ async def ai_watchdog(check_interval: float = 15.0):
                         exit_code,
                     )
 
-                    # Mark session as not busy
+                    # Mark session as not busy. Its status stays "running": the next
+                    # message starts the AI again, so the session itself is still usable.
+                    # (A status like "crashed (exit 1)" was a value nothing else knew.)
                     sess["busy"] = False
-                    sess["status"] = f"crashed (exit {exit_code})"
+                    sess["task_start"] = None
+                    sess["last_crash"] = {"exit_code": exit_code, "at": time.time()}
                     sess.pop("proc", None)
 
                     # Notify WebSocket clients about the crash

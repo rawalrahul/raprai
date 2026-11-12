@@ -257,7 +257,7 @@ async def run_agent(agent_id: str, request: Request):
 
 @router.post("/api/agents/{agent_id}/runs/{run_id}/cancel")
 async def cancel_run(agent_id: str, run_id: str):
-    """Cancel a running run."""
+    """Cancel a run that hasn't ended (running or waiting for input)."""
     run = _st.agent_runs.get(run_id)
     if not run:
         # Try loading from DB — it may already be completed
@@ -266,15 +266,10 @@ async def cancel_run(agent_id: str, run_id: str):
             return JSONResponse({"error": "Run not found"}, status_code=404)
         return JSONResponse({"error": "Run is already complete"}, status_code=400)
 
-    if run["status"] != "running":
-        return JSONResponse({"error": f"Run is '{run['status']}', not running"}, status_code=400)
+    from helm.agent.executor import broadcast_run_update, cancel_run as _cancel_run
+    if not _cancel_run(run):
+        return JSONResponse({"error": f"Run is '{run['status']}', already ended"}, status_code=400)
 
-    run["status"] = "cancelled"
-    for n in run["nodes"]:
-        if n["status"] in ("pending", "running"):
-            n["status"] = "skipped"
-
-    from helm.agent.executor import broadcast_run_update
     await broadcast_run_update(run)
     await save_run(run)
 

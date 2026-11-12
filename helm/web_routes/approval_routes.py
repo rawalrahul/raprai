@@ -9,7 +9,6 @@ Provides REST endpoints for:
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-import helm.state as _st
 import helm.approval as _appr
 
 router = APIRouter()
@@ -40,10 +39,5 @@ async def resolve_approval(req_id: str, request: Request):
     ok = _appr.resolve(req_id, status, source="web")
     if not ok:
         return JSONResponse({"error": "Request not found or already resolved"}, status_code=404)
-
-    # Broadcast resolution to all WS clients
-    req = _st.approval_queue.get(req_id)
-    if req:
-        await _appr.broadcast_resolution(req)
 
     return JSONResponse({"ok": True, "status": status})

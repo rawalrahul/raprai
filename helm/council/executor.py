@@ -22,6 +22,18 @@ def _find_participant(council: dict, ai_name: str) -> dict | None:
     return None
 
 
+def end_council(council: dict, status: str, reason: str) -> bool:
+    """End a council that hasn't ended yet: status "completed" (consensus) or "stopped",
+    with stop_reason "user", "max_rounds" or "error". Returns False if it already ended,
+    so a late consensus can't overwrite the person's stop, nor a stop a finished council."""
+    if council.get("status") not in ("pending", "running"):
+        return False
+    council["status"] = status
+    if status == "stopped":
+        council["stop_reason"] = reason
+    return True
+
+
 async def run_council(council_id: str):
     """Main council loop. Launched as asyncio.create_task()."""
     try:
@@ -30,6 +42,8 @@ async def run_council(council_id: str):
             logger.error("council %s not found in state", council_id)
             return
 
+        if council["status"] != "pending":   # stopped before it got going
+            return
         council["status"] = "running"
         await broadcast_council("council_created", {"council": council})
     except Exception as exc:
@@ -50,7 +64,7 @@ async def run_council(council_id: str):
                 decision = await _moderator.get_next_turn(council)
             except Exception as exc:
                 logger.error("council moderator error: %s", exc)
-                council["status"] = "stopped"
+                end_council(council, "stopped", "error")
                 await broadcast_council("council_stopped", {"council_id": council_id})
                 return
 
@@ -65,7 +79,8 @@ async def run_council(council_id: str):
             })
 
             if decision.get("consensus"):
-                council["status"] = "completed"
+                if not end_council(council, "completed", ""):
+                    return   # stopped while the moderator was deciding
                 council["consensus_summary"] = decision.get("summary", "")
                 council["completed_at"] = ts()
                 rounds_done = council["rounds"]
@@ -172,8 +187,7 @@ async def run_council(council_id: str):
                 })
 
         # Exhausted max rounds — declare overall winner
-        if council["status"] == "running":
-            council["status"] = "stopped"
+        if end_council(council, "stopped", "max_rounds"):
             try:
                 final = await _moderator.declare_overall_winner(council)
                 winner_ai = final.get("winner", "")
@@ -202,11 +216,11 @@ async def run_council(council_id: str):
             await broadcast_council("council_stopped", {"council_id": council_id, "council": council})
 
     except asyncio.CancelledError:
-        council["status"] = "stopped"
+        end_council(council, "stopped", "error")
         await broadcast_council("council_stopped", {"council_id": council_id})
     except Exception as exc:
         logger.error("council executor error: %s", exc, exc_info=True)
-        council["status"] = "stopped"
+        end_council(council, "stopped", "error")
         await broadcast_council("council_stopped", {"council_id": council_id})
 
 

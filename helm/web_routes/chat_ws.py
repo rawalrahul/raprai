@@ -9,7 +9,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 import helm.state as _st
 from helm.config import logger
-from helm.session_mgr import focused_session, make_session, session_cwd, sessions_state_payload
+from helm.session_mgr import clear_busy_after_kill, focused_session, make_session, session_cwd, sessions_state_payload
 from helm.broadcast import push_message, push_state, push_thinking
 from helm.history import ts
 from helm.ai_runner import change_cwd, process_message, tg_update_focus, kill_session_proc
@@ -211,8 +211,7 @@ async def call_kelvin_crew(sess: dict) -> bool:
     lock = sess.get("_lock")
     if lock and lock.locked():
         kill_session_proc(sess)
-        sess["busy"] = False
-        sess["task_start"] = None
+        clear_busy_after_kill(sess)
         await push_thinking(False, session_id=sess["id"])
         await push_message("system", "⏸ Stopped the solo run. Calling the Kelvin crew…",
                            source="web", session_id=sess["id"])
@@ -322,8 +321,7 @@ async def handle_web_command(command: str, ws: WebSocket):
             sess["terminal"].stop()
             await emit_session_end_summary(sess, ended_as="stopped", source="web")
             sess["status"] = "stopped"
-            sess["busy"]      = False
-            sess["task_start"] = None
+            clear_busy_after_kill(sess)
             # Preserve the CWD so next session starts on the same path
             if sess.get("cwd"):
                 _st.last_cwd = sess["cwd"]
@@ -373,8 +371,7 @@ async def handle_web_command(command: str, ws: WebSocket):
             try:
                 if sess["ai"]:
                     kill_session_proc(sess)
-                    sess["busy"]       = False
-                    sess["task_start"] = None
+                    clear_busy_after_kill(sess)
                     await push_thinking(False, session_id=sess["id"])
                     await push_state()
                     await push_message("system", "⏸ Task cancelled.", source="web",

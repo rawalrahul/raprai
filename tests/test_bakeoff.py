@@ -229,3 +229,31 @@ def test_the_web_runner_reports_an_ai_that_timed_out_as_failed(monkeypatch):
         asyncio.run(br._real_runner("codex", "hi", "."))
     monkeypatch.setattr(runner, "_run_subprocess_blocking", lambda *a, **k: "(no output)")
     assert asyncio.run(br._real_runner("codex", "hi", ".")) == ""
+
+
+def test_merged_bakeoff_cannot_be_discarded(tmp_path):
+    """Discarding after a merge flipped it to "discarded" (and the MCP tool then said
+    the project was unchanged), though the winner was already in the project."""
+    from helm import mcp_server
+    a = bo.Attempt(ai="claude", path=str(tmp_path / "copy"), branch="")
+    b = bo.BakeOff(id="b2", repo=str(tmp_path), task="t", attempts=[a], is_git=False)
+    b.status = "merged"
+    with pytest.raises(ValueError):
+        bo.discard(b)
+    ctx = type("Ctx", (), {"bakeoffs": {"b2": b}})()
+    with pytest.raises(mcp_server.ToolError):
+        mcp_server.tool_discard_bakeoff({"id": "b2"}, ctx)
+    assert b.status == "merged"
+
+
+def test_mcp_discard_stops_ais_still_running(tmp_path):
+    from helm import mcp_server
+    a = bo.Attempt(ai="claude", path=str(tmp_path / "copy"), branch="")
+    b = bo.BakeOff(id="b3", repo=str(tmp_path), task="t", attempts=[a], is_git=False)
+    b.status = "running"
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    mcp_server._bakeoff_procs["b3"] = [proc]
+    ctx = type("Ctx", (), {"bakeoffs": {"b3": b}})()
+    mcp_server.tool_discard_bakeoff({"id": "b3"}, ctx)
+    assert proc.wait(timeout=10) is not None
+    assert b.status == "discarded"

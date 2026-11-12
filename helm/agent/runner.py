@@ -14,7 +14,7 @@ from helm.config import logger
 
 from .models import ensure_manager_node, make_run, workflow_root_nodes
 from .repair import repair_agent_graph
-from .executor import execute_agent_run
+from .executor import start_run
 from .storage import save_agent, save_run
 
 
@@ -66,7 +66,7 @@ async def trigger_agent_run(
     # Persist immediately so it's visible even before the executor runs
     await save_run(run)
 
-    asyncio.create_task(execute_agent_run(run["id"]))
+    start_run(run["id"])
     logger.info(
         "Agent run %s triggered (%s) for agent %s (%s)",
         run["id"][:8], trigger, agent_id, agent["name"],

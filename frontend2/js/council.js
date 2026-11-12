@@ -283,7 +283,9 @@ function renderCouncilPanel() {
 
   // Stopped banner
   if (council.status === 'stopped' && !council.consensus_summary) {
-    const banner = _el('div', 'council-stopped-banner', 'Council stopped. ');
+    const why = council.stop_reason === 'max_rounds' ? `Council ended after ${council.rounds} rounds. `
+      : council.stop_reason === 'error' ? 'Council stopped by an error. ' : 'Council stopped. ';
+    const banner = _el('div', 'council-stopped-banner', why);
     const restartBtn = _el('button', 'council-btn-secondary', 'Start New Council');
     restartBtn.addEventListener('click', openCouncilModal);
     banner.appendChild(restartBtn);

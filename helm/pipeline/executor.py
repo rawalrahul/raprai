@@ -10,6 +10,7 @@ import asyncio
 import os
 import pathlib
 import time
+import uuid
 
 import helm.state as _st
 from helm.config import logger
@@ -18,7 +19,7 @@ from helm.session_mgr import make_session
 
 from .models import (
     find_step, ready_steps, is_pipeline_done, is_pipeline_blocked,
-    pipeline_state_payload, pipeline_progress,
+    pipeline_state_payload, pipeline_progress, transition,
 )
 from .context import build_step_context, maybe_summarize
 
@@ -244,6 +245,12 @@ async def _execute_step(pipeline: dict, step: dict, semaphore: asyncio.Semaphore
                 source="pipeline", session_id=sid,
             )
 
+        except asyncio.CancelledError:
+            # Pipeline cancelled: stop the AI working on this step, then let the cancel through.
+            from helm.ai_runner.core import kill_session_proc
+            kill_session_proc(child_sess)
+            raise
+
         except Exception as exc:
             step["error"] = str(exc)
             step["completed_at"] = time.time()
@@ -324,21 +331,24 @@ async def retry_step(pipeline: dict, step_id: str) -> bool:
         logger.warning("Step %s has exceeded max retries (%d)", step_id, step["retry_count"])
         return False
 
-    step["retry_count"] += 1
+    _reset_for_retry(step)
+
+    logger.info("Retrying step %s (attempt %d)", step_id, step["retry_count"] + 1)
+
+    # If pipeline is not running, restart the executor
+    if pipeline["status"] in ("failed", "paused") and transition(pipeline, "running"):
+        start_pipeline(pipeline["id"])
+
+    return True
+
+
+def _reset_for_retry(step: dict) -> None:
+    step["retry_count"] = step.get("retry_count", 0) + 1
     step["status"] = "pending"
     step["error"] = None
     step["output"] = None
     step["output_summary"] = None
     step["session_id"] = None
-
-    logger.info("Retrying step %s (attempt %d)", step_id, step["retry_count"] + 1)
-
-    # If pipeline is not running, restart the executor
-    if pipeline["status"] in ("failed", "paused"):
-        pipeline["status"] = "running"
-        asyncio.create_task(execute_pipeline(pipeline["id"]))
-
-    return True
 
 
 # ---------------------------------------------------------------------------
@@ -379,29 +389,112 @@ async def skip_step(pipeline: dict, step_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Lifecycle: approve / pause / resume / cancel (shared by web and Telegram)
+# ---------------------------------------------------------------------------
+
+# Only one orchestration loop may drive a pipeline. start_pipeline() hands the pipeline
+# to a new loop; an older one (e.g. still waiting out a pause) sees it no longer owns
+# the pipeline and returns quietly.
+_owner: dict[str, str] = {}
+# Step tasks per pipeline, shared across loops, so a step is never launched twice and
+# cancel can stop the ones in flight.
+_step_tasks: dict[str, dict[str, asyncio.Task]] = {}
+_semaphores: dict[str, asyncio.Semaphore] = {}
+
+
+def start_pipeline(pipeline_id: str) -> asyncio.Task:
+    """Start the orchestration loop for a pipeline, taking over from any older loop."""
+    token = uuid.uuid4().hex
+    _owner[pipeline_id] = token
+    return asyncio.create_task(execute_pipeline(pipeline_id, _token=token))
+
+
+def approve_pipeline(pipeline: dict) -> bool:
+    """Approve the plan and start running it. False if it isn't awaiting approval."""
+    if pipeline["status"] != "awaiting_approval" or not transition(pipeline, "running"):
+        return False
+    start_pipeline(pipeline["id"])
+    return True
+
+
+def pause_pipeline(pipeline: dict) -> bool:
+    """Pause a running pipeline: running steps finish, no new ones start."""
+    return pipeline["status"] == "running" and transition(pipeline, "paused")
+
+
+def resume_pipeline(pipeline: dict, retry_failed: bool = False) -> bool:
+    """Resume a paused pipeline. With retry_failed, a failed one is restarted too, retrying
+    each failed step that has retries left (the same limit as retrying one step)."""
+    status = pipeline["status"]
+    if status == "failed" and retry_failed:
+        retryable = [s for s in pipeline["steps"]
+                     if s["status"] == "failed"
+                     and s.get("retry_count", 0) < s.get("max_retries", 2)]
+        if not retryable:
+            return False
+        for step in retryable:
+            _reset_for_retry(step)
+    elif status != "paused":
+        return False
+    if not transition(pipeline, "running"):
+        return False
+    start_pipeline(pipeline["id"])
+    return True
+
+
+def cancel_pipeline(pipeline: dict) -> bool:
+    """Cancel the pipeline and stop steps in flight. False if it has already ended."""
+    if not transition(pipeline, "cancelled"):
+        return False
+    for step in pipeline["steps"]:
+        if step["status"] in ("pending", "running"):
+            if step["status"] == "running":
+                step["error"] = "pipeline cancelled"
+            step["status"] = "skipped"
+    for task in list(_step_tasks.get(pipeline["id"], {}).values()):
+        task.cancel()
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Main orchestration loop
 # ---------------------------------------------------------------------------
 
-async def execute_pipeline(pipeline_id: str) -> None:
+async def execute_pipeline(pipeline_id: str, _token: str | None = None) -> None:
     """
     Main orchestration loop. Runs steps in parallel (up to concurrency limit)
     as their dependencies complete. Blocks until pipeline is done/failed/cancelled.
+    Prefer start_pipeline(), which makes sure only one loop drives the pipeline.
     """
+    if _token is None:
+        _token = uuid.uuid4().hex
+        _owner[pipeline_id] = _token
+
+    def owns() -> bool:
+        return _owner.get(pipeline_id) == _token
+
     pipeline = _st.pipelines.get(pipeline_id)
     if not pipeline:
         logger.error("Pipeline %s not found", pipeline_id)
         return
 
     sid = pipeline["session_id"]
-    pipeline["status"] = "running"
-    pipeline["started_at"] = time.time()
+    if pipeline["status"] != "running" and not transition(pipeline, "running"):
+        # e.g. cancelled between approval and this loop starting
+        logger.info("Pipeline %s not started: status is %s", pipeline_id, pipeline["status"])
+        if owns():
+            _owner.pop(pipeline_id, None)
+        return
+    pipeline["started_at"] = pipeline.get("started_at") or time.time()
 
     # Create artifacts directory
     artifacts_base = pathlib.Path(pipeline["cwd"]) / pipeline["artifacts_dir"]
     artifacts_base.mkdir(parents=True, exist_ok=True)
 
-    semaphore = asyncio.Semaphore(_max_parallel())
-    running_tasks: dict[str, asyncio.Task] = {}  # step_id -> Task
+    # Shared with any older loop for this pipeline, so a step is never launched twice
+    # and the parallel limit holds across a hand-over.
+    semaphore = _semaphores.setdefault(pipeline_id, asyncio.Semaphore(_max_parallel()))
+    running_tasks = _step_tasks.setdefault(pipeline_id, {})  # step_id -> Task
 
     await broadcast_pipeline_update(pipeline)
     prog = pipeline_progress(pipeline)
@@ -414,29 +507,31 @@ async def execute_pipeline(pipeline_id: str) -> None:
 
     try:
         while True:
+            if not owns():
+                return   # a newer loop took over (e.g. after resume); it finishes up
+
             # Check for pause/cancel
             if pipeline["status"] == "paused":
                 await push_message(
                     "system", "⏸️ Pipeline paused. Resume to continue.",
                     source="pipeline", session_id=sid,
                 )
-                # Wait until unpaused or cancelled
-                while pipeline["status"] == "paused":
+                # Wait until unpaused, cancelled, or handed to a newer loop
+                while pipeline["status"] == "paused" and owns():
                     await asyncio.sleep(1)
-                if pipeline["status"] == "cancelled":
-                    break
+                continue
 
             if pipeline["status"] == "cancelled":
                 break
 
             # Clean up finished tasks
             done_ids = [
-                sid for sid, t in running_tasks.items() if t.done()
+                step_id for step_id, t in running_tasks.items() if t.done()
             ]
             for did in done_ids:
                 task = running_tasks.pop(did)
-                # Re-raise any exceptions from the task
-                if task.exception():
+                # Log any exceptions from the task
+                if not task.cancelled() and task.exception():
                     logger.error("Step task exception: %s", task.exception())
 
             # Check if done
@@ -445,7 +540,7 @@ async def execute_pipeline(pipeline_id: str) -> None:
 
             # Check if blocked (all pending depend on failed)
             if is_pipeline_blocked(pipeline) and not running_tasks:
-                pipeline["status"] = "failed"
+                transition(pipeline, "failed")
                 await push_message(
                     "system",
                     "❌ Pipeline blocked — remaining steps depend on failed steps. "
@@ -469,7 +564,7 @@ async def execute_pipeline(pipeline_id: str) -> None:
             if running_tasks:
                 # Wait for at least one task to complete
                 done, _ = await asyncio.wait(
-                    running_tasks.values(),
+                    list(running_tasks.values()),
                     timeout=2.0,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
@@ -477,10 +572,11 @@ async def execute_pipeline(pipeline_id: str) -> None:
                 await asyncio.sleep(1)
 
     except asyncio.CancelledError:
-        pipeline["status"] = "cancelled"
+        if owns():
+            cancel_pipeline(pipeline)
         logger.info("Pipeline %s was cancelled", pipeline_id)
     except Exception as exc:
-        pipeline["status"] = "failed"
+        transition(pipeline, "failed")
         logger.error("Pipeline %s orchestration error: %s", pipeline_id, exc, exc_info=True)
         await push_message(
             "system",
@@ -489,6 +585,12 @@ async def execute_pipeline(pipeline_id: str) -> None:
             source="pipeline", session_id=sid,
         )
 
+    if not owns():
+        return   # a newer loop took over and will finalize
+    if pipeline["status"] == "cancelled":
+        for task in list(running_tasks.values()):
+            task.cancel()
+
     # Finalize
     if pipeline["status"] == "running":
         # All steps done
@@ -496,7 +598,7 @@ async def execute_pipeline(pipeline_id: str) -> None:
             s["status"] in ("completed", "skipped")
             for s in pipeline["steps"]
         )
-        pipeline["status"] = "completed" if all_completed else "failed"
+        transition(pipeline, "completed" if all_completed else "failed")
         from helm.kelvin_stickers import kelvin_sticker_soon
         kelvin_sticker_soon("done" if all_completed else "error")
 
@@ -532,3 +634,8 @@ async def execute_pipeline(pipeline_id: str) -> None:
     await push_message("system", summary, source="pipeline", session_id=sid)
     await broadcast_pipeline_update(pipeline)
     await push_state()
+    if owns():
+        _owner.pop(pipeline_id, None)
+        if not any(not t.done() for t in running_tasks.values()):
+            _step_tasks.pop(pipeline_id, None)
+            _semaphores.pop(pipeline_id, None)
